@@ -6,7 +6,7 @@ import logging
 from contextlib import contextmanager
 from typing import Iterator, Optional, Tuple
 
-from abstracts_explorer.mcp import deps
+from abstracts_explorer.mcp import shared_dependencies
 from abstracts_explorer.mcp.errors import ClusterAnalysisError
 
 logger = logging.getLogger(__name__)
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 def load_clustering_data(
     collection_name: Optional[str] = None,
-) -> tuple[deps.ClusteringManager, deps.DatabaseManager]:
+) -> tuple[shared_dependencies.ClusteringManager, shared_dependencies.DatabaseManager]:
     """
     Load clustering data and database.
 
@@ -25,7 +25,7 @@ def load_clustering_data(
 
     Returns
     -------
-    tuple[deps.ClusteringManager, deps.DatabaseManager]
+    tuple[shared_dependencies.ClusteringManager, shared_dependencies.DatabaseManager]
         Clustering manager and database manager instances
 
     Raises
@@ -33,25 +33,25 @@ def load_clustering_data(
     ClusterAnalysisError
         If loading fails
     """
-    config = deps.get_config()
+    config = shared_dependencies.get_config()
 
     # Use config defaults if not provided
     collection_name = collection_name or config.collection_name
 
-    em: Optional[deps.EmbeddingsManager] = None
-    db: Optional[deps.DatabaseManager] = None
+    em: Optional[shared_dependencies.EmbeddingsManager] = None
+    db: Optional[shared_dependencies.DatabaseManager] = None
 
     try:
         # Initialize embeddings manager
-        em = deps.EmbeddingsManager(
+        em = shared_dependencies.EmbeddingsManager(
             collection_name=collection_name,
         )
 
         # Initialize database manager
-        db = deps.DatabaseManager()
+        db = shared_dependencies.DatabaseManager()
 
         # Initialize clustering manager
-        cm = deps.ClusteringManager(em, db)
+        cm = shared_dependencies.ClusteringManager(em, db)
 
         return cm, db
 
@@ -68,7 +68,7 @@ def _get_mcp_resources(
     collection_name: Optional[str] = None,
     *,
     with_embeddings: bool = True,
-) -> Iterator[Tuple[Optional[deps.EmbeddingsManager], deps.DatabaseManager]]:
+) -> Iterator[Tuple[Optional[shared_dependencies.EmbeddingsManager], shared_dependencies.DatabaseManager]]:
     """
     Provide MCP tool resources and guarantee they are closed.
 
@@ -78,7 +78,7 @@ def _get_mcp_resources(
         ChromaDB collection name.  Uses the configured default when embeddings
         are requested.
     with_embeddings : bool, optional
-        Whether to create an ``deps.EmbeddingsManager`` (default: ``True``).
+        Whether to create an ``shared_dependencies.EmbeddingsManager`` (default: ``True``).
 
     Yields
     ------
@@ -86,13 +86,13 @@ def _get_mcp_resources(
         ``(embeddings_manager, database_manager)``; the embeddings manager is
         ``None`` when *with_embeddings* is ``False``.
     """
-    em: Optional[deps.EmbeddingsManager] = None
-    db: Optional[deps.DatabaseManager] = None
+    em: Optional[shared_dependencies.EmbeddingsManager] = None
+    db: Optional[shared_dependencies.DatabaseManager] = None
     try:
         if with_embeddings:
-            resolved_collection = collection_name or deps.get_config().collection_name
-            em = deps.EmbeddingsManager(collection_name=resolved_collection)
-        db = deps.DatabaseManager()
+            resolved_collection = collection_name or shared_dependencies.get_config().collection_name
+            em = shared_dependencies.EmbeddingsManager(collection_name=resolved_collection)
+        db = shared_dependencies.DatabaseManager()
         yield em, db
     finally:
         if em is not None:
@@ -104,7 +104,7 @@ def _get_mcp_resources(
 @contextmanager
 def _get_clustering_resources(
     collection_name: Optional[str] = None,
-) -> Iterator[Tuple[deps.ClusteringManager, deps.DatabaseManager]]:
+) -> Iterator[Tuple[shared_dependencies.ClusteringManager, shared_dependencies.DatabaseManager]]:
     """
     Provide clustering resources and guarantee they are closed.
 

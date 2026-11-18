@@ -19,13 +19,13 @@ from abstracts_explorer.mcp import (
     summarize_interesting_papers as mcp_summarize_interesting_papers,
 )
 from abstracts_explorer.mcp_tools import abbreviate_result, format_tool_result_for_llm
-from abstracts_explorer.rag.deps import RAGDeps
+from abstracts_explorer.rag.tool_context import RAGToolContext
 
 logger = logging.getLogger(__name__)
 
 
 def _run_rag_tool(
-    ctx: RunContext[RAGDeps],
+    ctx: RunContext[RAGToolContext],
     tool_name: str,
     mcp_func: Callable[..., str],
     kwargs: Dict[str, Any],
@@ -35,7 +35,7 @@ def _run_rag_tool(
 
     Parameters
     ----------
-    ctx : RunContext[RAGDeps]
+    ctx : RunContext[RAGToolContext]
         Agent context with dependencies.
     tool_name : str
         Name of the tool as exposed to the LLM.
@@ -80,7 +80,7 @@ def _run_rag_tool(
 
 
 def _tool_search_papers(
-    ctx: RunContext[RAGDeps],
+    ctx: RunContext[RAGToolContext],
     topic_keywords: str,
     limit: Optional[int] = None,
     years: Optional[List[int]] = None,
@@ -99,7 +99,7 @@ def _tool_search_papers(
 
     Parameters
     ----------
-    ctx : RunContext[RAGDeps]
+    ctx : RunContext[RAGToolContext]
         Agent context with dependencies.
     topic_keywords : str
         Keywords describing the topic to search for.
@@ -134,7 +134,7 @@ def _tool_search_papers(
 
 
 def _tool_get_conference_topics(
-    ctx: RunContext[RAGDeps],
+    ctx: RunContext[RAGToolContext],
     conference: Optional[str] = None,
 ) -> str:
     """Get the main research topics of a conference.
@@ -148,7 +148,7 @@ def _tool_get_conference_topics(
 
     Parameters
     ----------
-    ctx : RunContext[RAGDeps]
+    ctx : RunContext[RAGToolContext]
         Agent context with dependencies.
     conference : str, optional
         Conference name (e.g. "NeurIPS").
@@ -169,7 +169,7 @@ def _tool_get_conference_topics(
 
 
 def _tool_get_topic_evolution(
-    ctx: RunContext[RAGDeps],
+    ctx: RunContext[RAGToolContext],
     topic_keywords: str,
     conferences: Optional[list[str]] = None,
     start_year: Optional[int] = None,
@@ -186,7 +186,7 @@ def _tool_get_topic_evolution(
 
     Parameters
     ----------
-    ctx : RunContext[RAGDeps]
+    ctx : RunContext[RAGToolContext]
         Agent context with dependencies.
     topic_keywords : str
         Keywords describing the topic to analyze (e.g. "transformers attention").
@@ -215,7 +215,7 @@ def _tool_get_topic_evolution(
 
 
 def _tool_analyze_topic_relevance(
-    ctx: RunContext[RAGDeps],
+    ctx: RunContext[RAGToolContext],
     topic: str,
     distance_threshold: float = 1.1,
     conference: Optional[str] = None,
@@ -234,7 +234,7 @@ def _tool_analyze_topic_relevance(
 
     Parameters
     ----------
-    ctx : RunContext[RAGDeps]
+    ctx : RunContext[RAGToolContext]
         Agent context with dependencies.
     topic : str
         The topic or research question to analyze.
@@ -265,7 +265,7 @@ def _tool_analyze_topic_relevance(
 
 
 def _tool_get_cluster_visualization(
-    ctx: RunContext[RAGDeps],
+    ctx: RunContext[RAGToolContext],
     conference: Optional[str] = None,
 ) -> str:
     """Generate 2D visualization data for pre-computed clustered paper embeddings.
@@ -278,7 +278,7 @@ def _tool_get_cluster_visualization(
 
     Parameters
     ----------
-    ctx : RunContext[RAGDeps]
+    ctx : RunContext[RAGToolContext]
         Agent context with dependencies.
     conference : str, optional
         Conference name to retrieve visualization for (e.g. "NeurIPS").
@@ -299,7 +299,7 @@ def _tool_get_cluster_visualization(
 
 
 def _tool_get_paper_details(
-    ctx: RunContext[RAGDeps],
+    ctx: RunContext[RAGToolContext],
     title: Optional[str] = None,
     paper_id: Optional[str] = None,
     conference: Optional[str] = None,
@@ -318,7 +318,7 @@ def _tool_get_paper_details(
 
     Parameters
     ----------
-    ctx : RunContext[RAGDeps]
+    ctx : RunContext[RAGToolContext]
         Agent context with dependencies.
     title : str, optional
         Title or partial title to search for (case-insensitive).
@@ -355,7 +355,7 @@ def _tool_get_paper_details(
 
 
 def _tool_summarize_interesting_papers(
-    ctx: RunContext[RAGDeps],
+    ctx: RunContext[RAGToolContext],
     conference: Optional[str] = None,
     years: Optional[List[int]] = None,
 ) -> str:
@@ -368,7 +368,7 @@ def _tool_summarize_interesting_papers(
 
     Parameters
     ----------
-    ctx : RunContext[RAGDeps]
+    ctx : RunContext[RAGToolContext]
         Agent context with dependencies.
     conference : str, optional
         Conference filter (e.g. "ICLR" or "ICLR 2026"). When omitted, the
@@ -396,7 +396,7 @@ def _tool_summarize_interesting_papers(
 
 
 def _tool_recommend_related_papers(
-    ctx: RunContext[RAGDeps],
+    ctx: RunContext[RAGToolContext],
     conferences: Optional[List[str]] = None,
     years: Optional[List[int]] = None,
     limit: int = 10,
@@ -410,7 +410,7 @@ def _tool_recommend_related_papers(
 
     Parameters
     ----------
-    ctx : RunContext[RAGDeps]
+    ctx : RunContext[RAGToolContext]
         Agent context with dependencies.
     conferences : list of str, optional
         Restrict recommendations to these conferences. When omitted, the

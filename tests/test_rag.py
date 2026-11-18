@@ -399,10 +399,10 @@ class TestRAGToolQueue:
 
     def test_duplicate_tool_call_is_reused(self):
         """Identical calls execute once and the second result is marked cached."""
-        from abstracts_explorer.rag import _run_rag_tool, RAGDeps
+        from abstracts_explorer.rag import _run_rag_tool, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         mcp_func = Mock(return_value=json.dumps({"papers": []}))
 
         first = _run_rag_tool(ctx, "search_papers", mcp_func, {"topic_keywords": "transformers"})
@@ -415,10 +415,10 @@ class TestRAGToolQueue:
 
     def test_duplicate_error_tells_model_not_to_retry(self):
         """Cached errors include an explicit no-retry instruction."""
-        from abstracts_explorer.rag import _run_rag_tool, RAGDeps
+        from abstracts_explorer.rag import _run_rag_tool, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         mcp_func = Mock(return_value=json.dumps({"error": "No pre-computed clustering data"}))
 
         _run_rag_tool(ctx, "get_conference_topics", mcp_func, {"conferences": ["NeurIPS"]})
@@ -1424,10 +1424,10 @@ class TestRAGToolLogging:
 
     def test_search_papers_logs_call_and_result(self, caplog, mock_search_papers):
         """_tool_search_papers logs the call arguments and abbreviated result."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
 
         with caplog.at_level("INFO", logger="abstracts_explorer.rag"):
@@ -1438,10 +1438,10 @@ class TestRAGToolLogging:
 
     def test_get_conference_topics_logs_call_and_result(self, caplog, mock_cluster_topics):
         """_tool_get_conference_topics logs the call arguments and abbreviated result."""
-        from abstracts_explorer.rag import _tool_get_conference_topics, RAGDeps
+        from abstracts_explorer.rag import _tool_get_conference_topics, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
 
         with caplog.at_level("INFO", logger="abstracts_explorer.rag"):
@@ -1452,10 +1452,10 @@ class TestRAGToolLogging:
 
     def test_get_topic_evolution_logs_call_and_result(self, caplog, mock_topic_evolution):
         """_tool_get_topic_evolution logs the call arguments and abbreviated result."""
-        from abstracts_explorer.rag import _tool_get_topic_evolution, RAGDeps
+        from abstracts_explorer.rag import _tool_get_topic_evolution, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
 
         with caplog.at_level("INFO", logger="abstracts_explorer.rag"):
             _tool_get_topic_evolution(ctx, topic_keywords="attention", conferences=["NeurIPS"])
@@ -1465,10 +1465,10 @@ class TestRAGToolLogging:
 
     def test_analyze_topic_relevance_logs_call_and_result(self, caplog, mock_analyze_topic):
         """_tool_analyze_topic_relevance logs the call arguments and abbreviated result."""
-        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGDeps
+        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
 
         with caplog.at_level("INFO", logger="abstracts_explorer.rag"):
             _tool_analyze_topic_relevance(ctx, topic="diffusion models", conference="NeurIPS")
@@ -1478,13 +1478,13 @@ class TestRAGToolLogging:
 
     def test_get_cluster_visualization_logs_call_and_result(self, caplog):
         """_tool_get_cluster_visualization logs the call arguments and abbreviated result."""
-        from abstracts_explorer.rag import _tool_get_cluster_visualization, RAGDeps
+        from abstracts_explorer.rag import _tool_get_cluster_visualization, RAGToolContext
 
         with patch("abstracts_explorer.rag.tools.mcp_get_cluster_visualization") as mock_viz:
             mock_viz.return_value = json.dumps({"points": [], "n_points": 0})
 
             ctx = Mock()
-            ctx.deps = RAGDeps()
+            ctx.deps = RAGToolContext()
             ctx.deps.conferences = ["ICLR"]
 
             with caplog.at_level("INFO", logger="abstracts_explorer.rag"):
@@ -1499,10 +1499,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_search_papers_uses_deps_conference_when_not_specified(self, mock_search_papers):
         """_tool_search_papers uses ctx.deps.conferences[0] when no conference provided."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = []
 
@@ -1513,10 +1513,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_search_papers_explicit_conference_overrides_deps(self, mock_search_papers):
         """_tool_search_papers uses the explicitly provided conference over deps."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = []
 
@@ -1527,10 +1527,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_search_papers_uses_deps_years_when_not_specified(self, mock_search_papers):
         """_tool_search_papers uses ctx.deps.years when no years provided."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = [2024]
 
@@ -1541,10 +1541,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_search_papers_explicit_years_overrides_deps(self, mock_search_papers):
         """_tool_search_papers uses explicitly provided years over deps."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = [2024]
 
@@ -1555,10 +1555,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_search_papers_no_years_when_deps_empty(self, mock_search_papers):
         """_tool_search_papers does not filter by years when deps.years is empty."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = []
 
@@ -1569,10 +1569,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_search_papers_explicit_limit(self, mock_search_papers):
         """_tool_search_papers passes an explicit limit."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
 
         _tool_search_papers(ctx, topic_keywords="transformers", limit=20)
@@ -1582,10 +1582,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_search_papers_n_results_alias(self, mock_search_papers):
         """_tool_search_papers maps the n_results alias to limit."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
 
         _tool_search_papers(ctx, topic_keywords="transformers", n_results=15)
@@ -1595,10 +1595,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_search_papers_uses_deps_limit(self, mock_search_papers):
         """_tool_search_papers uses ctx.deps.limit when not provided."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps(limit=25)
+        ctx.deps = RAGToolContext(limit=25)
         ctx.deps.conferences = ["NeurIPS"]
 
         _tool_search_papers(ctx, topic_keywords="transformers")
@@ -1608,10 +1608,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_search_papers_default_limit(self, mock_search_papers):
         """_tool_search_papers defaults to 10 when neither param nor deps provide a limit."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
 
         _tool_search_papers(ctx, topic_keywords="transformers")
@@ -1621,10 +1621,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_analyze_topic_relevance_uses_deps_conference_when_not_specified(self, mock_analyze_topic):
         """_tool_analyze_topic_relevance uses ctx.deps.conferences when no conference provided."""
-        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGDeps
+        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["ICLR"]
         ctx.deps.years = []
 
@@ -1635,10 +1635,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_analyze_topic_relevance_explicit_conference_overrides_deps(self, mock_analyze_topic):
         """_tool_analyze_topic_relevance uses explicitly provided conference over deps."""
-        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGDeps
+        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["ICLR"]
         ctx.deps.years = []
 
@@ -1649,10 +1649,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_analyze_topic_relevance_uses_deps_years_when_not_specified(self, mock_analyze_topic):
         """_tool_analyze_topic_relevance uses ctx.deps.years when no years provided."""
-        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGDeps
+        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = [2024]
 
@@ -1663,10 +1663,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_analyze_topic_relevance_explicit_years_overrides_deps(self, mock_analyze_topic):
         """_tool_analyze_topic_relevance uses explicitly provided years over deps."""
-        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGDeps
+        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = [2024]
 
@@ -1677,10 +1677,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_analyze_topic_relevance_no_years_when_deps_empty(self, mock_analyze_topic):
         """_tool_analyze_topic_relevance does not filter by years when deps.years is empty."""
-        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGDeps
+        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = []
 
@@ -1718,10 +1718,10 @@ class TestRAGToolGetPaperDetails:
 
     def test_get_paper_details_uses_deps_conference_when_not_specified(self, mock_paper_details):
         """_tool_get_paper_details uses ctx.deps.conferences[0] when no conference provided."""
-        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = []
 
@@ -1732,10 +1732,10 @@ class TestRAGToolGetPaperDetails:
 
     def test_get_paper_details_explicit_conference_overrides_deps(self, mock_paper_details):
         """_tool_get_paper_details uses explicitly provided conference over deps."""
-        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = []
 
@@ -1746,10 +1746,10 @@ class TestRAGToolGetPaperDetails:
 
     def test_get_paper_details_uses_deps_year_when_not_specified(self, mock_paper_details):
         """_tool_get_paper_details uses ctx.deps.years[0] when no year provided."""
-        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = [2024]
 
@@ -1760,10 +1760,10 @@ class TestRAGToolGetPaperDetails:
 
     def test_get_paper_details_explicit_year_overrides_deps(self, mock_paper_details):
         """_tool_get_paper_details uses explicitly provided year over deps."""
-        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = [2024]
 
@@ -1774,10 +1774,10 @@ class TestRAGToolGetPaperDetails:
 
     def test_get_paper_details_no_year_when_deps_empty(self, mock_paper_details):
         """_tool_get_paper_details does not filter by year when deps.years is empty."""
-        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = []
 
@@ -1788,10 +1788,10 @@ class TestRAGToolGetPaperDetails:
 
     def test_get_paper_details_no_conference_when_deps_empty(self, mock_paper_details):
         """_tool_get_paper_details does not filter by conference when deps.conferences is empty."""
-        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = []
         ctx.deps.years = []
 
@@ -1802,10 +1802,10 @@ class TestRAGToolGetPaperDetails:
 
     def test_get_paper_details_stores_tool_result(self, mock_paper_details):
         """_tool_get_paper_details appends result to ctx.deps.tool_results."""
-        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = []
 
@@ -2011,10 +2011,10 @@ class TestRAGChatInterestingPaperTools:
         mock_embeddings_manager,
         mock_database,
     ):
-        from abstracts_explorer.rag import RAGDeps, _tool_summarize_interesting_papers
+        from abstracts_explorer.rag import RAGToolContext, _tool_summarize_interesting_papers
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
 
         message = _tool_summarize_interesting_papers(ctx)
         assert "No papers have been marked" in message

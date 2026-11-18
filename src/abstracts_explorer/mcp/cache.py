@@ -5,7 +5,7 @@ Clustering cache lookups and label restoration helpers.
 import logging
 from typing import Any, Dict, List, Optional
 
-from abstracts_explorer.mcp import deps
+from abstracts_explorer.mcp import shared_dependencies
 from abstracts_explorer.clustering import (
     DEFAULT_CLUSTERING_METHOD,
     DEFAULT_CLUSTERING_PARAMS,
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def _apply_cached_cluster_labels(
-    cm: deps.ClusteringManager,
+    cm: shared_dependencies.ClusteringManager,
     cached_results: Dict[str, Any],
 ) -> None:
     """
@@ -26,7 +26,7 @@ def _apply_cached_cluster_labels(
 
     Parameters
     ----------
-    cm : deps.ClusteringManager
+    cm : shared_dependencies.ClusteringManager
         Clustering manager with embeddings already loaded
         (``cm.paper_ids`` must be populated).
     cached_results : dict
@@ -55,7 +55,7 @@ def _apply_cached_cluster_labels(
 
 
 def _lookup_clustering_cache(
-    db: "deps.DatabaseManager",
+    db: "shared_dependencies.DatabaseManager",
     config: Any,
     conference: str,
     years: Optional[List[int]],
@@ -70,7 +70,7 @@ def _lookup_clustering_cache(
 
     Parameters
     ----------
-    db : deps.DatabaseManager
+    db : shared_dependencies.DatabaseManager
         Open database connection.
     config : object
         Configuration object (needs ``embedding_model``).

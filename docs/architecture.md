@@ -20,7 +20,7 @@ The codebase comprises **~21,200 lines** of Python (plus the dev-only
 | `embeddings/` package | 1,426 | ChromaDB store, generation, queries, ingestion, artifacts |
 | `rag/` package | 1,064 | RAG agent, tool wrappers, conversation, extraction |
 | `web_ui/app.py` | 1,037 | Flask web API (19 routes) |
-| `web_ui/dependencies.py` | 178 | Request-scoped DB/embeddings/RAG helpers |
+| `web_ui/request_services.py` | 202 | Request-scoped DB/embeddings/RAG helpers |
 | `evaluation/` package | 882 | RAG evaluation (prompts, generation, running) |
 | `interesting_papers/` package | 823 | Interesting-paper summaries & recommendations |
 | `export/` package | 709 | Paper export (ZIP/Markdown) |

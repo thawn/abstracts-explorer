@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from abstracts_explorer.mcp import cache, deps, resources
+from abstracts_explorer.mcp import cache, resources, shared_dependencies
 from abstracts_explorer.mcp.errors import ClusterAnalysisError
 from abstracts_explorer.mcp.server import mcp
 
@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 def analyze_cluster_topics(
-    cm: deps.ClusteringManager,
-    db: deps.DatabaseManager,
+    cm: shared_dependencies.ClusteringManager,
+    db: shared_dependencies.DatabaseManager,
     cluster_id: int,
     use_llm: bool = False,
 ) -> Dict[str, Any]:
@@ -29,9 +29,9 @@ def analyze_cluster_topics(
 
     Parameters
     ----------
-    cm : deps.ClusteringManager
+    cm : shared_dependencies.ClusteringManager
         Clustering manager with loaded data
-    db : deps.DatabaseManager
+    db : shared_dependencies.DatabaseManager
         Database manager for paper metadata
     cluster_id : int
         Internal cluster ID to analyze
@@ -113,11 +113,11 @@ def _get_conference_topics_for_single_conference(
         Topics result dict with ``"topic_sizes"`` and ``"topics"``
         keys, or an ``"error"`` key if no cache is available.
     """
-    config = deps.get_config()
+    config = shared_dependencies.get_config()
     collection_name = collection_name or config.collection_name
 
     # Parse year from conference name if present (e.g. "NeurIPS 2025" → "NeurIPS", 2025)
-    conference, extracted_year = deps.parse_conference_year(conference)
+    conference, extracted_year = shared_dependencies.parse_conference_year(conference)
     if extracted_year is not None:
         if years is None:
             years = [extracted_year]
@@ -137,7 +137,7 @@ def _get_conference_topics_for_single_conference(
                 ),
             }
 
-        # Reconstruct deps.ClusteringManager state from cached results
+        # Reconstruct shared_dependencies.ClusteringManager state from cached results
         cm.load_embeddings(conferences=[conference], years=years)
         cache._apply_cached_cluster_labels(cm, cached)
 

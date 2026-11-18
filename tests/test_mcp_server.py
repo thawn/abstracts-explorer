@@ -21,10 +21,10 @@ from abstracts_explorer.database import DatabaseManager
 class TestLoadClusteringData:
     """Tests for load_clustering_data function."""
 
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
-    @patch("abstracts_explorer.mcp.deps.ClusteringManager")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.ClusteringManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_load_with_defaults(self, mock_config, mock_cm_class, mock_db_class, mock_em_class):
         """Test loading clustering data with default config values."""
         # Setup mocks
@@ -56,8 +56,8 @@ class TestLoadClusteringData:
         assert cm == mock_cm
         assert db == mock_db
 
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_load_with_custom_collection(self, mock_config, mock_em_class):
         """Test loading with custom collection name."""
         mock_config_obj = Mock()
@@ -68,8 +68,8 @@ class TestLoadClusteringData:
         mock_em_class.return_value = mock_em
 
         with (
-            patch("abstracts_explorer.mcp.deps.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.mcp.deps.ClusteringManager") as mock_cm_class,
+            patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.mcp.shared_dependencies.ClusteringManager") as mock_cm_class,
         ):
             mock_db = Mock()
             mock_db_class.return_value = mock_db
@@ -87,8 +87,8 @@ class TestLoadClusteringData:
             )
             mock_db_class.assert_called_once_with()
 
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_load_failure(self, mock_config, mock_em_class):
         """Test error handling when loading fails."""
         mock_config_obj = Mock()
@@ -105,9 +105,9 @@ class TestLoadClusteringData:
 class TestMCPResources:
     """Tests for shared MCP resource context managers."""
 
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_mcp_resources_closes_on_exception(self, mock_config, mock_db_class, mock_em_class):
         """Resources are closed when the managed block raises."""
         mock_config_obj = Mock()
@@ -129,8 +129,8 @@ class TestMCPResources:
         mock_em.close.assert_called_once()
         mock_db.close.assert_called_once()
 
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
     def test_mcp_resources_without_embeddings(self, mock_db_class, mock_em_class):
         """Database-only resources skip the embeddings manager."""
         mock_db = Mock()
@@ -287,7 +287,7 @@ class TestMCPTools:
 
     @patch("abstracts_explorer.mcp.resources.load_clustering_data")
     @patch("abstracts_explorer.mcp.tools.topics.analyze_cluster_topics")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_get_conference_topics(self, mock_config, mock_analyze, mock_load):
         """Test get_conference_topics tool with cached results."""
         # Setup config mock
@@ -378,7 +378,7 @@ class TestMCPTools:
         mock_db.close.assert_called_once()
 
     @patch("abstracts_explorer.mcp.resources.load_clustering_data")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_get_conference_topics_no_conference(self, mock_config, mock_load):
         """Test get_conference_topics returns error when no conference is specified."""
         from abstracts_explorer.mcp_server import get_conference_topics
@@ -390,7 +390,7 @@ class TestMCPTools:
         assert "conference must be specified" in result["error"]
 
     @patch("abstracts_explorer.mcp.resources.load_clustering_data")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_get_conference_topics_no_cache(self, mock_config, mock_load):
         """Test get_conference_topics returns error when no cached results exist."""
         mock_config_obj = Mock()
@@ -415,7 +415,7 @@ class TestMCPTools:
 
     @patch("abstracts_explorer.mcp.resources.load_clustering_data")
     @patch("abstracts_explorer.mcp.tools.topics.analyze_cluster_topics")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_get_conference_topics_with_year_in_name(self, mock_config, mock_analyze, mock_load):
         """Test get_conference_topics parses year from conference name like 'NeurIPS 2025'."""
         mock_config_obj = Mock()
@@ -474,9 +474,9 @@ class TestMCPTools:
 class TestToolResourceCleanup:
     """Tests that tool failures still release MCP resources."""
 
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_search_papers_closes_on_error(self, mock_config, mock_db_class, mock_em_class):
         """search_papers closes resources when the database search fails."""
         mock_config_obj = Mock()
@@ -496,9 +496,9 @@ class TestToolResourceCleanup:
         mock_em.close.assert_called_once()
         mock_db.close.assert_called_once()
 
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_get_topic_evolution_closes_on_error(self, mock_config, mock_db_class, mock_em_class):
         """get_topic_evolution closes resources when a database lookup fails."""
         mock_config_obj = Mock()
@@ -518,9 +518,9 @@ class TestToolResourceCleanup:
         mock_em.close.assert_called_once()
         mock_db.close.assert_called_once()
 
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_analyze_topic_relevance_closes_on_error(self, mock_config, mock_db_class, mock_em_class):
         """analyze_topic_relevance closes resources when the search fails."""
         mock_config_obj = Mock()
@@ -562,7 +562,7 @@ class TestParseConferenceYear:
 
     @patch("abstracts_explorer.mcp.resources.load_clustering_data")
     @patch("abstracts_explorer.mcp.tools.topics.analyze_cluster_topics")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_missing_year_cache_does_not_fallback(self, mock_config, mock_analyze, mock_load):
         """A missing per-year cache must not be replaced by all-years data."""
         mock_config_obj = Mock()
@@ -604,9 +604,9 @@ class TestParseConferenceYear:
 class TestTopicEvolutionAndRelevance:
     """Tests for get_topic_evolution, analyze_topic_relevance, and search_papers."""
 
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_get_topic_evolution(self, mock_config, mock_db_class, mock_em_class):
         mock_config.return_value = Mock(collection_name="papers")
         mock_em = Mock()
@@ -638,9 +638,9 @@ class TestTopicEvolutionAndRelevance:
         mock_em.close.assert_called_once()
         mock_db.close.assert_called_once()
 
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_get_topic_evolution_with_year_range(self, mock_config, mock_db_class, mock_em_class):
         mock_config.return_value = Mock(collection_name="papers")
         mock_em = Mock()
@@ -688,9 +688,9 @@ class TestTopicEvolutionAndRelevance:
         assert "2025" not in cdata["year_counts"]
         mock_db.resolve_paper_uids.assert_called_once_with(conferences=["NeurIPS"], years=[2023, 2024])
 
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_get_topic_evolution_with_distance_threshold(self, mock_config, mock_db_class, mock_em_class):
         mock_config.return_value = Mock(collection_name="papers")
         mock_em = Mock()
@@ -715,9 +715,9 @@ class TestTopicEvolutionAndRelevance:
         mock_em.query_ids_within_distance.assert_called_once()
         assert mock_em.query_ids_within_distance.call_args.kwargs["distance_threshold"] == 0.8
 
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_get_topic_evolution_multiple_conferences(self, mock_config, mock_db_class, mock_em_class):
         mock_config.return_value = Mock(collection_name="papers")
         mock_em = Mock()
@@ -774,9 +774,9 @@ class TestTopicEvolutionAndRelevance:
         assert result["conference_data"]["NeurIPS"]["year_counts"]["2023"] == 1
         assert result["conference_data"]["ICLR"]["year_counts"]["2024"] == 1
 
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_search_papers_forwards_where_filters(self, mock_config, mock_db_class, mock_em_class):
         mock_config.return_value = Mock(collection_name="papers")
         mock_em_class.return_value = Mock()
@@ -802,9 +802,9 @@ class TestTopicEvolutionAndRelevance:
         assert call_kwargs["conferences"] == ["NeurIPS"]
         assert call_kwargs["years"] == [2024, 2025]
 
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_search_papers_forwards_complex_where_filters(self, mock_config, mock_db_class, mock_em_class):
         mock_config.return_value = Mock(collection_name="papers")
         mock_em_class.return_value = Mock()
@@ -823,7 +823,7 @@ class TestTopicEvolutionAndRelevance:
         assert mock_db.search.call_args.kwargs["where_filters"] == filters
 
     @patch("abstracts_explorer.mcp.resources.load_clustering_data")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_get_cluster_visualization(self, mock_config, mock_load):
         mock_config.return_value = Mock(collection_name="papers", embedding_model="test-model")
         mock_cm = Mock()
@@ -848,7 +848,7 @@ class TestTopicEvolutionAndRelevance:
         mock_db.get_clustering_cache.assert_called_once()
 
     @patch("abstracts_explorer.mcp.resources.load_clustering_data")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_get_cluster_visualization_no_conference(self, mock_config, mock_load):
         from abstracts_explorer.mcp_server import get_cluster_visualization
 
@@ -857,7 +857,7 @@ class TestTopicEvolutionAndRelevance:
         assert "conference must be specified" in result["error"]
 
     @patch("abstracts_explorer.mcp.resources.load_clustering_data")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_get_cluster_visualization_no_cache(self, mock_config, mock_load):
         mock_config.return_value = Mock(collection_name="papers", embedding_model="test-model")
         mock_cm = Mock()
@@ -907,9 +907,9 @@ class TestSearchPapersPaperCardFields:
     including the fix for missing 'uid' and 'authors' fields.
     """
 
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_search_papers_returns_uid_not_id(self, mock_config, mock_db_class, mock_em_class):
         """
         Test that search_papers returns 'uid' field instead of 'id'.
@@ -961,9 +961,9 @@ class TestSearchPapersPaperCardFields:
         assert paper["uid"] == "abc123"
         assert "id" not in paper, "Should use 'uid' not 'id' - 'id' would break paper cards"
 
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_search_papers_returns_authors_as_list(self, mock_config, mock_db_class, mock_em_class):
         """
         Test that search_papers returns authors as a list, not a string.
@@ -1021,9 +1021,9 @@ class TestSearchPapersPaperCardFields:
         ), "authors must be a list for paper card display; string would show as 'Unknown'"
         assert paper["authors"] == ["Alice Smith", "Bob Jones", "Carol White"]
 
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_search_papers_authors_empty_when_missing(self, mock_config, mock_db_class, mock_em_class):
         """Test that missing authors metadata results in an empty list, not 'Unknown'."""
         mock_config_obj = Mock()
@@ -1063,9 +1063,9 @@ class TestSearchPapersPaperCardFields:
         assert isinstance(paper["authors"], list)
         assert paper["authors"] == []
 
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_search_papers_returns_conference_field(self, mock_config, mock_db_class, mock_em_class):
         """
         Test that search_papers returns the conference field.
@@ -1121,9 +1121,9 @@ class TestSearchPapersPaperCardFields:
         assert "conference" in paper, "Paper card requires 'conference' field for conference badge"
         assert paper["conference"] == "NeurIPS"
 
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
-    @patch("abstracts_explorer.mcp.deps.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_search_papers_all_card_fields_present(self, mock_config, mock_db_class, mock_em_class):
         """
         Test that search_papers returns all fields required for a complete paper card.
@@ -1233,7 +1233,7 @@ class TestGetPaperDetails:
         mock_db = Mock()
         mock_db.keyword_search.return_value = [self._make_paper_row()]
 
-        with patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db):
+        with patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager", return_value=mock_db):
             result = json.loads(get_paper_details(title="Test Paper"))
 
         assert "error" not in result
@@ -1253,7 +1253,7 @@ class TestGetPaperDetails:
         mock_db = Mock()
         mock_db.get_paper_by_original_id_or_uid.return_value = self._make_paper_row(award="Best Paper")
 
-        with patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db):
+        with patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager", return_value=mock_db):
             result = json.loads(get_paper_details(paper_id="abc123"))
 
         assert "error" not in result
@@ -1272,7 +1272,7 @@ class TestGetPaperDetails:
         mock_db.get_paper_by_original_id_or_uid.return_value = None  # ID not found
         mock_db.keyword_search.return_value = [self._make_paper_row()]
 
-        with patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db):
+        with patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager", return_value=mock_db):
             result = json.loads(get_paper_details(paper_id="notfound", title="Test Paper"))
 
         assert "error" not in result
@@ -1287,7 +1287,7 @@ class TestGetPaperDetails:
         mock_db = Mock()
         mock_db.keyword_search.return_value = [self._make_paper_row(authors=["Solo Author"])]
 
-        with patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db):
+        with patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager", return_value=mock_db):
             result = json.loads(get_paper_details(title="Paper"))
 
         assert result["papers"][0]["authors"] == ["Solo Author"]
@@ -1299,7 +1299,7 @@ class TestGetPaperDetails:
         mock_db = Mock()
         mock_db.keyword_search.return_value = [self._make_paper_row(authors=[])]
 
-        with patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db):
+        with patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager", return_value=mock_db):
             result = json.loads(get_paper_details(title="Paper"))
 
         assert result["papers"][0]["authors"] == []
@@ -1311,7 +1311,7 @@ class TestGetPaperDetails:
         mock_db = Mock()
         mock_db.keyword_search.return_value = []
 
-        with patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db):
+        with patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager", return_value=mock_db):
             get_paper_details(title="Paper", conference="ICLR", year=2024, limit=3)
 
         mock_db.keyword_search.assert_called_once_with(keyword="Paper", conferences=["ICLR"], years=[2024], limit=3)
@@ -1323,7 +1323,7 @@ class TestGetPaperDetails:
         mock_db = Mock()
         mock_db.keyword_search.return_value = []
 
-        with patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db):
+        with patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager", return_value=mock_db):
             get_paper_details(title="Paper", limit=10)
 
         mock_db.keyword_search.assert_called_once_with(keyword="Paper", conferences=None, years=None, limit=10)
@@ -1335,7 +1335,7 @@ class TestGetPaperDetails:
         mock_db = Mock()
         mock_db.keyword_search.return_value = []
 
-        with patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db):
+        with patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager", return_value=mock_db):
             result = json.loads(get_paper_details(title="Nonexistent Paper"))
 
         assert "error" not in result
@@ -1349,7 +1349,7 @@ class TestGetPaperDetails:
         mock_db = Mock()
         mock_db.keyword_search.side_effect = Exception("DB connection failed")
 
-        with patch("abstracts_explorer.mcp.deps.DatabaseManager", return_value=mock_db):
+        with patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager", return_value=mock_db):
             result = json.loads(get_paper_details(title="Paper"))
 
         assert "error" in result
@@ -1370,8 +1370,8 @@ class TestInterestingPaperMCPTools:
         result = json.loads(summarize_interesting_papers())
         assert "error" in result
 
-    @patch("abstracts_explorer.mcp.deps._summarize_interesting_papers")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies._summarize_interesting_papers")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
     def test_summarize_delegates_to_core(self, mock_db_class, mock_summarize):
         from abstracts_explorer.mcp_server import summarize_interesting_papers
 
@@ -1403,10 +1403,10 @@ class TestInterestingPaperMCPTools:
         result = json.loads(recommend_related_papers())
         assert "error" in result
 
-    @patch("abstracts_explorer.mcp.deps._recommend_related_papers")
-    @patch("abstracts_explorer.mcp.deps.get_config")
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies._recommend_related_papers")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
     def test_recommend_delegates_to_core(
         self,
         mock_db_class,
@@ -1452,7 +1452,7 @@ class TestInterestingPaperMCPTools:
 class TestInterestingPaperLegacyFormatRejection:
     """Legacy scalar ratings are rejected by the interesting-paper tools."""
 
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
     def test_summarize_rejects_scalar_priorities(self, mock_db_class):
         from abstracts_explorer.mcp_server import summarize_interesting_papers
 
@@ -1465,9 +1465,9 @@ class TestInterestingPaperLegacyFormatRejection:
         assert "Invalid rating format" in result["error"]
         mock_db.close.assert_called_once()
 
-    @patch("abstracts_explorer.mcp.deps.get_config")
-    @patch("abstracts_explorer.mcp.deps.EmbeddingsManager")
-    @patch("abstracts_explorer.mcp.deps.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
     def test_recommend_rejects_scalar_priorities(self, mock_db_class, mock_em_class, mock_config):
         from abstracts_explorer.mcp_server import recommend_related_papers
 

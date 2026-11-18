@@ -45,7 +45,7 @@ them with `--no-verify` unless explicitly asked.
   - `interesting_papers/`: loading, summary, recommendations.
   - `export/`: markdown/ZIP export (`export_utils.py` is a facade).
   - `utils/`: shared time/json/url/conference/paper-presentation helpers.
-  - Top-level: `config.py`, `db_models.py`, `paper_utils.py`, `registry.py`, `rate_limiter.py`, `metadata_cache.py`, `llm_utils.py`, `web_ui/` (Flask + `dependencies.py` + modular ES6).
+  - Top-level: `config.py`, `db_models.py`, `paper_utils.py`, `registry.py`, `rate_limiter.py`, `metadata_cache.py`, `llm_utils.py`, `web_ui/` (Flask + `request_services.py` + modular ES6).
 - `tools/profiling.py`: dev-only SQL profiler (not shipped in the wheel).
 - `scripts/archive/`: applied one-off migrations kept for reference.
 - `tests/`: pytest suite.

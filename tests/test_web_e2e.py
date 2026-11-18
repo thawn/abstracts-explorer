@@ -328,7 +328,7 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
 
     # Get the actual module from sys.modules (now it's loaded)
     app_module = sys.modules["abstracts_explorer.web_ui.app"]
-    deps_module = sys.modules["abstracts_explorer.web_ui.dependencies"]
+    services_module = sys.modules["abstracts_explorer.web_ui.request_services"]
     # Get the Flask app instance
     flask_app = app_module.app
 
@@ -365,14 +365,14 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
 
     # Patch the dependency module: routes and lazy managers resolve their
     # dependencies through ``dependencies`` at call time.
-    original_deps_get_config = deps_module.get_config
-    deps_module.get_config = mock_get_config
+    original_services_get_config = services_module.get_config
+    services_module.get_config = mock_get_config
 
     # Inject the pre-created embeddings manager directly
     # CRITICAL: Set this BEFORE starting the server to avoid race conditions
     # This prevents get_embeddings_manager() from creating a new instance
-    deps_module.embeddings_manager = em
-    deps_module._reset_rag_chat_local()
+    services_module.embeddings_manager = em
+    services_module._reset_rag_chat_local()
 
     # Pre-populate the database with cached clustering results so that MCP
     # tools (get_conference_topics, get_cluster_visualization) return instantly
@@ -394,8 +394,8 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
             g.db.create_tables()  # Ensure all tables exist (including clustering_cache)
         return g.db
 
-    original_deps_get_database = deps_module.get_database
-    deps_module.get_database = mock_get_database_wrapper
+    original_services_get_database = services_module.get_database
+    services_module.get_database = mock_get_database_wrapper
 
     # Use werkzeug's make_server for better cross-platform compatibility
     # This works more reliably in threads than Flask's app.run()
@@ -431,10 +431,10 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     server.shutdown()
 
     # Reset the dependency module state
-    deps_module.embeddings_manager = None
-    deps_module._reset_rag_chat_local()
-    deps_module.get_database = original_deps_get_database
-    deps_module.get_config = original_deps_get_config
+    services_module.embeddings_manager = None
+    services_module._reset_rag_chat_local()
+    services_module.get_database = original_services_get_database
+    services_module.get_config = original_services_get_config
 
     # Restore original environment variables
     if original_default_conference is not None:

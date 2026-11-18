@@ -8,7 +8,7 @@ from collections import Counter
 from typing import Optional
 
 from abstracts_explorer.embeddings import QueryEmbedding
-from abstracts_explorer.mcp import deps, resources
+from abstracts_explorer.mcp import resources, shared_dependencies
 from abstracts_explorer.mcp.server import mcp
 
 logger = logging.getLogger(__name__)
@@ -81,7 +81,7 @@ def analyze_topic_relevance(
                 indent=2,
             )
 
-        config = deps.get_config()
+        config = shared_dependencies.get_config()
         collection_name = collection_name or config.collection_name
 
         with resources._get_mcp_resources(collection_name) as (em, db):

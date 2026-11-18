@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from abstracts_explorer.mcp import cache, deps, resources
+from abstracts_explorer.mcp import cache, resources, shared_dependencies
 from abstracts_explorer.mcp.server import mcp
 
 logger = logging.getLogger(__name__)
@@ -61,7 +61,7 @@ def get_cluster_visualization(
                 indent=2,
             )
 
-        config = deps.get_config()
+        config = shared_dependencies.get_config()
         collection_name = collection_name or config.collection_name
 
         all_points: List[Dict[str, Any]] = []
@@ -69,7 +69,7 @@ def get_cluster_visualization(
 
         for conf in conferences:
             # Parse year from conference name if present (e.g. "NeurIPS 2025")
-            parsed_conf, extracted_year = deps.parse_conference_year(conf)
+            parsed_conf, extracted_year = shared_dependencies.parse_conference_year(conf)
             vis_years = list(years) if years else None
             if extracted_year is not None:
                 if vis_years is None:

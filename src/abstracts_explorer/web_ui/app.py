@@ -26,8 +26,8 @@ from abstracts_explorer.clustering import (
 from abstracts_explorer.embeddings import QueryEmbedding
 from abstracts_explorer.export_utils import export_papers_to_zip
 from abstracts_explorer.paper_utils import extract_top_keywords
-from abstracts_explorer.web_ui import dependencies as deps
-from abstracts_explorer.web_ui.dependencies import (
+from abstracts_explorer.web_ui import request_services as services
+from abstracts_explorer.web_ui.request_services import (
     _RAG_CHAT_CACHE_MAX,  # noqa: F401  (re-exported for tests)
     _get_session_id,  # noqa: F401  (re-exported for tests)
     _rag_chat_cache,  # noqa: F401  (re-exported for tests)
@@ -87,7 +87,7 @@ def _load_secret_key() -> str:
     env_key = os.environ.get("FLASK_SECRET_KEY")
     if env_key:
         return env_key
-    key_path = Path(deps.get_config().data_dir) / ".flask_secret"
+    key_path = Path(services.get_config().data_dir) / ".flask_secret"
     try:
         if key_path.exists():
             existing = key_path.read_text(encoding="utf-8").strip()
@@ -116,7 +116,7 @@ app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("MAX_CONTENT_LENGTH", 2 * 
 # in docker-compose.yml.  Set any value to 0 to disable that header entirely.
 # When the app is run directly (no proxy), no X-Forwarded-* headers are present
 # so ProxyFix is a no-op regardless of the configured values.
-_config = deps.get_config()
+_config = services.get_config()
 app.wsgi_app = ProxyFix(  # type: ignore[assignment]
     app.wsgi_app,
     x_for=_config.proxy_x_for,
@@ -125,7 +125,7 @@ app.wsgi_app = ProxyFix(  # type: ignore[assignment]
     x_prefix=_config.proxy_x_prefix,
 )
 
-app.teardown_appcontext(deps.teardown_db)
+app.teardown_appcontext(services.teardown_db)
 
 
 def _allowed_cors_origins() -> list[str]:
@@ -170,7 +170,7 @@ def index():
     str
         Rendered HTML template
     """
-    llm_backend = deps.get_llm_backend_info(_config.llm_backend_url)
+    llm_backend = services.get_llm_backend_info(_config.llm_backend_url)
     return render_template(
         "index.html",
         version=__version__,
@@ -209,9 +209,9 @@ def conference_index(conference_name):
     if conference_name.startswith("."):
         abort(404)
 
-    llm_backend = deps.get_llm_backend_info(_config.llm_backend_url)
+    llm_backend = services.get_llm_backend_info(_config.llm_backend_url)
     try:
-        database = deps.get_database()
+        database = services.get_database()
         result = database.resolve_conference_for_url(conference_name)
     except DatabaseError as exc:
         logger.error("Database error in conference URL route: %s", exc, exc_info=True)
@@ -266,7 +266,7 @@ def health():
     """
     try:
         # Check if database is accessible
-        db = deps.get_database()
+        db = services.get_database()
         db.get_paper_count()
         return jsonify({"status": "healthy", "service": "abstracts-explorer"}), 200
     except Exception as e:
@@ -293,7 +293,7 @@ def stats():
     """
     conference, year = get_conference_year_params(request)
 
-    database = deps.get_database()
+    database = services.get_database()
     stats_data = database.get_stats(year=year, conference=conference)
 
     return jsonify(stats_data)
@@ -313,8 +313,8 @@ def check_embedding_model():
         - current_model: str - Current model from configuration
         - warning: str or None - Warning message if incompatible
     """
-    config = deps.get_config()
-    database = deps.get_database()
+    config = services.get_config()
+    database = services.get_database()
 
     # Get the stored embedding model from the database
     stored_model = database.get_embedding_model()
@@ -366,7 +366,7 @@ def get_filters():
     """
     conference, year = get_conference_year_params(request)
 
-    database = deps.get_database()
+    database = services.get_database()
     sessions = database.get_sessions(conference=conference, year=year)
     return jsonify({"sessions": sessions})
 
@@ -390,8 +390,8 @@ def get_available_filters_endpoint():
         - default_conference: conference to pre-select (guaranteed to have DB data, if any exists)
         - default_year: year to pre-select (guaranteed to have DB data for the default conference)
     """
-    config = deps.get_config()
-    database = deps.get_database()
+    config = services.get_config()
+    database = services.get_database()
 
     db_conference_years = database.get_conference_years_from_db()
 
@@ -458,8 +458,8 @@ def search():
     if use_embeddings:
         enforce_client_rate_limit(_client_id())
 
-    database = deps.get_database()
-    embeddings_manager = deps.get_embeddings_manager() if use_embeddings else None
+    database = services.get_database()
+    embeddings_manager = services.get_embeddings_manager() if use_embeddings else None
     papers, total_similar = database.search(
         query=query,
         limit=limit,
@@ -503,7 +503,7 @@ def get_paper(paper_uid):
     dict
         Paper details including authors
     """
-    database = deps.get_database()
+    database = services.get_database()
     paper = database.get_paper_by_uid(paper_uid)
     if paper is None:
         return jsonify({"error": f"Paper with uid={paper_uid} not found"}), 404
@@ -534,7 +534,7 @@ def get_papers_batch():
     if len(paper_ids) > 1000:
         raise ApiError("Too many paper IDs (maximum 1000)", 400)
 
-    database = deps.get_database()
+    database = services.get_database()
     papers = []
 
     for paper_uid in paper_ids:
@@ -573,7 +573,7 @@ def chat():
     dict
         Chat response with papers used
     """
-    config = deps.get_config()  # Get config lazily
+    config = services.get_config()  # Get config lazily
     data = get_json_object()
     message = coerce_text(data.get("message"), "message", _MAX_CHAT_MESSAGE_LENGTH)
     n_papers = coerce_limit(
@@ -594,13 +594,13 @@ def chat():
         return jsonify({"error": "Message is required"}), 400
 
     enforce_client_rate_limit(_client_id())
-    rag = deps.get_rag_chat()
+    rag = services.get_rag_chat()
 
     if reset:
         rag.reset_conversation()
 
     # Get response with filters
-    database = deps.get_database()
+    database = services.get_database()
     available_conferences = database.get_conferences()
     response = rag.query(
         message,
@@ -665,8 +665,8 @@ def compute_clusters():
     years = coerce_int_list(data.get("years"), "years", max_items=_MAX_FILTER_ITEMS) or None
 
     # Get config and database
-    config = deps.get_config()
-    database = deps.get_database()
+    config = services.get_config()
+    database = services.get_database()
 
     # Get current embedding model
     current_model = config.embedding_model
@@ -752,8 +752,8 @@ def search_custom_cluster():
 
     # Get embeddings manager and database
     enforce_client_rate_limit(_client_id())
-    em = deps.get_embeddings_manager()
-    database = deps.get_database()
+    em = services.get_embeddings_manager()
+    database = services.get_database()
 
     query_embedding = QueryEmbedding(query, em)
     matches = database.find_paper_ids_within_distance(
@@ -841,7 +841,7 @@ def papers_per_year():
         Dictionary with year_counts mapping year to paper count
     """
     conference = request.args.get("conference")
-    database = deps.get_database()
+    database = services.get_database()
 
     if conference:
         years = sorted(database.get_years(conference=conference))
@@ -911,7 +911,7 @@ def export_interesting_papers():
             )
 
     # Fetch papers from database
-    database = deps.get_database()
+    database = services.get_database()
     papers = []
     for paper_id in paper_ids:
         try:
@@ -981,7 +981,7 @@ def donate_data():
     if any(not isinstance(value, dict) for value in paper_priorities.values()):
         raise ApiError("Invalid data format. Expected dict with priority and searchTerm", 400)
 
-    database = deps.get_database()
+    database = services.get_database()
 
     try:
         # Use DatabaseManager's donate_validation_data method
@@ -1036,7 +1036,7 @@ def donate_chat():
     if total_chars > _MAX_TRANSCRIPT_CHARS:
         raise ApiError(f"transcript must contain at most {_MAX_TRANSCRIPT_CHARS} characters", 400)
 
-    database = deps.get_database()
+    database = services.get_database()
 
     try:
         donation_id = database.donate_chat_transcript(rating, transcript)
@@ -1097,7 +1097,7 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=6):
     if threads < 1:
         raise ValueError(f"threads must be >= 1, got {threads}")
 
-    config = deps.get_config()  # Get config lazily
+    config = services.get_config()  # Get config lazily
 
     if debug and host not in ("127.0.0.1", "localhost", "::1"):
         print(

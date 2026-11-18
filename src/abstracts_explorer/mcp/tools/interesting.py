@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from abstracts_explorer.mcp import deps, resources
+from abstracts_explorer.mcp import resources, shared_dependencies
 from abstracts_explorer.mcp.server import mcp
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ def summarize_interesting_papers(
 
     try:
         with resources._get_mcp_resources(with_embeddings=False) as (_, db):
-            result = deps._summarize_interesting_papers(
+            result = shared_dependencies._summarize_interesting_papers(
                 database=db,
                 priorities=priorities,
                 paper_ids=paper_ids,
@@ -134,13 +134,13 @@ def recommend_related_papers(
             indent=2,
         )
 
-    config = deps.get_config()
+    config = shared_dependencies.get_config()
     collection_name = collection_name or config.collection_name
 
     try:
         with resources._get_mcp_resources(collection_name) as (em, db):
             assert em is not None
-            result = deps._recommend_related_papers(
+            result = shared_dependencies._recommend_related_papers(
                 database=db,
                 embeddings_manager=em,
                 priorities=priorities,

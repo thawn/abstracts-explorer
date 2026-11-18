@@ -8,9 +8,9 @@ from typing import Any, Dict, List, Optional
 
 
 @dataclass
-class RAGDeps:
+class RAGToolContext:
     """
-    Dependencies for RAG agent tools.
+    Per-query context for RAG agent tools.
 
     Carries shared state for capturing tool results during agent runs,
     allowing post-processing (e.g. paper extraction) after the agent completes.

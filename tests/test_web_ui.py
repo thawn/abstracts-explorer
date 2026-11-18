@@ -21,7 +21,7 @@ from tests.conftest import set_test_db
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from abstracts_explorer.web_ui import app as flask_app
-from abstracts_explorer.web_ui import dependencies as web_deps
+from abstracts_explorer.web_ui import request_services as web_services
 from abstracts_explorer.database import DatabaseError, DatabaseManager
 from abstracts_explorer.config import get_config
 from tests.helpers import raw_query
@@ -201,8 +201,8 @@ class TestWebInterface:
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
         mock_db = self._mock_db_for_available_filters(app_module, {"NeurIPS": [2025, 2024]})
 
-        with patch.object(web_deps, "get_database", return_value=mock_db):
-            with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_cfg:
+        with patch.object(web_services, "get_database", return_value=mock_db):
+            with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_cfg:
                 mock_cfg.return_value.default_conference = "NeurIPS"
                 mock_cfg.return_value.default_year = 2024
                 response = client.get("/api/available-filters")
@@ -219,8 +219,8 @@ class TestWebInterface:
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
         mock_db = self._mock_db_for_available_filters(app_module, {})
 
-        with patch.object(web_deps, "get_database", return_value=mock_db):
-            with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_cfg:
+        with patch.object(web_services, "get_database", return_value=mock_db):
+            with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_cfg:
                 mock_cfg.return_value.default_conference = ""
                 mock_cfg.return_value.default_year = 0
                 response = client.get("/api/available-filters")
@@ -237,8 +237,8 @@ class TestWebInterface:
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
         mock_db = self._mock_db_for_available_filters(app_module, {"NeurIPS": [2025, 2024], "ICLR": [2024]})
 
-        with patch.object(web_deps, "get_database", return_value=mock_db):
-            with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_cfg:
+        with patch.object(web_services, "get_database", return_value=mock_db):
+            with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_cfg:
                 mock_cfg.return_value.default_conference = ""
                 mock_cfg.return_value.default_year = 0
                 response = client.get("/api/available-filters")
@@ -259,8 +259,8 @@ class TestWebInterface:
         # DB only has ICLR/2024 – configured default "ICML" has no data
         mock_db = self._mock_db_for_available_filters(app_module, {"ICLR": [2024]})
 
-        with patch.object(web_deps, "get_database", return_value=mock_db):
-            with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_cfg:
+        with patch.object(web_services, "get_database", return_value=mock_db):
+            with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_cfg:
                 mock_cfg.return_value.default_conference = "ICML"
                 mock_cfg.return_value.default_year = 2024
                 response = client.get("/api/available-filters")
@@ -281,8 +281,8 @@ class TestWebInterface:
         # DB has NeurIPS/2024 and ICLR/2025
         mock_db = self._mock_db_for_available_filters(app_module, {"NeurIPS": [2024], "ICLR": [2025]})
 
-        with patch.object(web_deps, "get_database", return_value=mock_db):
-            with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_cfg:
+        with patch.object(web_services, "get_database", return_value=mock_db):
+            with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_cfg:
                 mock_cfg.return_value.default_conference = ""
                 mock_cfg.return_value.default_year = 0
                 response = client.get("/api/available-filters")
@@ -301,8 +301,8 @@ class TestWebInterface:
         # DB has NeurIPS 2024 and 2025 but not 2020
         mock_db = self._mock_db_for_available_filters(app_module, {"NeurIPS": [2025, 2024]})
 
-        with patch.object(web_deps, "get_database", return_value=mock_db):
-            with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_cfg:
+        with patch.object(web_services, "get_database", return_value=mock_db):
+            with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_cfg:
                 mock_cfg.return_value.default_conference = "NeurIPS"
                 mock_cfg.return_value.default_year = 2020
                 response = client.get("/api/available-filters")
@@ -321,8 +321,8 @@ class TestWebInterface:
         app_module = sys.modules["abstracts_explorer.web_ui.app"]
         mock_db = self._mock_db_for_available_filters(app_module, {"NeurIPS": [2025]})
 
-        with patch.object(web_deps, "get_database", return_value=mock_db):
-            with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_cfg:
+        with patch.object(web_services, "get_database", return_value=mock_db):
+            with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_cfg:
                 mock_cfg.return_value.default_conference = "NeurIPS"
                 mock_cfg.return_value.default_year = 2025
                 response = client.get("/api/available-filters")
@@ -457,7 +457,7 @@ class TestConferenceURLRoute:
         mock_db = MagicMock()
         mock_db.resolve_conference_for_url.return_value = {"conference": "NeurIPS", "error": None, "reason": "found"}
 
-        with patch.object(web_deps, "get_database", return_value=mock_db):
+        with patch.object(web_services, "get_database", return_value=mock_db):
             response = client.get("/neurips")
 
         assert response.status_code == 200
@@ -471,7 +471,7 @@ class TestConferenceURLRoute:
         mock_db = MagicMock()
         mock_db.resolve_conference_for_url.return_value = {"conference": "ICML", "error": None, "reason": "found"}
 
-        with patch.object(web_deps, "get_database", return_value=mock_db):
+        with patch.object(web_services, "get_database", return_value=mock_db):
             response = client.get("/ICML")
 
         assert response.status_code == 200
@@ -482,7 +482,7 @@ class TestConferenceURLRoute:
         mock_db = MagicMock()
         mock_db.resolve_conference_for_url.return_value = {"conference": "NeurIPS", "error": None, "reason": "found"}
 
-        with patch.object(web_deps, "get_database", return_value=mock_db):
+        with patch.object(web_services, "get_database", return_value=mock_db):
             response = client.get("/NeurIPS")
 
         assert response.status_code == 200
@@ -501,7 +501,7 @@ class TestConferenceURLRoute:
             "reason": "not_found",
         }
 
-        with patch.object(web_deps, "get_database", return_value=mock_db):
+        with patch.object(web_services, "get_database", return_value=mock_db):
             response = client.get("/unknownconf")
 
         assert response.status_code == 404
@@ -524,7 +524,7 @@ class TestConferenceURLRoute:
             "reason": "no_data",
         }
 
-        with patch.object(web_deps, "get_database", return_value=mock_db):
+        with patch.object(web_services, "get_database", return_value=mock_db):
             response = client.get("/icml")
 
         assert response.status_code == 404
@@ -593,7 +593,7 @@ class TestSearchEndpoint:
         mock_db.search.return_value = (mock_papers, None)
 
         # Patch the get_database function to return our mock
-        with patch.object(web_deps, "get_database", return_value=mock_db):
+        with patch.object(web_services, "get_database", return_value=mock_db):
             # Make search request
             response = client.post(
                 "/api/search",
@@ -638,7 +638,7 @@ class TestSearchEndpoint:
         mock_db.search.return_value = (mock_papers[:2], None)  # Return limited results
 
         # Patch the get_database function
-        with patch.object(web_deps, "get_database", return_value=mock_db):
+        with patch.object(web_services, "get_database", return_value=mock_db):
             # Search with limit
             response = client.post(
                 "/api/search",
@@ -687,7 +687,7 @@ class TestSearchEndpoint:
         ]
         mock_db.search.return_value = (mock_papers, None)
 
-        with patch.object(web_deps, "get_database", return_value=mock_db):
+        with patch.object(web_services, "get_database", return_value=mock_db):
             response = client.post(
                 "/api/search",
                 data=json.dumps({"query": 'authors:"John Smith"', "use_embeddings": False, "limit": 10}),
@@ -711,8 +711,8 @@ class TestSearchEndpoint:
         mock_papers = [{"uid": "test1", "title": "Test Paper", "abstract": "Test", "authors": ["John Smith"]}]
         mock_db.search.return_value = (mock_papers, None)
 
-        with patch.object(web_deps, "get_embeddings_manager", return_value=mock_em):
-            with patch.object(web_deps, "get_database", return_value=mock_db):
+        with patch.object(web_services, "get_embeddings_manager", return_value=mock_em):
+            with patch.object(web_services, "get_database", return_value=mock_db):
                 response = client.post(
                     "/api/search",
                     data=json.dumps({"query": 'authors:"John Smith"', "use_embeddings": True, "limit": 10}),
@@ -815,7 +815,7 @@ class TestExtractTopKeywords:
         ]
         mock_db.search.return_value = (mock_papers, None)
 
-        with patch.object(web_deps, "get_database", return_value=mock_db):
+        with patch.object(web_services, "get_database", return_value=mock_db):
             response = client.post(
                 "/api/search",
                 data=json.dumps({"query": "deep learning", "use_embeddings": False, "limit": 10}),
@@ -945,8 +945,8 @@ class TestWebUISemanticSearchDetails:
 
         with app.test_client() as client:
             # Mock the get_embeddings_manager function
-            with patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager") as mock_get_em:
-                with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_embeddings_manager") as mock_get_em:
+                with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                     # Setup mock embeddings manager
                     mock_em = Mock()
                     mock_db = Mock()
@@ -1005,8 +1005,8 @@ class TestWebUISemanticSearchDetails:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager") as mock_get_em:
-                with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_embeddings_manager") as mock_get_em:
+                with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                     mock_em = Mock()
                     mock_db = Mock()
                     mock_db.search.return_value = ([], 0)
@@ -1029,8 +1029,8 @@ class TestWebUISemanticSearchDetails:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager") as mock_get_em:
-                with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_embeddings_manager") as mock_get_em:
+                with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                     with patch("abstracts_explorer.web_ui.app._SIMILAR_DISTANCE_THRESHOLD", 1.2):
                         mock_em = Mock()
                         mock_db = Mock()
@@ -1053,8 +1053,8 @@ class TestWebUISemanticSearchDetails:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager") as mock_get_em:
-                with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_embeddings_manager") as mock_get_em:
+                with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                     mock_em = Mock()
                     mock_db = Mock()
                     mock_db.search.return_value = ([], 0)
@@ -1086,8 +1086,8 @@ class TestWebUIChatEndpointSuccess:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_rag_chat") as mock_get_rag:
-                with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_get_config:
+            with patch("abstracts_explorer.web_ui.request_services.get_rag_chat") as mock_get_rag:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_get_config:
                     # Setup mocks
                     mock_config = Mock()
                     mock_config.max_context_papers = 3
@@ -1123,8 +1123,8 @@ class TestWebUIChatEndpointSuccess:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_rag_chat") as mock_get_rag:
-                with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_get_config:
+            with patch("abstracts_explorer.web_ui.request_services.get_rag_chat") as mock_get_rag:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_get_config:
                     mock_config = Mock()
                     mock_config.max_context_papers = 3
                     mock_get_config.return_value = mock_config
@@ -1157,9 +1157,9 @@ class TestWebUIChatEndpointSuccess:
         priorities = {"paper1": {"priority": 5, "searchTerm": "llms"}}
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_rag_chat") as mock_get_rag:
-                with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_get_config:
-                    with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_rag_chat") as mock_get_rag:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_get_config:
+                    with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                         mock_config = Mock()
                         mock_config.max_context_papers = 3
                         mock_get_config.return_value = mock_config
@@ -1193,8 +1193,8 @@ class TestWebUIChatEndpointSuccess:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_rag_chat") as mock_get_rag:
-                with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_get_config:
+            with patch("abstracts_explorer.web_ui.request_services.get_rag_chat") as mock_get_rag:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_get_config:
                     mock_config = Mock()
                     mock_config.max_context_papers = 3
                     mock_get_config.return_value = mock_config
@@ -1245,7 +1245,7 @@ class TestWebUIErrorHandlingDetails:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                 mock_db = Mock()
                 mock_db.get_stats.side_effect = Exception("Database error")
                 mock_get_db.return_value = mock_db
@@ -1270,7 +1270,7 @@ class TestWebUIGetPaperDetails:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                 mock_db = Mock()
 
                 # DatabaseManager.get_paper_by_uid returns authors already as a list
@@ -1306,7 +1306,7 @@ class TestWebUIStatsEndpoint:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                 mock_db = Mock()
                 mock_db.get_stats.return_value = {
                     "total_papers": 42,
@@ -1332,7 +1332,7 @@ class TestWebUISearchExceptionHandling:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                 mock_db = Mock()
                 mock_db.keyword_search.side_effect = Exception("Database connection failed")
                 mock_db.get_paper_authors.return_value = []
@@ -1352,7 +1352,7 @@ class TestWebUISearchExceptionHandling:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager") as mock_get_em:
+            with patch("abstracts_explorer.web_ui.request_services.get_embeddings_manager") as mock_get_em:
                 mock_em = Mock()
                 mock_em.search_similar.side_effect = Exception("Embeddings error")
                 mock_get_em.return_value = mock_em
@@ -1413,7 +1413,7 @@ class TestWebUIDatabaseModes:
     def test_get_database_with_sqlite_path(self, tmp_path):
         """Test that get_database works with local SQLite database path."""
         from abstracts_explorer.web_ui.app import app
-        from abstracts_explorer.web_ui.dependencies import get_database
+        from abstracts_explorer.web_ui.request_services import get_database
         from abstracts_explorer.database import DatabaseManager
 
         # Create a real SQLite database
@@ -1424,7 +1424,7 @@ class TestWebUIDatabaseModes:
             db.create_tables()
 
         with app.test_client():
-            with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_get_config:
+            with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_get_config:
                 mock_config = Mock()
                 # Simulate PAPER_DB_PATH mode (legacy)
                 mock_config.paper_db_path = str(db_path)
@@ -1446,7 +1446,7 @@ class TestWebUIDatabaseModes:
     def test_get_database_with_sqlite_url(self, tmp_path):
         """Test that get_database works with SQLite database URL (converted from path)."""
         from abstracts_explorer.web_ui.app import app
-        from abstracts_explorer.web_ui.dependencies import get_database
+        from abstracts_explorer.web_ui.request_services import get_database
         from abstracts_explorer.database import DatabaseManager
 
         # Create a real SQLite database
@@ -1457,7 +1457,7 @@ class TestWebUIDatabaseModes:
             db.create_tables()
 
         with app.test_client():
-            with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_get_config:
+            with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_get_config:
                 mock_config = Mock()
                 # Simulate DATABASE_URL with SQLite
                 mock_config.paper_db_path = ""  # Not used when DATABASE_URL is set
@@ -1501,7 +1501,7 @@ class TestWebUIDatabaseModes:
             db.add_paper(paper)
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_get_config:
+            with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_get_config:
                 mock_config = Mock()
                 mock_config.database_url = f"sqlite:///{str(db_path)}"
                 mock_config.embedding_db_path = "chroma_db"
@@ -1524,8 +1524,8 @@ class TestWebUIChatExceptionLines:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_rag_chat") as mock_get_rag:
-                with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_get_config:
+            with patch("abstracts_explorer.web_ui.request_services.get_rag_chat") as mock_get_rag:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_get_config:
                     mock_config = Mock()
                     mock_config.max_context_papers = 3
                     mock_get_config.return_value = mock_config
@@ -1553,7 +1553,7 @@ class TestWebUIGetPaperException:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                 mock_db = Mock()
                 mock_db.get_paper_by_uid.return_value = None  # Paper not found
                 mock_get_db.return_value = mock_db
@@ -1570,7 +1570,7 @@ class TestWebUIGetPaperException:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                 mock_db = Mock()
                 # Simulate a database exception
                 mock_db.get_paper_by_uid.side_effect = RuntimeError("Database connection lost")
@@ -1591,7 +1591,7 @@ class TestWebUIStatsExceptionHandling:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                 mock_db = Mock()
                 mock_db.get_stats.return_value = {
                     "total_papers": 100,
@@ -1618,7 +1618,7 @@ class TestWebUIRunServer:
         from abstracts_explorer.web_ui import run_server
 
         with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=True):
-            with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_config:
+            with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
                 mock_cfg = Mock()
                 mock_cfg.paper_db_path = "/some/path/test.db"
                 mock_cfg.embedding_db_path = "/some/path/chroma_db"
@@ -1642,7 +1642,7 @@ class TestWebUIRunServer:
         from abstracts_explorer.web_ui import run_server, app
 
         with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=True):
-            with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_config:
+            with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
                 mock_cfg = Mock()
                 mock_cfg.paper_db_path = "/some/path/test.db"
                 mock_cfg.embedding_db_path = "/some/path/chroma_db"
@@ -1691,7 +1691,7 @@ class TestWebUIRunServer:
         from abstracts_explorer.web_ui import run_server
 
         with patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=True):
-            with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_config:
+            with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
                 mock_cfg = Mock()
                 mock_cfg.paper_db_path = "/some/path/test.db"
                 mock_cfg.embedding_db_path = "/some/path/chroma_db"
@@ -1807,7 +1807,7 @@ class TestServerInitialization:
             db.create_tables()
 
         # Mock config to use our test database
-        with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_config:
+        with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
             mock_config.return_value = Mock(database_url=f"sqlite:///{str(db_path)}", embedding_db_path="chroma_db")
 
             # Mock app.run
@@ -1833,7 +1833,7 @@ class TestServerInitialization:
             db.create_tables()
 
         # Mock config to use our test database
-        with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_config:
+        with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
             mock_config.return_value = Mock(database_url=f"sqlite:///{str(db_path)}", embedding_db_path="chroma_db")
 
             # Mock Waitress serve (debug mode now works with Waitress)
@@ -1864,7 +1864,7 @@ class TestServerInitialization:
             db.create_tables()
 
         # Mock config to use our test database
-        with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_config:
+        with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
             mock_config.return_value = Mock(database_url=f"sqlite:///{str(db_path)}", embedding_db_path="chroma_db")
 
             # Mock waitress import to fail
@@ -2004,7 +2004,7 @@ class TestServerInitialization:
     def test_compute_clusters_creates_tables_on_first_connection(self, tmp_path):
         """Test that create_tables is called when connecting to database."""
         from abstracts_explorer.web_ui.app import app
-        from abstracts_explorer.web_ui.dependencies import get_database
+        from abstracts_explorer.web_ui.request_services import get_database
         from abstracts_explorer.database import DatabaseManager
         from abstracts_explorer.plugin import LightweightPaper
 
@@ -2028,7 +2028,7 @@ class TestServerInitialization:
 
         # Now test that get_database calls create_tables
         with app.test_client():
-            with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_config:
+            with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
                 mock_config.return_value = Mock(
                     database_url=f"sqlite:///{str(db_path)}", embedding_db_path="chroma_db", collection_name="papers"
                 )
@@ -2046,9 +2046,9 @@ class TestServerInitialization:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager") as mock_get_em:
-                with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
-                    with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_config:
+            with patch("abstracts_explorer.web_ui.request_services.get_embeddings_manager") as mock_get_em:
+                with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
+                    with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
                         mock_config.return_value = Mock(embedding_model="test-model")
                         mock_get_db.return_value = Mock()
                         mock_em = Mock()
@@ -2077,7 +2077,7 @@ class TestSessionScopedRAGChat:
     def test_different_sessions_get_different_rag_instances(self):
         """Two distinct sessions must receive different RAGChat instances."""
         from abstracts_explorer.web_ui.app import app
-        from abstracts_explorer.web_ui.dependencies import (
+        from abstracts_explorer.web_ui.request_services import (
             get_rag_chat,
             _rag_chat_cache,
             _reset_rag_chat_local,
@@ -2091,10 +2091,10 @@ class TestSessionScopedRAGChat:
         mock_config.chat_model = "test"
 
         with (
-            patch("abstracts_explorer.web_ui.dependencies.RAGChat") as MockRAGChat,
-            patch("abstracts_explorer.web_ui.dependencies.get_database"),
-            patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager"),
-            patch("abstracts_explorer.web_ui.dependencies.get_config", return_value=mock_config),
+            patch("abstracts_explorer.web_ui.request_services.RAGChat") as MockRAGChat,
+            patch("abstracts_explorer.web_ui.request_services.get_database"),
+            patch("abstracts_explorer.web_ui.request_services.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.request_services.get_config", return_value=mock_config),
         ):
             MockRAGChat.side_effect = [Mock(), Mock()]
 
@@ -2121,7 +2121,7 @@ class TestSessionScopedRAGChat:
     def test_new_session_starts_with_fresh_rag_chat(self):
         """A brand-new session cookie must get a fresh RAGChat, not reused from a previous one."""
         from abstracts_explorer.web_ui.app import app
-        from abstracts_explorer.web_ui.dependencies import (
+        from abstracts_explorer.web_ui.request_services import (
             get_rag_chat,
             _rag_chat_cache,
             _reset_rag_chat_local,
@@ -2135,10 +2135,10 @@ class TestSessionScopedRAGChat:
         mock_config.chat_model = "test"
 
         with (
-            patch("abstracts_explorer.web_ui.dependencies.RAGChat") as MockRAGChat,
-            patch("abstracts_explorer.web_ui.dependencies.get_database"),
-            patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager"),
-            patch("abstracts_explorer.web_ui.dependencies.get_config", return_value=mock_config),
+            patch("abstracts_explorer.web_ui.request_services.RAGChat") as MockRAGChat,
+            patch("abstracts_explorer.web_ui.request_services.get_database"),
+            patch("abstracts_explorer.web_ui.request_services.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.request_services.get_config", return_value=mock_config),
         ):
             created_instances = []
             MockRAGChat.side_effect = lambda *a, **kw: created_instances.append(Mock()) or created_instances[-1]
@@ -2158,7 +2158,7 @@ class TestSessionScopedRAGChat:
     def test_same_session_reuses_rag_chat(self):
         """The same session should reuse the same RAGChat instance across calls."""
         from abstracts_explorer.web_ui.app import app
-        from abstracts_explorer.web_ui.dependencies import (
+        from abstracts_explorer.web_ui.request_services import (
             get_rag_chat,
             _rag_chat_cache,
             _reset_rag_chat_local,
@@ -2172,10 +2172,10 @@ class TestSessionScopedRAGChat:
         mock_config.chat_model = "test"
 
         with (
-            patch("abstracts_explorer.web_ui.dependencies.RAGChat") as MockRAGChat,
-            patch("abstracts_explorer.web_ui.dependencies.get_database"),
-            patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager"),
-            patch("abstracts_explorer.web_ui.dependencies.get_config", return_value=mock_config),
+            patch("abstracts_explorer.web_ui.request_services.RAGChat") as MockRAGChat,
+            patch("abstracts_explorer.web_ui.request_services.get_database"),
+            patch("abstracts_explorer.web_ui.request_services.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.request_services.get_config", return_value=mock_config),
         ):
             MockRAGChat.return_value = Mock()
 
@@ -2210,7 +2210,7 @@ class TestSessionScopedRAGChat:
     def test_cache_evicts_oldest_when_full(self):
         """When _rag_chat_cache exceeds _RAG_CHAT_CACHE_MAX, oldest entry is evicted."""
         from abstracts_explorer.web_ui.app import app
-        from abstracts_explorer.web_ui.dependencies import (
+        from abstracts_explorer.web_ui.request_services import (
             get_rag_chat,
             _rag_chat_cache,
             _RAG_CHAT_CACHE_MAX,
@@ -2225,10 +2225,10 @@ class TestSessionScopedRAGChat:
         mock_config.chat_model = "test"
 
         with (
-            patch("abstracts_explorer.web_ui.dependencies.RAGChat", return_value=Mock()),
-            patch("abstracts_explorer.web_ui.dependencies.get_database"),
-            patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager"),
-            patch("abstracts_explorer.web_ui.dependencies.get_config", return_value=mock_config),
+            patch("abstracts_explorer.web_ui.request_services.RAGChat", return_value=Mock()),
+            patch("abstracts_explorer.web_ui.request_services.get_database"),
+            patch("abstracts_explorer.web_ui.request_services.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.request_services.get_config", return_value=mock_config),
         ):
             # Fill the cache to the max
             for i in range(_RAG_CHAT_CACHE_MAX):
@@ -2272,10 +2272,10 @@ class TestSessionScopedRAGChat:
         mock_config.max_context_papers = 10
 
         with (
-            patch("abstracts_explorer.web_ui.dependencies.RAGChat") as MockRAGChat,
-            patch("abstracts_explorer.web_ui.dependencies.get_database"),
-            patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager"),
-            patch("abstracts_explorer.web_ui.dependencies.get_config", return_value=mock_config),
+            patch("abstracts_explorer.web_ui.request_services.RAGChat") as MockRAGChat,
+            patch("abstracts_explorer.web_ui.request_services.get_database"),
+            patch("abstracts_explorer.web_ui.request_services.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.request_services.get_config", return_value=mock_config),
         ):
             mock_rag = Mock()
             MockRAGChat.return_value = mock_rag
@@ -2348,7 +2348,7 @@ class TestSessionScopedRAGChat:
     def test_consecutive_sessions_are_isolated(self):
         """Messages in session A must not leak into session B (regression for thread-local bug)."""
         from abstracts_explorer.web_ui.app import app
-        from abstracts_explorer.web_ui.dependencies import (
+        from abstracts_explorer.web_ui.request_services import (
             get_rag_chat,
             _rag_chat_cache,
             _reset_rag_chat_local,
@@ -2367,10 +2367,10 @@ class TestSessionScopedRAGChat:
         rag_b._message_history = []
 
         with (
-            patch("abstracts_explorer.web_ui.dependencies.RAGChat"),
-            patch("abstracts_explorer.web_ui.dependencies.get_database"),
-            patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager"),
-            patch("abstracts_explorer.web_ui.dependencies.get_config", return_value=mock_config),
+            patch("abstracts_explorer.web_ui.request_services.RAGChat"),
+            patch("abstracts_explorer.web_ui.request_services.get_database"),
+            patch("abstracts_explorer.web_ui.request_services.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.request_services.get_config", return_value=mock_config),
         ):
             # Manually seed cache as if session A already had a conversation
             _rag_chat_cache["session-a"] = rag_a
@@ -2382,7 +2382,7 @@ class TestSessionScopedRAGChat:
                 flask_session["_session_id"] = "session-b"
                 flask_session.modified = True
 
-                with patch("abstracts_explorer.web_ui.dependencies.RAGChat", return_value=rag_b):
+                with patch("abstracts_explorer.web_ui.request_services.RAGChat", return_value=rag_b):
                     got_rag = get_rag_chat()
 
             assert got_rag is rag_b, "Session B must get its own RAGChat, not session A's"
@@ -2404,8 +2404,8 @@ class TestClusteringEndpoint:
         }
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
-                with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_config:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
                     mock_config.return_value = Mock(embedding_model="test-model")
                     mock_db = Mock()
                     mock_db.get_clustering_cache.return_value = cached_results
@@ -2434,8 +2434,8 @@ class TestClusteringEndpoint:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
-                with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_config:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
                     mock_config.return_value = Mock(embedding_model="test-model")
                     mock_db = Mock()
                     mock_db.get_clustering_cache.return_value = None
@@ -2461,8 +2461,8 @@ class TestClusteringEndpoint:
         }
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
-                with patch("abstracts_explorer.web_ui.dependencies.get_config") as mock_config:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
                     mock_config.return_value = Mock(embedding_model="test-model")
                     mock_db = Mock()
                     mock_db.get_clustering_cache.return_value = cached_results
@@ -2489,8 +2489,8 @@ class TestClusteringEndpoint:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager") as mock_get_em:
-                with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_embeddings_manager") as mock_get_em:
+                with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                     # Mock embeddings manager
                     mock_em = Mock()
                     mock_em.generate_embedding.return_value = [0.1] * 100
@@ -2556,8 +2556,8 @@ class TestClusteringEndpoint:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager") as mock_get_em:
-                with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_embeddings_manager") as mock_get_em:
+                with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                     # Mock embeddings manager
                     mock_em = Mock()
                     mock_em.generate_embedding.return_value = [0.1] * 100
@@ -2585,8 +2585,8 @@ class TestClusteringEndpoint:
         from abstracts_explorer.embeddings import EmbeddingsError
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_embeddings_manager") as mock_get_em:
-                with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_embeddings_manager") as mock_get_em:
+                with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                     mock_em = Mock()
                     mock_db = Mock()
 
@@ -2609,7 +2609,8 @@ class TestClusteringEndpoint:
 
         with app.test_client() as client:
             with patch(
-                "abstracts_explorer.web_ui.dependencies.get_embeddings_manager", side_effect=Exception("Test error")
+                "abstracts_explorer.web_ui.request_services.get_embeddings_manager",
+                side_effect=Exception("Test error"),
             ):
                 response = client.post("/api/clusters/search", json={"query": "Test query", "distance": 100})
 
@@ -2722,7 +2723,7 @@ class TestDataDonationEndpoint:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                 mock_db = Mock()
                 # Simulate engine creation failure
                 mock_db.engine.side_effect = Exception("Database connection error")
@@ -2974,7 +2975,7 @@ class TestPaperCardDisplayFieldsUnit:
         client, app_module = app_client
         mock_db = self._make_mock_db()
 
-        with patch.object(web_deps, "get_database", return_value=mock_db):
+        with patch.object(web_services, "get_database", return_value=mock_db):
             response = client.post(
                 "/api/search",
                 json={"query": "attention", "use_embeddings": False, "limit": 5},
@@ -3001,7 +3002,7 @@ class TestPaperCardDisplayFieldsUnit:
         client, app_module = app_client
         mock_db = self._make_mock_db()
 
-        with patch.object(web_deps, "get_database", return_value=mock_db):
+        with patch.object(web_services, "get_database", return_value=mock_db):
             response = client.post(
                 "/api/search",
                 json={"query": "attention", "use_embeddings": False, "limit": 5},
@@ -3032,7 +3033,7 @@ class TestPaperCardDisplayFieldsUnit:
         ]
         mock_db = self._make_mock_db(papers=papers_with_authors)
 
-        with patch.object(web_deps, "get_database", return_value=mock_db):
+        with patch.object(web_services, "get_database", return_value=mock_db):
             response = client.post(
                 "/api/search",
                 json={"query": "attention", "use_embeddings": False, "limit": 5},
@@ -3065,7 +3066,7 @@ class TestPaperCardDisplayFieldsUnit:
             "url": "https://papers.nips.cc/paper/detail",
         }
 
-        with patch.object(web_deps, "get_database") as mock_get_db:
+        with patch.object(web_services, "get_database") as mock_get_db:
             mock_db = Mock()
             mock_db.get_paper_by_uid.return_value = expected_paper
             mock_get_db.return_value = mock_db
@@ -3095,7 +3096,7 @@ class TestPaperCardDisplayFieldsUnit:
             "year": 2025,
         }
 
-        with patch.object(web_deps, "get_database") as mock_get_db:
+        with patch.object(web_services, "get_database") as mock_get_db:
             mock_db = Mock()
             mock_db.get_paper_by_uid.return_value = expected_paper
             mock_get_db.return_value = mock_db
@@ -3139,7 +3140,7 @@ class TestPaperCardDisplayFieldsUnit:
 
         paper_map = {p["uid"]: p for p in batch_papers}
 
-        with patch.object(web_deps, "get_database") as mock_get_db:
+        with patch.object(web_services, "get_database") as mock_get_db:
             mock_db = Mock()
             mock_db.get_paper_by_uid.side_effect = lambda uid: paper_map.get(uid)
             mock_get_db.return_value = mock_db
@@ -3169,7 +3170,7 @@ class TestPapersPerYearEndpoint:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                 mock_db = Mock()
                 mock_db.get_years.return_value = [2023, 2024]
                 mock_db.get_stats.side_effect = [
@@ -3192,7 +3193,7 @@ class TestPapersPerYearEndpoint:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                 mock_db = Mock()
                 mock_db.get_years.return_value = [2024, 2023]
                 mock_db.get_stats.side_effect = [
@@ -3213,7 +3214,7 @@ class TestPapersPerYearEndpoint:
         from abstracts_explorer.web_ui.app import app
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                 mock_get_db.side_effect = Exception("DB error")
 
                 response = client.get("/api/papers-per-year")
@@ -3327,7 +3328,7 @@ class TestExportInterestingPapersPriorities:
         }
 
         with app.test_client() as client:
-            with patch("abstracts_explorer.web_ui.dependencies.get_database") as mock_get_db:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                 with patch("abstracts_explorer.web_ui.app.export_papers_to_zip") as mock_export:
                     mock_db = Mock()
                     mock_db.get_paper_by_uid.return_value = paper
@@ -3401,9 +3402,9 @@ class TestWebInputHardeningAndRateLimits:
 
         with patch("abstracts_explorer.web_ui.rate_limit.get_config", return_value=mock_config):
             with patch.object(
-                web_deps, "get_embeddings_manager", return_value=Mock(generate_embedding=Mock(return_value=[]))
+                web_services, "get_embeddings_manager", return_value=Mock(generate_embedding=Mock(return_value=[]))
             ):
-                with patch.object(web_deps, "get_database", return_value=mock_db):
+                with patch.object(web_services, "get_database", return_value=mock_db):
                     first = client.post("/api/clusters/search", json={"query": "test"})
                     second = client.post("/api/clusters/search", json={"query": "test"})
                     third = client.post("/api/clusters/search", json={"query": "test"})
@@ -3421,15 +3422,15 @@ class TestWebInputHardeningAndRateLimits:
 
         with patch("abstracts_explorer.web_ui.rate_limit.get_config", return_value=mock_config):
             with patch.object(
-                web_deps, "get_embeddings_manager", return_value=Mock(generate_embedding=Mock(return_value=[]))
+                web_services, "get_embeddings_manager", return_value=Mock(generate_embedding=Mock(return_value=[]))
             ):
-                with patch.object(web_deps, "get_database", return_value=mock_db):
+                with patch.object(web_services, "get_database", return_value=mock_db):
                     responses = [client.post("/api/clusters/search", json={"query": "test"}) for _ in range(5)]
 
         assert all(response.status_code == 200 for response in responses)
 
     def test_conference_route_database_error_returns_503(self, client):
-        with patch.object(web_deps, "get_database", side_effect=DatabaseError("db down")):
+        with patch.object(web_services, "get_database", side_effect=DatabaseError("db down")):
             response = client.get("/neurips")
 
         assert response.status_code == 503
@@ -3442,7 +3443,7 @@ class TestWebInputHardeningAndRateLimits:
             "error": {"message": "Conference 'robots.txt' not found.", "available_conferences": []},
             "reason": "not_found",
         }
-        with patch.object(web_deps, "get_database", return_value=mock_db):
+        with patch.object(web_services, "get_database", return_value=mock_db):
             response = client.get("/robots.txt")
 
         assert response.status_code == 404

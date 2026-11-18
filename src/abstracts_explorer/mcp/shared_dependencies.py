@@ -1,7 +1,7 @@
 """
 Shared, patchable dependencies for MCP tools.
 
-Tool modules access these through ``deps.X`` so tests can patch a single
+Tool modules access these through ``shared_dependencies.X`` so tests can patch a single
 module instead of every tool module.
 """
 

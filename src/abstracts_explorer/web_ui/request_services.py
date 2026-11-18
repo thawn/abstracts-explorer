@@ -1,5 +1,5 @@
 """
-Shared request-scoped dependencies for the web UI.
+Shared request-scoped services for the web UI.
 
 Database connections, the embeddings manager, and per-session RAG chat
 instances live here so routes and tests use one set of helpers.

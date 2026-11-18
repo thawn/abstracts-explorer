@@ -16,7 +16,7 @@ from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from abstracts_explorer.config import get_config
-from abstracts_explorer.rag.deps import RAGDeps
+from abstracts_explorer.rag.tool_context import RAGToolContext
 from abstracts_explorer.rag.errors import RAGError
 from abstracts_explorer.rag.tools import (
     _tool_analyze_topic_relevance,
@@ -180,13 +180,13 @@ class AgentMixin:
 
         return instructions
 
-    def _build_agent(self) -> Agent[RAGDeps, str]:
+    def _build_agent(self) -> Agent[RAGToolContext, str]:
         """
         Build the Pydantic AI agent with tools and model configuration.
 
         Returns
         -------
-        Agent[RAGDeps, str]
+        Agent[RAGToolContext, str]
             Configured Pydantic AI agent.
         """
         config = get_config()
@@ -215,7 +215,7 @@ class AgentMixin:
         ai_model = OpenAIChatModel(self.model, provider=provider)
 
         # Build tool list
-        tools: List[Tool[RAGDeps]] = [
+        tools: List[Tool[RAGToolContext]] = [
             Tool(_tool_search_papers, takes_ctx=True, name="search_papers"),
             Tool(_tool_get_paper_details, takes_ctx=True, name="get_paper_details"),
         ]
@@ -243,7 +243,7 @@ class AgentMixin:
         assert executor is not None
         return Agent(
             ai_model,
-            deps_type=RAGDeps,
+            deps_type=RAGToolContext,
             tools=tools,
             capabilities=[UseThreadExecutor(executor)],
         )
@@ -333,7 +333,7 @@ class AgentMixin:
                 limit = self.max_context_papers
 
             # Fresh deps for each query to capture tool results
-            deps = RAGDeps(
+            deps = RAGToolContext(
                 conferences=conferences or [],
                 years=years or [],
                 limit=limit,

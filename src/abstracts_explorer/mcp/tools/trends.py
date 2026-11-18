@@ -7,7 +7,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from abstracts_explorer.embeddings import QueryEmbedding
-from abstracts_explorer.mcp import deps, resources
+from abstracts_explorer.mcp import resources, shared_dependencies
 from abstracts_explorer.mcp.server import mcp
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ def get_topic_evolution(
     Analyze how topics have evolved over the years for one or more conferences.
 
     For each conference and year in the given range, this tool uses
-    ``deps.EmbeddingsManager.query_ids_within_distance()`` to count how many
+    ``shared_dependencies.EmbeddingsManager.query_ids_within_distance()`` to count how many
     papers are semantically close to the topic keywords.  It also
     computes the relative percentage of matching papers with respect to
     the total number of papers for that conference and year.
@@ -69,7 +69,7 @@ def get_topic_evolution(
                 },
                 indent=2,
             )
-        config = deps.get_config()
+        config = shared_dependencies.get_config()
         collection_name = collection_name or config.collection_name
 
         with resources._get_mcp_resources(collection_name) as (em, db):
