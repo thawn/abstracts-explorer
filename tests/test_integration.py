@@ -9,6 +9,7 @@ used by the current plugins.
 import pytest
 
 from abstracts_explorer import DatabaseManager
+from abstracts_explorer.embeddings import QueryEmbedding
 from abstracts_explorer.plugin import LightweightPaper, convert_to_lightweight_schema
 from tests.conftest import set_test_db, set_test_embedding_db
 from tests.helpers import raw_query, requires_lm_studio
@@ -562,7 +563,7 @@ class TestIntegration:
             assert stats["count"] == 7
 
             # Step 3: Test semantic search - Find papers about "graph learning"
-            graph_results = em.search_similar("graph learning representation", limit=3)
+            graph_results = em.search_similar(QueryEmbedding("graph learning representation", em), limit=3)
 
             assert len(graph_results) <= 3
             assert len(graph_results) > 0
@@ -578,7 +579,7 @@ class TestIntegration:
             assert all(isinstance(d, (int, float)) for d in distances)
 
             # Step 4: Test search with different query
-            reasoning_results = em.search_similar("reasoning and language models", limit=2)
+            reasoning_results = em.search_similar(QueryEmbedding("reasoning and language models", em), limit=2)
 
             assert len(reasoning_results) <= 2
             assert len(reasoning_results) > 0
@@ -589,7 +590,7 @@ class TestIntegration:
                 first_session = results[0]["session"]
                 session_ids = db.resolve_paper_uids(sessions=[first_session])
 
-            session_results = em.search_similar("machine learning", limit=5, ids=session_ids)
+            session_results = em.search_similar(QueryEmbedding("machine learning", em), limit=5, ids=session_ids)
             assert len(session_results) > 0
 
             # Step 6: Verify documents are content hashes and metadata is absent
@@ -609,7 +610,7 @@ class TestIntegration:
             assert stats["count"] == 7
 
             # Can still perform searches
-            results = em.search_similar("neural networks", limit=3)
+            results = em.search_similar(QueryEmbedding("neural networks", em), limit=3)
             assert len(results) > 0
 
     @requires_lm_studio
