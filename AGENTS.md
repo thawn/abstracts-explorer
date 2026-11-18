@@ -106,3 +106,7 @@ Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
 - Branches: `main` (releases), `develop` (integration), feature branches `author/brief-description` from `develop`, `hotfix-*` from `main` (see `docs/branching_strategy.md`).
 - Clear descriptive commit messages; only commit when explicitly asked, otherwise suggest a commit message.
 - Do not commit `*.db`, `chroma_db/`, `_build/`, `.env`, `__pycache__/`. `uv.lock` and `package-lock.json` are tracked.
+
+## Alpha status
+
+- no backwards compatibility needed yet, but the public API is expected to stabilize in the future.
