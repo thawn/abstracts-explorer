@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 _SCHEMA_READY_URLS: set[str] = set()
 _SCHEMA_LOCK = threading.Lock()
+_SCHEMA_CREATE_LOCK = threading.Lock()
 _METADATA_CACHE = MetadataCache()
 
 
@@ -194,7 +195,6 @@ class SessionMixin:
 
                 # Create a session
                 self._session = self.SessionLocal()
-                self._schema_ready = False
 
                 logger.debug(f"Connected to database: {self._mask_url(self.database_url)}")
             except Exception as e:
@@ -269,9 +269,10 @@ class SessionMixin:
         This method is idempotent - it can be called multiple times without error.
         Tables are only created if they don't already exist.
 
-        For PostgreSQL, successful schema verification is cached for the lifetime of
-        the process and keyed by database URL.  Subsequent calls from new
-        ``DatabaseManager`` instances skip the ``create_all`` reflection queries.
+        For all supported backends, successful schema verification is cached for
+        the lifetime of the process and keyed by database URL.  Subsequent calls
+        from new ``DatabaseManager`` instances skip the ``create_all`` reflection
+        queries.
 
         Parameters
         ----------
@@ -289,44 +290,58 @@ class SessionMixin:
                 self.connect()
             assert self.engine is not None
 
-            if not force and self._schema_cache_applies():
-                with _SCHEMA_LOCK:
-                    if self.database_url in _SCHEMA_READY_URLS:
-                        self._schema_ready = True
-                        return
+            with _SCHEMA_CREATE_LOCK:
+                if not force and self._schema_cache_applies():
+                    with _SCHEMA_LOCK:
+                        if self.database_url in _SCHEMA_READY_URLS:
+                            self._schema_ready = True
+                            return
 
-            try:
-                # Create tables only if they don't exist (checkfirst=True is the default)
-                # This makes the operation idempotent
-                Base.metadata.create_all(bind=self.engine, checkfirst=True)
-                self._mark_schema_ready()
-                logger.debug("Database tables created successfully")
-            except (OperationalError, ProgrammingError, IntegrityError) as e:
-                # These exceptions can occur when tables already exist, especially with:
-                # - Race conditions in concurrent environments
-                # - PostgreSQL's pg_type_typname_nsp_index constraint
-                # - SQLite "table already exists" errors
-                if _is_duplicate_schema_error(e, self.engine.dialect.name):
-                    # Tables already exist - this is fine, just log it
+                try:
+                    # Create tables only if they don't exist (checkfirst=True is the default)
+                    # This makes the operation idempotent
+                    Base.metadata.create_all(bind=self.engine, checkfirst=True)
                     self._mark_schema_ready()
-                    logger.debug(f"Tables already exist (this is normal): {str(e)}")
-                    return
-                # For other database errors, re-raise with context
-                raise DatabaseError(f"Failed to create tables: {str(e)}") from e
-            except Exception as e:
-                # Catch any other unexpected errors
-                raise DatabaseError(f"Failed to create tables: {str(e)}") from e
+                    logger.debug("Database tables created successfully")
+                except (OperationalError, ProgrammingError, IntegrityError) as e:
+                    # These exceptions can occur when tables already exist, especially with:
+                    # - Race conditions in concurrent environments
+                    # - PostgreSQL's pg_type_typname_nsp_index constraint
+                    # - SQLite "table already exists" errors
+                    if _is_duplicate_schema_error(e, self.engine.dialect.name):
+                        # Tables already exist - this is fine, just log it
+                        self._mark_schema_ready()
+                        logger.debug(f"Tables already exist (this is normal): {str(e)}")
+                        return
+                    # For other database errors, re-raise with context
+                    raise DatabaseError(f"Failed to create tables: {str(e)}") from e
+                except Exception as e:
+                    # Catch any other unexpected errors
+                    raise DatabaseError(f"Failed to create tables: {str(e)}") from e
 
     def _schema_cache_applies(self) -> bool:
         """
         Return whether process-level schema caching applies to this backend.
 
+        Schema verification is cached for every supported backend.  Tests and
+        migrations can clear the cache with :func:`reset_schema_cache`.
+
         Returns
         -------
         bool
-            ``True`` for PostgreSQL, ``False`` otherwise.
+            ``True`` when an engine is connected.
         """
-        return self.engine is not None and self.engine.dialect.name == "postgresql"
+        return self.engine is not None
+
+    def mark_schema_ready(self) -> None:
+        """
+        Mark the schema as already verified for this manager.
+
+        This is used when another manager has already created the tables for
+        the same database URL, avoiding redundant ``create_all`` reflection
+        queries on every request.
+        """
+        self._schema_ready = True
 
     def _mark_schema_ready(self) -> None:
         """Mark the current schema as ready and cache the URL when applicable."""

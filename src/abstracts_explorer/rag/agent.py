@@ -59,6 +59,29 @@ def _get_tool_executor(max_workers: int) -> ThreadPoolExecutor:
         return _TOOL_EXECUTOR
 
 
+def shutdown_tool_executor(wait: bool = True) -> None:
+    """
+    Shut down the shared RAG tool executor.
+
+    A subsequent ``RAGChat`` creates a fresh executor on demand.
+
+    Parameters
+    ----------
+    wait : bool, optional
+        Wait for running tool tasks to complete before returning (default:
+        ``True``).  Pending tasks are cancelled.
+    """
+    global _TOOL_EXECUTOR, _TOOL_EXECUTOR_WORKERS
+
+    with _TOOL_EXECUTOR_LOCK:
+        executor = _TOOL_EXECUTOR
+        _TOOL_EXECUTOR = None
+        _TOOL_EXECUTOR_WORKERS = 0
+
+    if executor is not None:
+        executor.shutdown(wait=wait, cancel_futures=True)
+
+
 class AgentMixin:
     """Build the Pydantic-AI agent and run queries."""
 

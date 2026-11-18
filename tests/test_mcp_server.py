@@ -156,6 +156,69 @@ class TestMCPResources:
         close_mcp_resources()
         mock_db.close.assert_called_once()
 
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    def test_close_defers_resources_owned_by_live_thread(self, mock_db_class):
+        """Default cleanup must not close resources used by another live thread."""
+        from abstracts_explorer.mcp_server import _get_mcp_resources, close_mcp_resources
+
+        first_db = Mock()
+        second_db = Mock()
+        mock_db_class.side_effect = [first_db, second_db]
+        started = threading.Event()
+        release = threading.Event()
+        created = {}
+
+        def worker() -> None:
+            with _get_mcp_resources(with_embeddings=False) as (_, db):
+                created["first"] = db
+            started.set()
+            release.wait(timeout=5)
+            with _get_mcp_resources(with_embeddings=False) as (_, db):
+                created["second"] = db
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        try:
+            assert started.wait(timeout=5)
+            close_mcp_resources()
+            first_db.close.assert_not_called()
+        finally:
+            release.set()
+            thread.join(timeout=5)
+
+        assert not thread.is_alive()
+        first_db.close.assert_called_once()
+        assert created["second"] is second_db
+        close_mcp_resources(force=True)
+        second_db.close.assert_called_once()
+
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    def test_force_close_closes_other_thread_resources(self, mock_db_class):
+        """Forced cleanup closes resources even when the owner thread is alive."""
+        from abstracts_explorer.mcp_server import _get_mcp_resources, close_mcp_resources
+
+        db = Mock()
+        mock_db_class.return_value = db
+        started = threading.Event()
+        release = threading.Event()
+
+        def worker() -> None:
+            with _get_mcp_resources(with_embeddings=False):
+                started.set()
+                release.wait(timeout=5)
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        try:
+            assert started.wait(timeout=5)
+            close_mcp_resources(force=True)
+            db.close.assert_called_once()
+        finally:
+            release.set()
+            thread.join(timeout=5)
+
+        assert not thread.is_alive()
+
     @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
     @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")

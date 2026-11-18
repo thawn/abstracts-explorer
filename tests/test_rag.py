@@ -2172,3 +2172,20 @@ def test_extract_papers_from_interesting_tools():
     papers = RAGChat._extract_papers(tool_results)
 
     assert [paper["uid"] for paper in papers] == ["1", "2"]
+
+
+def test_shutdown_tool_executor_resets_shared_executor():
+    """The shared RAG tool executor can be shut down and recreated."""
+    import abstracts_explorer.rag.agent as agent_module
+    from abstracts_explorer.rag import shutdown_tool_executor
+
+    shutdown_tool_executor()
+    try:
+        executor = agent_module._get_tool_executor(2)
+        shutdown_tool_executor()
+        assert agent_module._TOOL_EXECUTOR is None
+
+        replacement = agent_module._get_tool_executor(2)
+        assert replacement is not executor
+    finally:
+        shutdown_tool_executor()

@@ -18,8 +18,10 @@ from unittest.mock import patch, Mock
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from abstracts_explorer.database import DatabaseManager
+from abstracts_explorer.mcp import close_mcp_resources
+from abstracts_explorer.rag import shutdown_tool_executor
 from tests.conftest import set_test_db
-from tests.helpers import raw_query, requires_lm_studio, find_free_port
+from tests.helpers import raw_query, requires_lm_studio, find_free_port, stop_test_server
 
 # Helper functions imported from test_helpers:
 # - check_lm_studio_available(): Check if LM Studio is running
@@ -207,7 +209,9 @@ def web_server(test_database, tmp_path_factory):
         yield (host, port, base_url)
 
         # Shutdown server gracefully
-        server.shutdown()
+        stop_test_server(server, server_thread)
+        shutdown_tool_executor()
+        close_mcp_resources(force=True)
 
     finally:
         # Ensure mock is always stopped

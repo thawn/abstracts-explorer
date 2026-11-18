@@ -266,6 +266,31 @@ def find_free_port():
     return port
 
 
+def stop_test_server(server: Any, server_thread: threading.Thread, timeout: float = 30.0) -> None:
+    """
+    Stop a WSGI test server and wait for in-flight requests to finish.
+
+    Parameters
+    ----------
+    server : Any
+        WSGI server returned by ``werkzeug.serving.make_server``.
+    server_thread : threading.Thread
+        Thread running ``server.serve_forever()``.
+    timeout : float, optional
+        Maximum seconds to wait for the serve loop to stop (default: 30).
+
+    Raises
+    ------
+    RuntimeError
+        If the server thread does not stop within *timeout*.
+    """
+    server.shutdown()
+    server_thread.join(timeout=timeout)
+    if server_thread.is_alive():
+        raise RuntimeError(f"Test server did not stop within {timeout:.0f}s")
+    server.server_close()
+
+
 def requires_lm_studio(func):
     """
     Mark a test as slow and requiring a reachable OpenAI-compatible API backend.
