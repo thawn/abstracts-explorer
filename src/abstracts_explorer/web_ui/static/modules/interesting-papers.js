@@ -5,6 +5,7 @@
  */
 
 import { API_BASE } from './utils/constants.js';
+import { parseJsonResponse } from './utils/api-utils.js';
 import { escapeAttr, escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
 import { renderEmptyState } from './utils/ui-utils.js';
 import { naturalSortPosterPosition } from './utils/sort-utils.js';
@@ -137,7 +138,7 @@ export async function loadInterestingPapers() {
             body: JSON.stringify({ paper_ids: paperIds })
         });
 
-        const data = await response.json();
+        const data = await parseJsonResponse(response);
 
         if (data.error) {
             listDiv.innerHTML = `
@@ -153,7 +154,7 @@ export async function loadInterestingPapers() {
         console.error('Error loading interesting papers:', error);
         listDiv.innerHTML = `
             <div class="bg-red-50 border border-red-200 rounded-lg p-6">
-                <p class="text-red-700">Error loading papers. Please try again.</p>
+                <p class="text-red-700">${escapeHtml(error.message || 'Could not load papers. Please try again.')}</p>
             </div>
         `;
     }
@@ -418,8 +419,7 @@ export async function saveInterestingPapersAsMarkdown(event) {
         });
 
         if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to generate export');
+            await parseJsonResponse(response);
         }
 
         const blob = await response.blob();
@@ -727,11 +727,7 @@ export async function donateInterestingPapersData() {
             })
         });
 
-        const result = await response.json();
-
-        if (!response.ok) {
-            throw new Error(result.error || 'Failed to donate data');
-        }
+        const result = await parseJsonResponse(response);
 
         // Mark data as donated
         markDataAsDonated();

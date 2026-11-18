@@ -11,6 +11,7 @@ This module contains unit tests for the web UI application including:
 
 import json
 import sys
+import httpx2
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
@@ -1238,7 +1239,7 @@ class TestWebUIErrorHandlingDetails:
             assert response.status_code == 500
             data = response.get_json()
             assert "error" in data
-            assert "Reset failed" in data["error"]
+            assert "Something went wrong" in data["error"]
 
     def test_stats_endpoint_exception_handling(self):
         """Test stats endpoint handles exceptions (lines 304-305)."""
@@ -1255,7 +1256,7 @@ class TestWebUIErrorHandlingDetails:
                 assert response.status_code == 500
                 data = response.get_json()
                 assert "error" in data
-                assert "Database error" in data["error"]
+                assert "Something went wrong" in data["error"]
 
 
 class TestWebUIGetPaperDetails:
@@ -1365,6 +1366,24 @@ class TestWebUISearchExceptionHandling:
                 assert response.status_code == 500
                 data = response.get_json()
                 assert "error" in data
+
+    def test_search_timeout_returns_friendly_504(self):
+        """A semantic search backend timeout returns a friendly gateway timeout."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
+                mock_db = Mock()
+                mock_db.search.side_effect = httpx2.ReadTimeout("embedding backend timed out")
+                mock_get_db.return_value = mock_db
+
+                response = client.post(
+                    "/api/search",
+                    json={"query": "test", "use_embeddings": True, "limit": 10},
+                )
+
+                assert response.status_code == 504
+                assert "took too long" in response.get_json()["error"]
 
 
 class TestWebUIDatabaseNotFound:
@@ -1542,7 +1561,30 @@ class TestWebUIChatExceptionLines:
                     assert response.status_code == 500
                     data = response.get_json()
                     assert "error" in data
-                    assert "RAG system error" in data["error"]
+                    assert "Something went wrong" in data["error"]
+
+    def test_chat_timeout_returns_friendly_504(self):
+        """A RAG backend timeout returns a friendly gateway timeout."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.request_services.get_rag_chat") as mock_get_rag:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_get_config:
+                    mock_config = Mock()
+                    mock_config.max_context_papers = 3
+                    mock_get_config.return_value = mock_config
+
+                    mock_rag = Mock()
+                    mock_rag.query.side_effect = httpx2.ReadTimeout("backend timed out")
+                    mock_get_rag.return_value = mock_rag
+
+                    response = client.post(
+                        "/api/chat",
+                        json={"message": "test"},
+                    )
+
+                    assert response.status_code == 504
+                    assert "took too long" in response.get_json()["error"]
 
 
 class TestWebUIGetPaperException:

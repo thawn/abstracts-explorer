@@ -284,6 +284,20 @@ describe('Utility Modules', () => {
                 );
             });
 
+            it('should report a helpful error for an HTML unavailable response', async () => {
+                const response = {
+                    ok: false,
+                    status: 503,
+                    json: async () => {
+                        throw new SyntaxError('Unexpected token <');
+                    }
+                };
+
+                await expect(parseJsonResponse(response)).rejects.toThrow(
+                    'The server is temporarily unavailable'
+                );
+            });
+
             it('should surface the server error for a non-OK JSON response', async () => {
                 const response = {
                     ok: false,

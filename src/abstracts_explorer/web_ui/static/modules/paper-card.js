@@ -6,6 +6,7 @@
  */
 
 import { API_BASE } from './utils/constants.js';
+import { parseJsonResponse } from './utils/api-utils.js';
 import { escapeAttr, escapeHtml, getSelectedConference, getSelectedYears, sanitizeUrl } from './utils/dom-utils.js';
 import { showError } from './utils/ui-utils.js';
 import { renderMarkdownWithLatex, renderInlineMarkdownWithLatex } from './utils/markdown-utils.js';
@@ -169,7 +170,7 @@ export function formatPaperCard(paper, options = {}) {
 export async function showPaperDetails(paperId) {
     try {
         const response = await fetch(`${API_BASE}/api/paper/${paperId}`);
-        const paper = await response.json();
+        const paper = await parseJsonResponse(response);
 
         if (paper.error) {
             showError(paper.error);
@@ -243,7 +244,7 @@ export async function showPaperDetails(paperId) {
         document.body.appendChild(modal);
     } catch (error) {
         console.error('Error loading paper details:', error);
-        showError('Error loading paper details');
+        showError(error.message || 'Could not load paper details. Please try again.');
     }
 }
 
@@ -315,7 +316,7 @@ export async function updateInterestingPapersCount() {
             body: JSON.stringify({ paper_ids: paperIds })
         });
 
-        const data = await response.json();
+        const data = await parseJsonResponse(response);
 
         if (data.error || !data.papers) {
             countElement.textContent = paperIds.length;

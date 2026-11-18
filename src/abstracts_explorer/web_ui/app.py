@@ -775,7 +775,7 @@ def search_custom_cluster():
 
 
 @app.route("/api/topic-evolution", methods=["POST"])
-@api_error_handler(error_message="Failed to compute topic evolution")
+@api_error_handler(error_message="Could not compute topic evolution. Please try again.")
 def topic_evolution():
     """
     Get topic evolution data for a given topic across years.
@@ -825,7 +825,7 @@ def topic_evolution():
 
 
 @app.route("/api/papers-per-year")
-@api_error_handler(error_message="Failed to load papers per year data")
+@api_error_handler(error_message="Could not load paper counts. Please try again.")
 def papers_per_year():
     """
     Get paper counts per year for a conference.

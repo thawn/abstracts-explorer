@@ -191,7 +191,7 @@ export async function sendChatMessage() {
         document.getElementById(loadingId)?.remove();
 
         if (data.error) {
-            addChatMessage(`Error: ${data.error}`, 'assistant');
+            addChatMessage(data.error, 'assistant');
             return;
         }
 
@@ -232,8 +232,8 @@ export async function sendChatMessage() {
         console.error('Chat error:', error);
         document.getElementById(loadingId)?.remove();
         const message = error && error.message
-            ? `Sorry, an error occurred: ${error.message}`
-            : 'Sorry, an error occurred. Please try again.';
+            ? `Sorry, I couldn't complete that request. ${error.message}`
+            : "Sorry, I couldn't complete that request. Please try again.";
         addChatMessage(message, 'assistant');
     }
 }
@@ -712,11 +712,7 @@ export async function handleChatFeedback(messageId, rating) {
             body: JSON.stringify({ rating, transcript })
         });
 
-        const result = await response.json();
-
-        if (!response.ok) {
-            throw new Error(result.error || 'Failed to send feedback');
-        }
+        const result = await parseJsonResponse(response);
 
         // Show a brief "thank you" in place of the buttons
         if (messageDiv) {
@@ -727,12 +723,16 @@ export async function handleChatFeedback(messageId, rating) {
         }
     } catch (error) {
         console.error('Error sending chat feedback:', error);
-        // Re-enable buttons on error
+        // Re-enable buttons on error and show a short failure message.
         if (messageDiv) {
             const feedbackDiv = messageDiv.querySelector('.chat-feedback-buttons');
             if (feedbackDiv) {
                 const buttons = feedbackDiv.querySelectorAll('.chat-feedback-btn');
                 buttons.forEach(btn => { btn.disabled = false; });
+                const errorSpan = document.createElement('span');
+                errorSpan.className = 'text-s text-red-500';
+                errorSpan.textContent = error.message || 'Could not send feedback. Please try again.';
+                feedbackDiv.appendChild(errorSpan);
             }
         }
     }

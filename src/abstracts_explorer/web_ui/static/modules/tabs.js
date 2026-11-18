@@ -5,7 +5,8 @@
  */
 
 import { API_BASE } from './utils/constants.js';
-import { getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
+import { parseJsonResponse } from './utils/api-utils.js';
+import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
 import { setCurrentTab, getCurrentTab } from './state.js';
 import { getInterestingPapersSortOrder } from './state.js';
 import { areClustersLoaded } from './clustering.js';
@@ -72,7 +73,7 @@ export async function loadStats() {
         if (selectedConference) statsParams.append('conference', selectedConference);
 
         const response = await fetch(`${API_BASE}/api/stats?${statsParams.toString()}`);
-        const data = await response.json();
+        const data = await parseJsonResponse(response);
 
         if (data.error) {
             const errorBox = document.createElement('div');
@@ -112,7 +113,7 @@ export async function loadStats() {
     } catch (error) {
         console.error('Error loading stats:', error);
         document.getElementById('stats').innerHTML = `
-            <div class="text-sm text-red-200">Error loading stats</div>
+            <div class="text-sm text-red-200">${escapeHtml(error.message || 'Could not load stats. Please try again.')}</div>
         `;
     }
 }
@@ -124,12 +125,7 @@ export async function loadStats() {
 export async function checkEmbeddingModelCompatibility() {
     try {
         const response = await fetch(`${API_BASE}/api/embedding-model-check`);
-        if (!response.ok) {
-            console.error('Failed to check embedding model compatibility');
-            return;
-        }
-        
-        const data = await response.json();
+        const data = await parseJsonResponse(response);
         
         if (!data.compatible && data.warning) {
             const banner = document.getElementById('embedding-warning-banner');

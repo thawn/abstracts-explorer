@@ -2,6 +2,7 @@
 
 import logging
 
+import httpx2
 import pytest
 from flask import Flask, jsonify, request
 
@@ -37,6 +38,16 @@ def app():
     @api_error_handler
     def boom():
         raise RuntimeError("kaboom")
+
+    @test_app.route("/timeout")
+    @api_error_handler
+    def timeout():
+        raise httpx2.ReadTimeout("backend timed out")
+
+    @test_app.route("/unavailable")
+    @api_error_handler
+    def unavailable():
+        raise httpx2.ConnectError("connection refused")
 
     @test_app.route("/hidden")
     @api_error_handler(error_message="Something failed")
@@ -142,12 +153,36 @@ class TestApiErrorHandler:
     def test_unexpected_exception_returns_500(self, client):
         response = client.get("/boom")
         assert response.status_code == 500
-        assert response.get_json() == {"error": "kaboom"}
+        assert response.get_json() == {
+            "error": "Something went wrong while processing your request. Please try again."
+        }
+
+    def test_timeout_returns_friendly_504(self, client):
+        response = client.get("/timeout")
+        assert response.status_code == 504
+        assert "took too long" in response.get_json()["error"]
+
+    def test_connection_error_returns_friendly_503(self, client):
+        response = client.get("/unavailable")
+        assert response.status_code == 503
+        assert "temporarily unavailable" in response.get_json()["error"]
+
+    def test_unexpected_exception_hides_raw_details(self, client):
+        response = client.get("/boom")
+        assert "kaboom" not in response.get_json()["error"]
 
     def test_custom_error_message_hides_details(self, client):
         response = client.get("/hidden")
         assert response.status_code == 500
         assert response.get_json() == {"error": "Something failed"}
+
+    def test_timeout_is_logged_as_error(self, client, caplog):
+        with caplog.at_level(logging.ERROR):
+            client.get("/timeout")
+        assert any(
+            record.levelno == logging.ERROR and "backend timed out" in record.getMessage()
+            for record in caplog.records
+        )
 
     def test_unexpected_exception_is_logged(self, client, caplog):
         with caplog.at_level(logging.ERROR):

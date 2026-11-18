@@ -108,7 +108,22 @@ describe('Search Module', () => {
             await searchPapers();
 
             const results = document.getElementById('search-results');
-            expect(results.innerHTML).toContain('An error occurred');
+            expect(results.innerHTML).toContain('Network error');
+        });
+
+        it('should show a friendly message for a gateway timeout', async () => {
+            global.fetch.mockResolvedValueOnce({
+                ok: false,
+                status: 504,
+                json: async () => {
+                    throw new SyntaxError('Unexpected token <');
+                }
+            });
+
+            await searchPapers();
+
+            const results = document.getElementById('search-results');
+            expect(results.innerHTML).toContain('The server took too long to respond');
         });
 
         it('should set current search term', async () => {

@@ -7,6 +7,7 @@
 
 import { API_BASE } from './utils/constants.js';
 import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
+import { parseJsonResponse } from './utils/api-utils.js';
 import { showError, renderEmptyState } from './utils/ui-utils.js';
 import { setCurrentSearchTerm } from './state.js';
 import { formatPaperCard } from './paper-card.js';
@@ -86,12 +87,12 @@ export async function searchPapers() {
 
         if (requestId !== latestSearchRequest) return;
 
-        const data = await response.json();
+        const data = await parseJsonResponse(response);
 
         if (requestId !== latestSearchRequest) return;
 
-        if (!response.ok || data.error) {
-            showError(data.error || `Search failed (HTTP ${response.status})`);
+        if (data.error) {
+            showError(data.error);
             return;
         }
 
@@ -99,7 +100,7 @@ export async function searchPapers() {
     } catch (error) {
         if (requestId !== latestSearchRequest) return;
         console.error('Search error:', error);
-        showError('An error occurred while searching. Please try again.');
+        showError(error && error.message ? error.message : 'We could not complete the search. Please try again.');
     }
 }
 

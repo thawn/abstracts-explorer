@@ -4,6 +4,12 @@
  * This module provides utility functions for API calls.
  */
 
+const TIMEOUT_MESSAGE =
+    'The server took too long to respond. Please try again. ' +
+    'If this keeps happening, try a narrower request or fewer papers.';
+const UNAVAILABLE_MESSAGE =
+    'The server is temporarily unavailable. Please try again  later.';
+
 /**
  * Parse a fetch response as JSON with helpful handling for non-JSON bodies.
  *
@@ -21,16 +27,25 @@ export async function parseJsonResponse(response) {
         data = await response.json();
     } catch (error) {
         if (response.status === 504 || response.status === 502) {
-            throw new Error(
-                'The server took too long to respond. Please narrow the request ' +
-                '(for example, fewer years or conferences) and try again.'
-            );
+            throw new Error(TIMEOUT_MESSAGE);
         }
-        throw new Error(`The server returned an invalid response (HTTP ${response.status}). Please try again.`);
+        if (response.status === 503) {
+            throw new Error(UNAVAILABLE_MESSAGE);
+        }
+        throw new Error('The server returned an unexpected response. Please try again.');
     }
 
     if (response.ok === false) {
-        throw new Error((data && data.error) || `HTTP error! status: ${response.status}`);
+        if (data && data.error) {
+            throw new Error(data.error);
+        }
+        if (response.status === 504 || response.status === 502) {
+            throw new Error(TIMEOUT_MESSAGE);
+        }
+        if (response.status === 503) {
+            throw new Error(UNAVAILABLE_MESSAGE);
+        }
+        throw new Error(`The request could not be completed (HTTP ${response.status}). Please try again.`);
     }
 
     return data;

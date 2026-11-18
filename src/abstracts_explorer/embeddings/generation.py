@@ -16,6 +16,7 @@ from abstracts_explorer.embeddings.tokens import (
     token_margin,
     truncate_with_counts,
 )
+from abstracts_explorer.utils.http_utils import is_llm_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +237,8 @@ class GenerationMixin:
         except Exception as e:
             if is_context_length_error(e):
                 fallback_reason = "input exceeded the model context window"
+            elif is_llm_timeout(e):
+                fallback_reason = "batch request timed out"
             else:
                 fallback_reason = f"batch request failed: {e}"
 

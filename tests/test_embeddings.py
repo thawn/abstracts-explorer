@@ -2,8 +2,10 @@
 Tests for the embeddings module.
 """
 
+import logging
 import time
 
+import httpx2
 import pytest
 from unittest.mock import Mock
 
@@ -143,6 +145,33 @@ class TestEmbeddingsManager:
 
         with pytest.raises(EmbeddingsError, match="Failed to generate embedding"):
             embeddings_manager.generate_embedding("Test text")
+
+    def test_test_api_connection_timeout_is_logged_as_error(self, embeddings_manager, caplog):
+        """A backend connection timeout is logged as an error."""
+        embeddings_manager.openai_client.models.list.side_effect = httpx2.ReadTimeout("timed out")
+
+        with caplog.at_level(logging.ERROR, logger="abstracts_explorer.embeddings.models"):
+            result = embeddings_manager.test_api_connection()
+
+        assert result is False
+        assert any(
+            record.levelno == logging.ERROR and "timed out" in record.getMessage() for record in caplog.records
+        )
+
+    def test_generate_embeddings_batch_timeout_logs_warning(self, embeddings_manager, caplog):
+        """A recovered batch timeout is logged as a warning, not an error."""
+        embeddings_manager.openai_client.embeddings.create.side_effect = [httpx2.ReadTimeout("timed out")] + [
+            self._single_response() for _ in range(2)
+        ]
+
+        with caplog.at_level(logging.WARNING, logger="abstracts_explorer.embeddings.generation"):
+            vectors = embeddings_manager.generate_embeddings(["one", "two"])
+
+        assert len(vectors) == 2
+        assert any(
+            record.levelno == logging.WARNING and "timed out" in record.getMessage() for record in caplog.records
+        )
+        assert not any(record.levelno == logging.ERROR for record in caplog.records)
 
     def test_generate_embeddings_batches_inputs(self, embeddings_manager):
         """A batch request returns one vector per input."""

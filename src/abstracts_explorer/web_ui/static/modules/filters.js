@@ -5,6 +5,7 @@
  */
 
 import { API_BASE } from './utils/constants.js';
+import { parseJsonResponse } from './utils/api-utils.js';
 import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
 
 /**
@@ -118,7 +119,7 @@ export async function loadFilterOptions() {
 
         // Load session, topic, eventtype filters from database
         const filtersResponse = await fetch(`${API_BASE}/api/filters?${filterParams.toString()}`);
-        const filtersData = await filtersResponse.json();
+        const filtersData = await parseJsonResponse(filtersResponse);
 
         if (filtersData.error) {
             console.error('Error loading filters:', filtersData.error);
@@ -127,7 +128,7 @@ export async function loadFilterOptions() {
 
         // Load available conferences and years from database
         const availableResponse = await fetch(`${API_BASE}/api/available-filters`);
-        const availableData = await availableResponse.json();
+        const availableData = await parseJsonResponse(availableResponse);
 
         if (availableData.error) {
             console.error('Error loading available filters:', availableData.error);

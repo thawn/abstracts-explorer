@@ -8,10 +8,31 @@ from typing import Any, Callable, Dict, List, Optional, ParamSpec, Tuple, TypeVa
 from flask import Request, jsonify, request
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge, UnsupportedMediaType
 
+from abstracts_explorer.utils.http_utils import is_llm_connection_error, is_llm_timeout
+
 logger = logging.getLogger(__name__)
 
 P = ParamSpec("P")
 R = TypeVar("R")
+
+_TIMEOUT_ERROR_MESSAGE = (
+    "The AI service took too long to respond. Please try again. "
+    "If this keeps happening, try a shorter question or fewer papers."
+)
+_UNAVAILABLE_ERROR_MESSAGE = "The AI service is temporarily unavailable. Please try again in a moment."
+_GENERIC_ERROR_MESSAGE = "Something went wrong while processing your request. Please try again."
+
+
+def _backend_error_response(
+    exc: BaseException,
+    error_message: Optional[str] = None,
+) -> Tuple[Any, int]:
+    """Map backend failures to user-friendly messages and HTTP status codes."""
+    if is_llm_timeout(exc):
+        return jsonify({"error": _TIMEOUT_ERROR_MESSAGE}), 504
+    if is_llm_connection_error(exc):
+        return jsonify({"error": _UNAVAILABLE_ERROR_MESSAGE}), 503
+    return jsonify({"error": error_message or _GENERIC_ERROR_MESSAGE}), 500
 
 
 class ApiError(Exception):
@@ -60,8 +81,9 @@ def api_error_handler(func: Optional[Callable[P, R]] = None, *, error_message: O
         The Flask view function to wrap. When omitted, the decorator is
         returned so it can be used with keyword arguments.
     error_message : str, optional
-        Generic message returned for unexpected exceptions. When omitted,
-        ``str(exception)`` is returned to the client.
+        Generic message returned for unexpected non-backend exceptions. When
+        omitted, a safe generic message is returned; technical details stay in
+        the server log.
 
     Returns
     -------
@@ -77,6 +99,8 @@ def api_error_handler(func: Optional[Callable[P, R]] = None, *, error_message: O
             except ApiError as exc:
                 if exc.status_code >= 500:
                     logger.error("API error in %s: %s", request.endpoint, exc.message, exc_info=True)
+                    if is_llm_timeout(exc) or is_llm_connection_error(exc):
+                        return _backend_error_response(exc)
                 response = jsonify({"error": exc.message})
                 response.status_code = exc.status_code
                 for header, value in exc.headers.items():
@@ -93,8 +117,7 @@ def api_error_handler(func: Optional[Callable[P, R]] = None, *, error_message: O
                 return jsonify({"error": "Request body too large"}), 413
             except Exception as exc:
                 logger.error("Error in %s endpoint: %s", request.endpoint, exc, exc_info=True)
-                message = error_message if error_message is not None else str(exc)
-                return jsonify({"error": message}), 500
+                return _backend_error_response(exc, error_message)
 
         return wrapped
 

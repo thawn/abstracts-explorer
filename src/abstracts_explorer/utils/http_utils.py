@@ -2,7 +2,99 @@
 HTTP timeout helpers shared across the package.
 """
 
+import asyncio
+from collections.abc import Iterator
+from typing import Optional
+
 import httpx2
+
+_TIMEOUT_CLASS_NAMES = frozenset(
+    {
+        "APITimeoutError",
+        "ConnectTimeout",
+        "PoolTimeout",
+        "ReadTimeout",
+        "TimeoutError",
+        "WriteTimeout",
+    }
+)
+
+_CONNECTION_CLASS_NAMES = frozenset(
+    {
+        "APIConnectionError",
+        "ConnectError",
+        "NetworkError",
+        "RemoteProtocolError",
+    }
+)
+
+
+def _exception_chain(exc: BaseException) -> Iterator[BaseException]:
+    """Yield *exc* and its chained causes without repeating exceptions."""
+    seen: set[int] = set()
+    current: Optional[BaseException] = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def is_llm_timeout(exc: BaseException) -> bool:
+    """
+    Return whether *exc* represents an LLM or embedding backend timeout.
+
+    Parameters
+    ----------
+    exc : BaseException
+        Exception raised while talking to an OpenAI-compatible backend.
+
+    Returns
+    -------
+    bool
+        True when the exception or one of its underlying causes is a timeout.
+
+    Examples
+    --------
+    >>> import httpx2
+    >>> is_llm_timeout(httpx2.ReadTimeout("timed out"))
+    True
+    """
+    for item in _exception_chain(exc):
+        if isinstance(item, (httpx2.TimeoutException, TimeoutError, asyncio.TimeoutError)):
+            return True
+        if item.__class__.__name__ in _TIMEOUT_CLASS_NAMES:
+            return True
+        if "timed out" in str(item).lower():
+            return True
+    return False
+
+
+def is_llm_connection_error(exc: BaseException) -> bool:
+    """
+    Return whether *exc* represents an LLM or embedding backend connection failure.
+
+    Timeouts are excluded; :func:`is_llm_timeout` should be checked first when
+    choosing a user-facing message.
+
+    Parameters
+    ----------
+    exc : BaseException
+        Exception raised while talking to an OpenAI-compatible backend.
+
+    Returns
+    -------
+    bool
+        True when the exception or one of its underlying causes is a
+        non-timeout connection failure.
+    """
+    for item in _exception_chain(exc):
+        if is_llm_timeout(item):
+            continue
+        if isinstance(item, httpx2.TransportError):
+            return True
+        if item.__class__.__name__ in _CONNECTION_CLASS_NAMES:
+            return True
+    return False
 
 
 def build_llm_timeout(

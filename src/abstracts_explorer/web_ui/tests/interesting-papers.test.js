@@ -16,8 +16,11 @@ import {
 
 import {
     displayInterestingPapers,
+    loadInterestingPapers,
     loadInterestingPapersFromJSON,
     handleJSONFileLoad,
+    saveInterestingPapersAsMarkdown,
+    donateInterestingPapersData,
     switchInterestingSession,
     changeInterestingPapersSortOrder
 } from '../static/modules/interesting-papers.js';
@@ -303,6 +306,61 @@ describe('Interesting Papers Module', () => {
             // Verify the value was set in localStorage
             const storedOrder = localStorage.getItem('interestingPapersSortOrder');
             expect(storedOrder).toBe('rating-poster-search');
+        });
+    });
+
+    describe('proxy error handling', () => {
+        const html503 = () => ({
+            ok: false,
+            status: 503,
+            json: async () => {
+                throw new SyntaxError('Unexpected token <');
+            }
+        });
+
+        beforeEach(() => {
+            localStorage.setItem(
+                'paperPriorities',
+                JSON.stringify({ p1: { priority: 5, searchTerm: 'transformers' } })
+            );
+            loadPriorities();
+            global.alert = jest.fn();
+        });
+
+        test('should show a friendly message when loading papers gets an HTML 503', async () => {
+            global.fetch = jest.fn().mockResolvedValueOnce(html503());
+
+            await loadInterestingPapers();
+
+            const list = document.getElementById('interesting-papers-list');
+            expect(list.innerHTML).toContain('The server is temporarily unavailable');
+            expect(list.innerHTML).not.toContain('Unexpected token');
+        });
+
+        test('should show a friendly message when export gets an HTML 503', async () => {
+            global.fetch = jest.fn().mockResolvedValueOnce(html503());
+            global.confirm = jest.fn(() => false);
+            const button = document.createElement('button');
+            button.innerHTML = 'Download';
+
+            await saveInterestingPapersAsMarkdown({ target: button });
+
+            expect(global.alert).toHaveBeenCalledWith(
+                expect.stringContaining('The server is temporarily unavailable')
+            );
+            expect(global.alert).not.toHaveBeenCalledWith(expect.stringContaining('Unexpected token'));
+        });
+
+        test('should show a friendly message when donation gets an HTML 503', async () => {
+            global.fetch = jest.fn().mockResolvedValueOnce(html503());
+            global.confirm = jest.fn(() => true);
+
+            await donateInterestingPapersData();
+
+            expect(global.alert).toHaveBeenCalledWith(
+                expect.stringContaining('The server is temporarily unavailable')
+            );
+            expect(global.alert).not.toHaveBeenCalledWith(expect.stringContaining('Unexpected token'));
         });
     });
 });

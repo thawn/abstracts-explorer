@@ -12,7 +12,7 @@ from openai import OpenAI
 from abstracts_explorer.database import DatabaseManager, normalize_model_name
 from abstracts_explorer.embeddings.errors import translate_errors
 from abstracts_explorer.rate_limiter import RateLimitedTransport
-from abstracts_explorer.utils.http_utils import build_llm_timeout
+from abstracts_explorer.utils.http_utils import build_llm_timeout, is_llm_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,17 @@ class ModelMixin:
                 print("✅ Successfully connected to OpenAI API")
             return True
         except Exception as e:
-            logger.warning("Failed to connect to OpenAI-compatible API: %s", str(e))
+            if is_llm_timeout(e):
+                logger.error(
+                    "Embedding backend timed out after %ss (connect timeout %ss) at %s: %s",
+                    self.request_timeout,
+                    self.connect_timeout,
+                    self.backend_url,
+                    e,
+                    exc_info=True,
+                )
+            else:
+                logger.warning("Failed to connect to OpenAI-compatible API: %s", str(e))
             if verbose:
                 print("\n❌ Failed to connect to OpenAI API!", file=sys.stderr)
                 print("\nPlease ensure:", file=sys.stderr)
