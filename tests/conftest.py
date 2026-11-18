@@ -39,25 +39,45 @@ def _reset_process_caches():
     reset_metadata_cache()
 
 
-def get_env_test_path() -> Path:
+def get_base_env_test_path() -> Path:
     """
-    Get the path to the .env.tests file.
-
-    This helper function centralizes the logic for finding .env.tests,
-    reducing code duplication across test files.
+    Get the path to the tracked .env.tests file.
 
     Returns
     -------
     Path
-        Path to the .env.tests file in the repository root.
+        Path to the tracked .env.tests file in the repository root.
+    """
+    repo_root = Path(__file__).parent.parent
+    return repo_root / ".env.tests"
+
+
+def get_env_test_path() -> Path:
+    """
+    Get the path to the test env file.
+
+    If a ``.env.tests.local`` file exists next to the tracked ``.env.tests``,
+    it is used instead.  Copy ``.env.tests`` to ``.env.tests.local`` and edit
+    the copy to point slow tests at a local LM Studio backend or to use a
+    personal Blablador token.  Process environment variables still take
+    precedence over the file.
+
+    Returns
+    -------
+    Path
+        Path to ``.env.tests.local`` when it exists, otherwise the tracked
+        ``.env.tests`` file.
 
     Examples
     --------
     >>> env_test = get_env_test_path()
     >>> config = get_config(reload=True, env_path=env_test)
     """
-    repo_root = Path(__file__).parent.parent
-    return repo_root / ".env.tests"
+    base_path = get_base_env_test_path()
+    local_path = base_path.with_name(f"{base_path.name}.local")
+    if local_path.exists():
+        return local_path
+    return base_path
 
 
 def pytest_addoption(parser):

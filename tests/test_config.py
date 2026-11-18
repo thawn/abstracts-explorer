@@ -10,7 +10,7 @@ from pathlib import Path
 from abstracts_explorer.config import Config, get_config, load_env_file
 from abstracts_explorer import config as config_module
 
-from tests.conftest import get_env_test_path
+from tests.conftest import get_base_env_test_path
 
 
 def clean_config_env_vars():
@@ -131,6 +131,65 @@ LLM_BACKEND_URL=http://test
         assert isinstance(env_vars, dict)
 
 
+class TestEnvTestLocalOverride:
+    """Test .env.tests.local selection in the test setup."""
+
+    def setup_method(self):
+        """Clear environment variables before each test to ensure isolation."""
+        clean_config_env_vars()
+
+    def teardown_method(self):
+        """Clean up environment variables after each test."""
+        clean_config_env_vars()
+
+    def _patch_base_path(self, monkeypatch, tmp_path, base_content, local_content=None):
+        """Create base/local env files and point the helper at them."""
+        from tests import conftest as conftest_module
+
+        base_path = tmp_path / ".env.tests"
+        base_path.write_text(base_content)
+        if local_content is not None:
+            (tmp_path / ".env.tests.local").write_text(local_content)
+        monkeypatch.setattr(conftest_module, "get_base_env_test_path", lambda: base_path)
+        return conftest_module
+
+    def test_local_file_is_used_instead_of_base(self, monkeypatch, tmp_path):
+        """When .env.tests.local exists, it replaces the tracked base file."""
+        conftest_module = self._patch_base_path(
+            monkeypatch,
+            tmp_path,
+            "CHAT_MODEL=base-model\nEMBEDDING_MODEL=base-embedding\n",
+            "CHAT_MODEL=local-model\nEMBEDDING_MODEL=local-embedding\n",
+        )
+
+        env_path = conftest_module.get_env_test_path()
+        config = Config(env_path=env_path)
+
+        assert env_path == tmp_path / ".env.tests.local"
+        assert config.chat_model == "local-model"
+        assert config.embedding_model == "local-embedding"
+
+    def test_missing_local_file_returns_base_path(self, monkeypatch, tmp_path):
+        """Without a local file, the tracked base path is returned unchanged."""
+        conftest_module = self._patch_base_path(monkeypatch, tmp_path, "CHAT_MODEL=base-model\n")
+
+        assert conftest_module.get_env_test_path() == tmp_path / ".env.tests"
+
+    def test_process_env_overrides_local_file(self, monkeypatch, tmp_path):
+        """Real environment variables still beat the local env file."""
+        conftest_module = self._patch_base_path(
+            monkeypatch,
+            tmp_path,
+            "CHAT_MODEL=base-model\n",
+            "CHAT_MODEL=local-model\n",
+        )
+        monkeypatch.setenv("CHAT_MODEL", "env-model")
+
+        config = Config(env_path=conftest_module.get_env_test_path())
+
+        assert config.chat_model == "env-model"
+
+
 class TestConfig:
     """Test Config class."""
 
@@ -148,8 +207,8 @@ class TestConfig:
         """Test default configuration values."""
         # Clear all environment variables that might override defaults
 
-        # Use .env.test which has the default values
-        config = Config(env_path=get_env_test_path())
+        # Use .env.tests which has the default values, ignoring local overrides
+        config = Config(env_path=get_base_env_test_path())
 
         assert config.data_dir == "data"
         assert config.chat_model == "deepseek-v4.1-flash-at-hzdr"

@@ -164,6 +164,36 @@ uv run pytest -m ""
 - A chat model loaded in LM Studio
 - Use `pytest -m slow` to run only slow tests
 
+**Local test configuration overrides:** The test suite reads backend settings from the
+tracked `.env.tests` file. To use a local backend or a personal token without editing
+that file, copy it to the gitignored `.env.tests.local` and edit the copy:
+
+```bash
+cp .env.tests .env.tests.local
+```
+
+When `.env.tests.local` exists, it is used instead of `.env.tests`; it must therefore
+contain all required values. Process environment variables still take precedence over
+the file.
+
+For a local LM Studio instance, change these values in `.env.tests.local`:
+
+```dotenv
+LLM_BACKEND_URL=http://localhost:1234
+LLM_BACKEND_AUTH_TOKEN=
+CHAT_MODEL=<local-chat-model-id>
+EMBEDDING_MODEL=<local-embedding-model-id>
+```
+
+For Blablador, set the remote URL and your personal token instead:
+
+```dotenv
+LLM_BACKEND_URL=https://api.helmholtz-blablador.fz-juelich.de
+LLM_BACKEND_AUTH_TOKEN=<your-token>
+```
+
+List local model identifiers with `curl http://localhost:1234/v1/models`.
+
 #### Python Test Organization
 
 **One test file per module**: Each source module should have exactly one corresponding test file. This makes tests easy to find and maintain.
