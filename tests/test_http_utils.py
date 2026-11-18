@@ -33,6 +33,16 @@ class TestIsLlmTimeout:
 
         assert is_llm_timeout(APITimeoutError("request failed"))
 
+    def test_pydantic_ai_timeout_class_names(self):
+        class ModelRequestTimeout(Exception):
+            pass
+
+        class ModelTimeoutError(Exception):
+            pass
+
+        assert is_llm_timeout(ModelRequestTimeout("request deadline exceeded"))
+        assert is_llm_timeout(ModelTimeoutError("attempt timed out"))
+
     def test_non_timeout(self):
         assert not is_llm_timeout(RuntimeError("kaboom"))
 

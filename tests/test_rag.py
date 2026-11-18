@@ -395,6 +395,7 @@ class TestRAGToolQueue:
         assert kwargs["usage_limits"].request_limit == 50
         assert kwargs["timeout"] == 120
         assert kwargs["model_settings"]["timeout"] == 60
+        assert kwargs["model_settings"]["request_timeout"] == 120
         assert chat.query_timeout == 120
 
     def test_duplicate_tool_call_is_reused(self):
@@ -629,6 +630,64 @@ class TestRAGChatHTTPClient:
         assert async_client.timeout.read == 60
         asyncio.run(async_client.aclose())
 
+    def test_separate_chats_work_across_worker_threads(self, mock_embeddings_manager, mock_database, monkeypatch):
+        """Per-request chats must work on the event loop of their worker thread."""
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        import httpx2
+
+        import abstracts_explorer.rag.agent as agent_module
+
+        config = get_config()
+        monkeypatch.setattr(config, "requests_per_minute", 0)
+
+        def handler(request):
+            body = json.loads(request.content)
+            return httpx2.Response(
+                200,
+                json={
+                    "id": "chatcmpl-test",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": body.get("model", "test-model"),
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "ok"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                },
+            )
+
+        def create_client(*, timeout, transport=None):
+            return httpx2.AsyncClient(transport=httpx2.MockTransport(handler), timeout=timeout)
+
+        monkeypatch.setattr(agent_module, "create_async_httpx2_client", create_client)
+
+        barrier = threading.Barrier(2)
+
+        def run_query(question):
+            barrier.wait(timeout=5)
+            chat = RAGChat(
+                mock_embeddings_manager,
+                mock_database,
+                backend_url="http://test",
+                model="test-model",
+            )
+            try:
+                return chat.query(question, limit=1)
+            finally:
+                chat.close()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(run_query, question) for question in ("first", "second")]
+            results = [future.result(timeout=15) for future in futures]
+
+        assert [result["response"] for result in results] == ["ok", "ok"]
+
 
 class TestRAGChatConversation:
     """Test conversation history management."""
@@ -647,6 +706,18 @@ class TestRAGChatConversation:
         chat.reset_conversation()
 
         assert len(chat.conversation_history) == 0
+
+    def test_message_history_can_be_restored(self, mock_embeddings_manager, mock_database):
+        """A new chat can continue from a previously retained message history."""
+        first = RAGChat(mock_embeddings_manager, mock_database, message_history=["first"])
+        assert first.message_history == ["first"]
+
+        first.message_history = ["first", "second"]
+        restored = RAGChat(mock_embeddings_manager, mock_database, message_history=first.message_history)
+        assert restored.message_history == ["first", "second"]
+
+        first.close()
+        restored.close()
 
     def test_conversation_history_accumulates(self, mock_embeddings_manager, mock_database, mock_search_papers):
         """Test that conversation history accumulates across queries."""

@@ -28,9 +28,9 @@ from abstracts_explorer.export_utils import export_papers_to_zip
 from abstracts_explorer.paper_utils import extract_top_keywords
 from abstracts_explorer.web_ui import request_services as services
 from abstracts_explorer.web_ui.request_services import (
-    _RAG_CHAT_CACHE_MAX,  # noqa: F401  (re-exported for tests)
+    _CHAT_SESSION_CACHE_MAX,  # noqa: F401  (re-exported for tests)
+    _chat_sessions,  # noqa: F401  (re-exported for tests)
     _get_session_id,  # noqa: F401  (re-exported for tests)
-    _rag_chat_cache,  # noqa: F401  (re-exported for tests)
     _reset_rag_chat_local,  # noqa: F401  (re-exported for tests)
     get_llm_backend_info,  # noqa: F401  (re-exported for tests)
 )
@@ -594,22 +594,19 @@ def chat():
         return jsonify({"error": "Message is required"}), 400
 
     enforce_client_rate_limit(_client_id())
-    rag = services.get_rag_chat()
-
-    if reset:
-        rag.reset_conversation()
 
     # Get response with filters
     database = services.get_database()
     available_conferences = database.get_conferences()
-    response = rag.query(
-        message,
-        limit=n_papers,
-        conferences=conferences if conferences else None,
-        years=years if years else None,
-        available_conferences=available_conferences,
-        paper_priorities=paper_priorities,
-    )
+    with services.chat_session(reset=reset) as rag:
+        response = rag.query(
+            message,
+            limit=n_papers,
+            conferences=conferences if conferences else None,
+            years=years if years else None,
+            available_conferences=available_conferences,
+            paper_priorities=paper_priorities,
+        )
 
     return jsonify(
         {
@@ -630,9 +627,7 @@ def reset_chat():
     dict
         Success message
     """
-    session_id = _get_session_id()
-    if session_id in _rag_chat_cache:
-        _rag_chat_cache[session_id].reset_conversation()
+    services.reset_chat_history()
     return jsonify({"success": True, "message": "Conversation reset"})
 
 
@@ -1137,6 +1132,8 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=6):
     # Without this, PID 1 in a container ignores SIGTERM by default, forcing Docker
     # to wait the full stop-timeout before sending SIGKILL.
     signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
+
+    services.start_chat_history_cleanup()
 
     # Use Flask development server if explicitly requested
     if dev:

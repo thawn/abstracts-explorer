@@ -2,6 +2,7 @@
 RAG agent construction and query execution.
 """
 
+import asyncio
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -11,7 +12,7 @@ from typing import Any, Dict, List, Optional
 import httpx2
 from pydantic_ai import Agent, Tool, UsageLimits
 from pydantic_ai.capabilities import UseThreadExecutor
-from pydantic_ai.messages import ModelMessage
+from pydantic_ai.models import create_async_httpx2_client
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -78,6 +79,7 @@ class AgentMixin:
         max_context_papers: Optional[int] = None,
         temperature: Optional[float] = None,
         enable_mcp_tools: bool = True,
+        message_history: Optional[List[Any]] = None,
     ):
         if embeddings_manager is None:
             raise RAGError("embeddings_manager is required.")
@@ -101,7 +103,7 @@ class AgentMixin:
         self._tool_executor = _get_tool_executor(self.max_parallel_tools)
 
         # Message history for multi-turn conversation
-        self._message_history: List[ModelMessage] = []
+        self._message_history = list(message_history or [])
         self._query_lock = threading.Lock()
         self._http_client: Any = None
 
@@ -192,21 +194,20 @@ class AgentMixin:
         config = get_config()
         requests_per_minute = config.requests_per_minute
 
-        # Build the async HTTP client with an explicit structured timeout.
-        # When RPM > 0, wrap the transport so every request is throttled.
         transport = None
         if requests_per_minute > 0:
             from abstracts_explorer.rate_limiter import RateLimitedTransport
 
-            transport = RateLimitedTransport(httpx2.AsyncHTTPTransport(), requests_per_minute=requests_per_minute)
-        http_client = httpx2.AsyncClient(
-            transport=transport,
+            transport = RateLimitedTransport(
+                httpx2.AsyncHTTPTransport(),
+                requests_per_minute=requests_per_minute,
+            )
+        http_client = create_async_httpx2_client(
             timeout=build_llm_timeout(self.request_timeout, self.connect_timeout),
+            transport=transport,
         )
-
         self._http_client = http_client
 
-        # Create OpenAI-compatible model
         provider = OpenAIProvider(
             base_url=f"{self.backend_url}/v1",
             api_key=config.llm_backend_auth_token or "lm-studio-local",
@@ -345,6 +346,7 @@ class AgentMixin:
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 timeout=self.request_timeout,
+                request_timeout=self.query_timeout,
                 openai_reasoning_effort="low",
             )
 
@@ -411,7 +413,10 @@ class AgentMixin:
         self._http_client = None
         if client is not None:
             try:
-                client.close()
+                loop = asyncio.get_event_loop()
+                if loop.is_closed():
+                    raise RuntimeError("event loop is closed")
+                loop.run_until_complete(client.aclose())
             except Exception as exc:
                 logger.debug("Failed to close RAG HTTP client: %s", exc)
         self._tool_executor = None

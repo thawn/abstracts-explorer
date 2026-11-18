@@ -54,6 +54,7 @@ def clean_config_env_vars():
         "RAG_MAX_PARALLEL_TOOLS",
         "RAG_REQUEST_LIMIT",
         "RAG_QUERY_TIMEOUT",
+        "CHAT_HISTORY_TTL",
         "LLM_CONNECT_TIMEOUT",
         "LLM_REQUEST_TIMEOUT",
         "GITHUB_TOKEN",
@@ -227,6 +228,7 @@ class TestConfig:
         assert config.rag_max_parallel_tools == 8
         assert config.rag_request_limit == 50
         assert config.rag_query_timeout == 120
+        assert config.chat_history_ttl == 86400
         assert config.llm_connect_timeout == 10
         assert config.llm_request_timeout == 60
         assert config.proxy_x_for == 0
@@ -296,6 +298,18 @@ class TestConfig:
 
         config = Config(env_path=env_file)
         assert config.metadata_cache_ttl == 120
+
+    def test_chat_history_ttl_from_env(self, tmp_path):
+        """CHAT_HISTORY_TTL overrides the default and accepts 0 to disable expiry."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("CHAT_HISTORY_TTL=3600\n")
+
+        config = Config(env_path=env_file)
+        assert config.chat_history_ttl == 3600
+
+        env_file.write_text("CHAT_HISTORY_TTL=0\n")
+        config = Config(env_path=env_file)
+        assert config.chat_history_ttl == 0
 
     def test_config_from_env_file(self, tmp_path):
         """Test loading configuration from .env file."""
@@ -391,6 +405,7 @@ CHAT_MAX_TOKENS=500
         assert "collection_name" in config_dict
         assert "max_context_papers" in config_dict
         assert "metadata_cache_ttl" in config_dict
+        assert "chat_history_ttl" in config_dict
         assert "llm_connect_timeout" in config_dict
         assert "llm_request_timeout" in config_dict
 

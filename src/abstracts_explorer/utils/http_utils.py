@@ -12,6 +12,8 @@ _TIMEOUT_CLASS_NAMES = frozenset(
     {
         "APITimeoutError",
         "ConnectTimeout",
+        "ModelRequestTimeout",
+        "ModelTimeoutError",
         "PoolTimeout",
         "ReadTimeout",
         "TimeoutError",

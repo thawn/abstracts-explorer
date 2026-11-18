@@ -115,6 +115,9 @@ class Config:
         Maximum number of model requests per RAG query (default: 50).
     rag_query_timeout : int
         Wall-clock timeout in seconds for one RAG query (default: 120).
+    chat_history_ttl : int
+        Idle time in seconds after which a web chat session's history is
+        expired (default: 86400). ``0`` disables expiry.
     llm_connect_timeout : int
         TCP/TLS connect timeout in seconds for LLM and embedding HTTP
         requests (default: 10).
@@ -271,6 +274,7 @@ class Config:
         self.rag_max_parallel_tools = max(1, self._get_env_int("RAG_MAX_PARALLEL_TOOLS", default=8))
         self.rag_request_limit = max(1, self._get_env_int("RAG_REQUEST_LIMIT", default=50))
         self.rag_query_timeout = max(1, self._get_env_int("RAG_QUERY_TIMEOUT", default=120))
+        self.chat_history_ttl = max(0, self._get_env_int("CHAT_HISTORY_TTL", default=86400))
 
         # LLM HTTP Timeout Settings
         # Per-request timeout is clamped to the overall RAG query timeout so a
@@ -469,6 +473,7 @@ class Config:
             "rag_max_parallel_tools": self.rag_max_parallel_tools,
             "rag_request_limit": self.rag_request_limit,
             "rag_query_timeout": self.rag_query_timeout,
+            "chat_history_ttl": self.chat_history_ttl,
             "llm_connect_timeout": self.llm_connect_timeout,
             "llm_request_timeout": self.llm_request_timeout,
             "web_rate_limit_per_minute": self.web_rate_limit_per_minute,

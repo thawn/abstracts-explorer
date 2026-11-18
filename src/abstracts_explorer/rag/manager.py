@@ -20,4 +20,8 @@ class RAGChat(AgentMixin, ConversationMixin, ExtractionMixin):
     The agent uses MCP tools to search papers, analyze topics, and understand
     trends, then generates contextual responses. See :class:`~abstracts_explorer.rag.agent.AgentMixin`
     for constructor parameters and :meth:`query` for usage.
+
+    An instance is bound to the event loop of the thread where it performs
+    queries. Create one instance per request or worker thread; retain only
+    :attr:`message_history` to continue a conversation elsewhere.
     """

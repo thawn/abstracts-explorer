@@ -44,6 +44,30 @@ class ConversationMixin:
         logger.info("Conversation history reset")
 
     @property
+    def message_history(self) -> List[Any]:
+        """
+        Return a copy of the full Pydantic AI message history.
+
+        Returns
+        -------
+        list of Any
+            Model request and response messages retained for the conversation.
+        """
+        return list(self._message_history)
+
+    @message_history.setter
+    def message_history(self, history: List[Any]) -> None:
+        """
+        Replace the full Pydantic AI message history.
+
+        Parameters
+        ----------
+        history : list of Any
+            Model request and response messages to continue from.
+        """
+        self._message_history = list(history)
+
+    @property
     def conversation_history(self) -> List[Dict[str, str]]:
         """
         Get conversation history as a list of role/content dicts.

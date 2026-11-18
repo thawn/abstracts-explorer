@@ -1,15 +1,20 @@
 """
 Shared request-scoped services for the web UI.
 
-Database connections, the embeddings manager, and per-session RAG chat
-instances live here so routes and tests use one set of helpers.
+Database connections, the embeddings manager, and per-session chat history
+live here so routes and tests use one set of helpers.  RAG chat instances are
+created per request so their async HTTP clients are never reused across
+Waitress worker threads.
 """
 
 import logging
 import threading
+import time
 import uuid
 from collections import OrderedDict
-from typing import Any, Dict, List, Optional
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Any, Dict, Iterator, List, Optional
 
 from flask import g, session
 
@@ -22,9 +27,25 @@ logger = logging.getLogger(__name__)
 
 # Initialize components (lazy loading)
 embeddings_manager = None
-_rag_chat_cache: "OrderedDict[str, RAGChat]" = OrderedDict()
-_RAG_CHAT_CACHE_MAX = 1024
-_RAG_CHAT_LOCK = threading.Lock()
+
+
+@dataclass
+class _ChatSessionState:
+    """Conversation state retained between requests for one browser session."""
+
+    history: List[Any] = field(default_factory=list)
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    last_used: float = field(default_factory=time.monotonic)
+
+
+_chat_sessions: "OrderedDict[str, _ChatSessionState]" = OrderedDict()
+_CHAT_SESSION_CACHE_MAX = 1024
+_CHAT_SESSION_CACHE_LOCK = threading.Lock()
+_CHAT_HISTORY_SWEEP_INTERVAL_SECONDS = 3600
+_DEFAULT_CHAT_HISTORY_TTL_SECONDS = 86400
+_chat_history_cleanup_lock = threading.Lock()
+_chat_history_cleanup_thread: Optional[threading.Thread] = None
+_chat_history_cleanup_stop: Optional[threading.Event] = None
 _SCHEMA_INIT_LOCK = threading.Lock()
 _INITIALIZED_DB_URLS: set[str] = set()
 
@@ -81,49 +102,189 @@ def _get_session_id() -> str:
     return session["_session_id"]
 
 
-def get_rag_chat():
-    """
-    Get or create a RAG chat instance scoped to the current browser session.
+def _chat_history_ttl() -> int:
+    """Return the configured chat-history idle TTL in seconds."""
+    ttl = getattr(get_config(), "chat_history_ttl", _DEFAULT_CHAT_HISTORY_TTL_SECONDS)
+    if isinstance(ttl, bool) or not isinstance(ttl, int):
+        return _DEFAULT_CHAT_HISTORY_TTL_SECONDS
+    return max(0, ttl)
 
-    Each unique browser session gets its own ``RAGChat`` instance so that
-    conversation history is isolated per browser tab. A new page reload
-    (new session cookie) starts with a fresh conversation.
+
+def _get_chat_session_state(session_id: str) -> _ChatSessionState:
+    """Return the chat state for *session_id*, creating it when needed."""
+    now = time.monotonic()
+    ttl = _chat_history_ttl()
+
+    with _CHAT_SESSION_CACHE_LOCK:
+        state = _chat_sessions.get(session_id)
+        if state is not None:
+            last_used = getattr(state, "last_used", now)
+            if ttl > 0 and now - last_used > ttl:
+                state = _ChatSessionState(last_used=now)
+                _chat_sessions[session_id] = state
+            else:
+                state.last_used = now
+                _chat_sessions.move_to_end(session_id)
+            return state
+
+        while len(_chat_sessions) >= _CHAT_SESSION_CACHE_MAX:
+            _chat_sessions.popitem(last=False)
+
+        state = _ChatSessionState(last_used=now)
+        _chat_sessions[session_id] = state
+        return state
+
+
+def _purge_expired_chat_sessions(
+    *,
+    now: Optional[float] = None,
+    ttl_seconds: Optional[int] = None,
+) -> int:
+    """
+    Remove chat session states that have been idle longer than the TTL.
+
+    Parameters
+    ----------
+    now : float, optional
+        Monotonic timestamp to evaluate against. Defaults to the current time.
+    ttl_seconds : int, optional
+        Override the configured TTL for testing or explicit sweeps.
+
+    Returns
+    -------
+    int
+        Number of expired sessions removed.
+    """
+    ttl = _chat_history_ttl() if ttl_seconds is None else ttl_seconds
+    if ttl <= 0:
+        return 0
+
+    current = time.monotonic() if now is None else now
+    with _CHAT_SESSION_CACHE_LOCK:
+        expired = [
+            session_id
+            for session_id, state in _chat_sessions.items()
+            if current - getattr(state, "last_used", current) > ttl
+        ]
+        for session_id in expired:
+            del _chat_sessions[session_id]
+
+    if expired:
+        logger.info("Expired %d stale chat session(s)", len(expired))
+    return len(expired)
+
+
+def _chat_history_cleanup_loop(stop_event: threading.Event) -> None:
+    """Periodically purge stale chat sessions until *stop_event* is set."""
+    while not stop_event.wait(_CHAT_HISTORY_SWEEP_INTERVAL_SECONDS):
+        try:
+            _purge_expired_chat_sessions()
+        except Exception:
+            logger.exception("Failed to purge expired chat histories")
+
+
+def start_chat_history_cleanup() -> None:
+    """Start the background chat-history cleanup thread, if not already running."""
+    global _chat_history_cleanup_thread, _chat_history_cleanup_stop
+    with _chat_history_cleanup_lock:
+        if _chat_history_cleanup_thread is not None and _chat_history_cleanup_thread.is_alive():
+            return
+
+        stop_event = threading.Event()
+        thread = threading.Thread(
+            target=_chat_history_cleanup_loop,
+            args=(stop_event,),
+            name="chat-history-cleanup",
+            daemon=True,
+        )
+        _chat_history_cleanup_stop = stop_event
+        _chat_history_cleanup_thread = thread
+        thread.start()
+
+
+def stop_chat_history_cleanup() -> None:
+    """Stop the background chat-history cleanup thread."""
+    global _chat_history_cleanup_thread, _chat_history_cleanup_stop
+    with _chat_history_cleanup_lock:
+        stop_event = _chat_history_cleanup_stop
+        thread = _chat_history_cleanup_thread
+        _chat_history_cleanup_stop = None
+        _chat_history_cleanup_thread = None
+
+    if stop_event is not None:
+        stop_event.set()
+    if thread is not None and thread is not threading.current_thread():
+        thread.join(timeout=5)
+
+
+def get_rag_chat() -> RAGChat:
+    """
+    Create a RAG chat instance for the current browser session.
+
+    A fresh ``RAGChat`` is created for every request so its async HTTP client
+    is only used on the current worker thread's event loop.  The session's
+    message history is restored so multi-turn conversations keep working.
 
     Returns
     -------
     RAGChat
-        RAG chat instance for the current session.
+        RAG chat instance seeded with the current session's history.
     """
-    database = get_database()
-    session_id = _get_session_id()
+    state = _get_chat_session_state(_get_session_id())
+    config = get_config()
+    return RAGChat(
+        embeddings_manager=get_embeddings_manager(),
+        database=get_database(),
+        backend_url=config.llm_backend_url,
+        model=config.chat_model,
+        message_history=state.history,
+    )
 
-    with _RAG_CHAT_LOCK:
-        if session_id in _rag_chat_cache:
-            _rag_chat_cache.move_to_end(session_id)
-            return _rag_chat_cache[session_id]
 
-        while len(_rag_chat_cache) >= _RAG_CHAT_CACHE_MAX:
-            _evicted_id, evicted = _rag_chat_cache.popitem(last=False)
+@contextmanager
+def chat_session(reset: bool = False) -> Iterator[RAGChat]:
+    """
+    Yield a per-request RAG chat and persist its conversation history.
+
+    Parameters
+    ----------
+    reset : bool, optional
+        Clear the session's conversation history before the query.
+
+    Yields
+    ------
+    RAGChat
+        Chat instance scoped to the current request.
+    """
+    state = _get_chat_session_state(_get_session_id())
+    with state.lock:
+        if reset:
+            state.history = []
+
+        chat = get_rag_chat()
+        try:
+            yield chat
+        finally:
+            history = getattr(chat, "message_history", None)
+            if isinstance(history, list):
+                state.history = history
+            state.last_used = time.monotonic()
             try:
-                evicted.close()
+                chat.close()
             except Exception as exc:
-                logger.debug("Failed to close evicted RAG chat %s: %s", _evicted_id, exc)
+                logger.debug("Failed to close RAG chat: %s", exc)
 
-        config = get_config()
-        em = get_embeddings_manager()
-        chat = RAGChat(
-            embeddings_manager=em,
-            database=database,
-            backend_url=config.llm_backend_url,
-            model=config.chat_model,
-        )
-        _rag_chat_cache[session_id] = chat
-        return chat
+
+def reset_chat_history() -> None:
+    """Clear the current browser session's conversation history."""
+    state = _get_chat_session_state(_get_session_id())
+    with state.lock:
+        state.history = []
 
 
 def _reset_rag_chat_local():
     """
-    Reset the RAG chat cache.
+    Reset the chat session cache.
 
     When called inside a request context, only clears the entry for the
     current session.  When called outside a request context (e.g., by
@@ -131,19 +292,11 @@ def _reset_rag_chat_local():
     """
     try:
         session_id = _get_session_id()
-        with _RAG_CHAT_LOCK:
-            chat = _rag_chat_cache.pop(session_id, None)
-        if chat is not None:
-            chat.close()
+        with _CHAT_SESSION_CACHE_LOCK:
+            _chat_sessions.pop(session_id, None)
     except (RuntimeError, KeyError):
-        with _RAG_CHAT_LOCK:
-            chats = list(_rag_chat_cache.values())
-            _rag_chat_cache.clear()
-        for chat in chats:
-            try:
-                chat.close()
-            except Exception as exc:
-                logger.debug("Failed to close RAG chat: %s", exc)
+        with _CHAT_SESSION_CACHE_LOCK:
+            _chat_sessions.clear()
 
 
 def teardown_db(exception) -> None:
