@@ -95,7 +95,7 @@ See `docs/plugins.md` for adding one.
   `tests/conftest.py` fixtures (`db_manager`, `connected_db`, `test_database`,
   `mock_lm_studio`, `embeddings_manager`, `web_test_papers`, ...) and
   `tests/helpers.py` (`requires_lm_studio`, `create_test_db_with_paper`,
-  `find_free_port`, `create_webdriver`, ...).
+  `find_free_port`, Playwright fixtures, ...).
 - Mock external services (APIs, LLM backends, databases). Tests must skip
   gracefully when optional services are unavailable.
 - Markers: `slow` (deselected by default), `integration`, `e2e`, `staging`.

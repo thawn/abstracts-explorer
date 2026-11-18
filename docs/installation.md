@@ -69,12 +69,17 @@ This includes:
 - **pytest**: For running tests
 - **pytest-cov**: For test coverage reports
 - **pytest-mock**: For test mocking
-- **selenium**: For browser automation testing
-- **webdriver-manager**: For managing browser drivers
+- **pytest-playwright**: For Playwright browser automation testing
 - **black**: For code formatting
 - **ruff**: For linting
 - **mypy**: For type checking (required by the pre-commit hook)
 - **types-requests**: Type stubs for `requests`
+
+Install the Chromium browser used by the end-to-end tests:
+
+```bash
+uv run playwright install chromium
+```
 
 ### Web Interface Dependencies
 

@@ -172,7 +172,7 @@ error when the LLM backend is unavailable).
 
 ```{note}
 This list is a **first draft** and should evolve as the project matures. The staging
-tests are implemented as Selenium tests in
+tests are implemented as Playwright tests in
 [`tests/test_staging_e2e.py`](https://github.com/thawn/abstracts-explorer/blob/main/tests/test_staging_e2e.py)
 and can be run against any deployment URL::
 

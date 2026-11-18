@@ -147,29 +147,87 @@ def staging_url(request):
 
 
 @pytest.fixture(scope="module")
-def browser():
+def staging_page(browser):
     """
-    Create a module-scoped Selenium WebDriver instance for staging e2e tests.
+    Create a module-scoped Playwright page for staging e2e tests.
 
-    A single browser instance is shared across all tests in a module to avoid
-    the overhead of launching a new browser for every test.  The fixture is
-    defined here (``conftest.py``) so it is available to any test module; test
-    files that need a *function*-scoped browser (e.g. ``test_web_e2e.py``) can
-    override it with a local fixture of the same name.
-
-    Browser selection follows the ``E2E_BROWSER`` environment variable
-    (``chrome``, ``firefox``, or ``auto``).
+    A single browser context and page are shared across all tests in a module
+    to avoid the overhead of launching a new browser for every test.  The
+    fixture relies on the session-scoped ``browser`` fixture provided by
+    ``pytest-playwright``.
 
     Yields
     ------
-    webdriver.Chrome or webdriver.Firefox
-        A headless WebDriver instance.  Automatically quit after the module.
+    playwright.sync_api.Page
+        A page using a fresh browser context.  The context is closed after the
+        module finishes.
     """
-    from tests.helpers import create_webdriver
+    context = browser.new_context()
+    page = context.new_page()
+    yield page
+    context.close()
 
-    driver = create_webdriver()
-    yield driver
-    driver.quit()
+
+def _collect_console_errors(page) -> list[str]:
+    """
+    Attach console and page-error listeners to *page* and return the collector.
+
+    Parameters
+    ----------
+    page : playwright.sync_api.Page
+        Page whose console output should be collected.
+
+    Returns
+    -------
+    list[str]
+        Messages for console entries of type ``error`` and uncaught page
+        exceptions.  The list is populated as the page runs.
+    """
+    errors: list[str] = []
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    page.on("pageerror", lambda exc: errors.append(str(exc)))
+    return errors
+
+
+@pytest.fixture
+def console_errors(page):
+    """
+    Collect browser console errors and uncaught page errors.
+
+    The listeners are attached before the test body runs, so errors emitted
+    during navigation and asynchronous rendering are captured.
+
+    Parameters
+    ----------
+    page : playwright.sync_api.Page
+        Playwright page fixture.
+
+    Returns
+    -------
+    list[str]
+        Messages for console entries of type ``error`` and uncaught page
+        exceptions.  The list is populated as the test runs.
+    """
+    return _collect_console_errors(page)
+
+
+@pytest.fixture
+def staging_console_errors(staging_page):
+    """
+    Collect console errors for the module-scoped staging page.
+
+    Parameters
+    ----------
+    staging_page : playwright.sync_api.Page
+        Module-scoped Playwright page used by staging tests.
+
+    Returns
+    -------
+    list[str]
+        Messages for console entries of type ``error`` and uncaught page
+        exceptions.  The list is populated as the test runs.
+    """
+    return _collect_console_errors(staging_page)
 
 
 @pytest.fixture(scope="session")
