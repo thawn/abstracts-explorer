@@ -222,3 +222,11 @@ The browser test requires Chromium::
 Run only the browser UI stress test::
 
     uv run pytest tests/test_stress.py -m stress --server-url http://localhost:5000 -k browser -s
+
+Target a specific MCP tool with the prompts::
+
+    uv run pytest tests/test_stress.py -m stress --server-url http://localhost:5000 --stress-mcp-tool get_conference_topics -s
+
+Alternatively, set the ``STRESS_MCP_TOOL`` environment variable. The default is
+``search_papers``. The option only shapes the prompt; the LLM still decides
+which MCP tool to call.

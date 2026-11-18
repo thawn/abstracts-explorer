@@ -21,6 +21,17 @@ Run only the browser UI stress test::
 
     uv run pytest tests/test_stress.py -m stress --server-url http://localhost:5000 -k browser -s
 
+Target a specific MCP tool with the prompts::
+
+    uv run pytest tests/test_stress.py -m stress --server-url http://localhost:5000 --stress-mcp-tool get_conference_topics -s
+
+Alternatively, set the ``STRESS_MCP_TOOL`` environment variable.  The default
+tool is ``search_papers``.  Available tools are ``search_papers``,
+``get_paper_details``, ``get_conference_topics``, ``get_topic_evolution``,
+``analyze_topic_relevance``, ``get_cluster_visualization``,
+``summarize_interesting_papers``, ``recommend_related_papers``, and
+``suggest_authors_to_meet``.
+
 Notes
 -----
 * The tests are marked with ``@pytest.mark.stress`` and are excluded from the
@@ -32,6 +43,9 @@ Notes
   never fails cannot make the tests run indefinitely.
 * The browser test requires Chromium to be installed with
   ``uv run playwright install chromium``.
+* The MCP tool option only shapes the prompt; the LLM still decides which tool
+  to call.  The interesting-paper tools may return limited results in stress
+  runs because no ratings are seeded.
 """
 
 import asyncio
@@ -74,6 +88,18 @@ _RAG_QUERIES = [
     "Find papers about unsupervised learning at NeurIPS 2025.",
 ]
 
+_MCP_TOOL_PROMPTS: dict[str, list[str]] = {
+    "search_papers": _RAG_QUERIES,
+    "get_paper_details": ["Who are the authors of the paper titled 'Large Language Diffusion Models'?"],
+    "get_conference_topics": ["What are the main topics at NeurIPS 2025?"],
+    "get_topic_evolution": ["How has research on transformers evolved at NeurIPS over the years?"],
+    "analyze_topic_relevance": ["How relevant is uncertainty quantification at NeurIPS 2025?"],
+    "get_cluster_visualization": ["Show me a visual overview of how topics are clustered at NeurIPS."],
+    "summarize_interesting_papers": ["Summarize the papers I marked as interesting."],
+    "recommend_related_papers": ["Based on my interesting papers, suggest other papers that may interest me."],
+    "suggest_authors_to_meet": ["Who should I meet based on my interesting papers?"],
+}
+
 pytestmark = [
     pytest.mark.stress,
     pytest.mark.skipif(
@@ -81,6 +107,33 @@ pytestmark = [
         reason="Server URL not provided. Use --server-url or set SERVER_URL env var.",
     ),
 ]
+
+
+def _prompts_for_tool(tool: str, concurrency: int, suffix: str) -> list[str]:
+    """
+    Build the prompts for one wave targeting *tool*.
+
+    Parameters
+    ----------
+    tool : str
+        MCP tool name to target.
+    concurrency : int
+        Number of prompts to generate.
+    suffix : str
+        Label appended to each prompt to keep otherwise identical requests
+        distinct.
+
+    Returns
+    -------
+    list[str]
+        Prompts for the wave.
+    """
+    prompts = _MCP_TOOL_PROMPTS.get(tool)
+    if prompts is None:
+        supported = ", ".join(sorted(_MCP_TOOL_PROMPTS))
+        pytest.fail(f"Unknown MCP tool {tool!r}. Supported tools: {supported}")
+
+    return [f"{prompts[index % len(prompts)]} {suffix} {index}." for index in range(concurrency)]
 
 
 @dataclass
@@ -169,7 +222,7 @@ def _chat_request(server_url: str, query: str) -> tuple[int, str | None]:
     return response.status_code, response.text[:500]
 
 
-def _run_wave(server_url: str, concurrency: int) -> WaveResult:
+def _run_wave(server_url: str, concurrency: int, tool: str) -> WaveResult:
     """
     Send one wave of parallel chat requests.
 
@@ -179,13 +232,15 @@ def _run_wave(server_url: str, concurrency: int) -> WaveResult:
         Base URL of the deployment under test.
     concurrency : int
         Number of parallel requests to send.
+    tool : str
+        MCP tool to target with the prompts.
 
     Returns
     -------
     WaveResult
         Status codes, errors, and elapsed time for the wave.
     """
-    queries = [f"{_RAG_QUERIES[index % len(_RAG_QUERIES)]} Request {index}." for index in range(concurrency)]
+    queries = _prompts_for_tool(tool, concurrency, "Request")
     results: list[tuple[int, str | None]] = []
     start = time.monotonic()
 
@@ -203,7 +258,11 @@ def _run_wave(server_url: str, concurrency: int) -> WaveResult:
     return WaveResult(concurrency=concurrency, results=results, elapsed=time.monotonic() - start)
 
 
-def test_parallel_chat_capacity(server_url: str, record_property: Callable[[str, object], None]) -> None:
+def test_parallel_chat_capacity(
+    server_url: str,
+    stress_mcp_tool: str,
+    record_property: Callable[[str, object], None],
+) -> None:
     """
     Find the maximum number of parallel RAG chat requests the server handles.
 
@@ -212,6 +271,9 @@ def test_parallel_chat_capacity(server_url: str, record_property: Callable[[str,
     server_url : str
         Base URL of the deployment under test, provided by the ``server_url``
         fixture.
+    stress_mcp_tool : str
+        MCP tool to target with the prompts, provided by the
+        ``stress_mcp_tool`` fixture.
     record_property : Callable[[str, object], None]
         Pytest fixture for attaching the measured limit to the test report.
     """
@@ -222,7 +284,7 @@ def test_parallel_chat_capacity(server_url: str, record_property: Callable[[str,
     except requests.RequestException:
         pass
 
-    print(f"\nStress test target: {server_url}")
+    print(f"\nStress test target: {server_url} (MCP tool: {stress_mcp_tool})")
     print(f"{'concurrency':>11} | {'successes':>9} | {'failures':>8} | {'elapsed (s)':>11}")
     print("-" * 50)
 
@@ -231,7 +293,7 @@ def test_parallel_chat_capacity(server_url: str, record_property: Callable[[str,
     concurrency = _START_PARALLEL
 
     while concurrency <= _MAX_PARALLEL:
-        result = _run_wave(server_url, concurrency)
+        result = _run_wave(server_url, concurrency, stress_mcp_tool)
         print(f"{result.concurrency:>11} | {result.successes:>9} | {result.failures:>8} | {result.elapsed:>11.2f}")
         for status, error in result.results:
             if status != 200:
@@ -244,6 +306,7 @@ def test_parallel_chat_capacity(server_url: str, record_property: Callable[[str,
         last_success = concurrency
         concurrency *= 2
 
+    record_property("stress_mcp_tool", stress_mcp_tool)
     record_property("stress_max_parallel_requests", last_success)
     record_property("stress_first_failure", first_failure or "")
 
@@ -432,7 +495,7 @@ async def _run_browser_worker(browser: Browser, server_url: str, query: str) -> 
         return False, f"{type(exc).__name__}: {exc}"
 
 
-async def _run_browser_wave(browser: Browser, server_url: str, concurrency: int) -> BrowserWaveResult:
+async def _run_browser_wave(browser: Browser, server_url: str, concurrency: int, tool: str) -> BrowserWaveResult:
     """
     Run one wave of parallel browser chat sessions.
 
@@ -444,13 +507,15 @@ async def _run_browser_wave(browser: Browser, server_url: str, concurrency: int)
         Base URL of the deployment under test.
     concurrency : int
         Number of parallel browser sessions to run.
+    tool : str
+        MCP tool to target with the prompts.
 
     Returns
     -------
     BrowserWaveResult
         Session outcomes and elapsed time for the wave.
     """
-    queries = [f"{_RAG_QUERIES[index % len(_RAG_QUERIES)]} Browser request {index}." for index in range(concurrency)]
+    queries = _prompts_for_tool(tool, concurrency, "Browser request")
     start = time.monotonic()
     results = await asyncio.gather(*(_run_browser_worker(browser, server_url, query) for query in queries))
     return BrowserWaveResult(
@@ -460,7 +525,7 @@ async def _run_browser_wave(browser: Browser, server_url: str, concurrency: int)
     )
 
 
-async def _run_browser_stress(server_url: str, headed: bool) -> tuple[int, int | None]:
+async def _run_browser_stress(server_url: str, headed: bool, tool: str) -> tuple[int, int | None]:
     """
     Launch Chromium and probe increasing parallel browser chat sessions.
 
@@ -470,6 +535,8 @@ async def _run_browser_stress(server_url: str, headed: bool) -> tuple[int, int |
         Base URL of the deployment under test.
     headed : bool
         Whether to show the browser window.
+    tool : str
+        MCP tool to target with the prompts.
 
     Returns
     -------
@@ -487,7 +554,7 @@ async def _run_browser_stress(server_url: str, headed: bool) -> tuple[int, int |
             raise
 
         try:
-            print(f"\nBrowser stress test target: {server_url}")
+            print(f"\nBrowser stress test target: {server_url} (MCP tool: {tool})")
             print(f"{'concurrency':>11} | {'successes':>9} | {'failures':>8} | {'elapsed (s)':>11}")
             print("-" * 50)
 
@@ -496,7 +563,7 @@ async def _run_browser_stress(server_url: str, headed: bool) -> tuple[int, int |
             concurrency = _START_PARALLEL
 
             while concurrency <= _MAX_BROWSER_PARALLEL:
-                result = await _run_browser_wave(browser, server_url, concurrency)
+                result = await _run_browser_wave(browser, server_url, concurrency, tool)
                 print(
                     f"{result.concurrency:>11} | {result.successes:>9} | "
                     f"{result.failures:>8} | {result.elapsed:>11.2f}"
@@ -520,6 +587,7 @@ async def _run_browser_stress(server_url: str, headed: bool) -> tuple[int, int |
 def test_parallel_browser_chat_capacity(
     pytestconfig: pytest.Config,
     server_url: str,
+    stress_mcp_tool: str,
     record_property: Callable[[str, object], None],
 ) -> None:
     """
@@ -532,14 +600,22 @@ def test_parallel_browser_chat_capacity(
     server_url : str
         Base URL of the deployment under test, provided by the ``server_url``
         fixture.
+    stress_mcp_tool : str
+        MCP tool to target with the prompts, provided by the
+        ``stress_mcp_tool`` fixture.
     record_property : Callable[[str, object], None]
         Pytest fixture for attaching the measured limit to the test report.
     """
     _check_health(server_url)
     last_success, first_failure = asyncio.run(
-        _run_browser_stress(server_url, headed=bool(pytestconfig.getoption("--headed")))
+        _run_browser_stress(
+            server_url,
+            headed=bool(pytestconfig.getoption("--headed")),
+            tool=stress_mcp_tool,
+        )
     )
 
+    record_property("stress_mcp_tool", stress_mcp_tool)
     record_property("stress_browser_max_parallel_sessions", last_success)
     record_property("stress_browser_first_failure", first_failure or "")
 

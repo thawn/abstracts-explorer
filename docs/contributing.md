@@ -161,6 +161,9 @@ uv run pytest tests/test_stress.py -m stress --server-url http://localhost:5000 
 # Run only the browser UI stress test (requires Chromium)
 uv run pytest tests/test_stress.py -m stress --server-url http://localhost:5000 -k browser -s
 
+# Target a specific MCP tool with the stress-test prompts
+uv run pytest tests/test_stress.py -m stress --server-url http://localhost:5000 --stress-mcp-tool get_conference_topics -s
+
 # Run all tests including slow ones
 uv run pytest -m ""
 ```

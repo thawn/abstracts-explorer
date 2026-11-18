@@ -111,6 +111,12 @@ def pytest_addoption(parser):
         default=None,
         help="Base URL of the deployment to run stress tests against (e.g. http://localhost:5000)",
     )
+    parser.addoption(
+        "--stress-mcp-tool",
+        action="store",
+        default=None,
+        help="MCP tool to target with stress-test prompts (default: search_papers)",
+    )
 
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
@@ -207,6 +213,30 @@ def server_url(request):
     if not url:
         pytest.skip("Server URL not provided. Use --server-url or set SERVER_URL env var.")
     return url.rstrip("/")
+
+
+@pytest.fixture(scope="session")
+def stress_mcp_tool(request):
+    """
+    Resolve the MCP tool targeted by stress-test prompts.
+
+    The tool is taken from ``--stress-mcp-tool`` first, falling back to the
+    ``STRESS_MCP_TOOL`` environment variable and finally to
+    ``search_papers``.
+
+    Parameters
+    ----------
+    request : FixtureRequest
+        Pytest request object (provides access to CLI options).
+
+    Returns
+    -------
+    str
+        Name of the MCP tool to target.
+    """
+    import os
+
+    return request.config.getoption("--stress-mcp-tool") or os.environ.get("STRESS_MCP_TOOL") or "search_papers"
 
 
 @pytest.fixture(scope="module")
