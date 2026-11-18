@@ -105,6 +105,12 @@ def pytest_addoption(parser):
         default=None,
         help="Base URL of the staging deployment to run staging e2e tests against (e.g. http://localhost:5000)",
     )
+    parser.addoption(
+        "--server-url",
+        action="store",
+        default=None,
+        help="Base URL of the deployment to run stress tests against (e.g. http://localhost:5000)",
+    )
 
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
@@ -173,6 +179,33 @@ def staging_url(request):
     url = request.config.getoption("--staging-url") or os.environ.get("STAGING_URL")
     if not url:
         pytest.skip("Staging URL not provided. Use --staging-url or set STAGING_URL env var.")
+    return url.rstrip("/")
+
+
+@pytest.fixture(scope="session")
+def server_url(request):
+    """
+    Resolve the stress-test deployment URL from CLI option or environment variable.
+
+    The URL is taken from ``--server-url`` first, falling back to the
+    ``SERVER_URL`` environment variable.  Tests that depend on this fixture
+    are skipped when neither source provides a value.
+
+    Parameters
+    ----------
+    request : FixtureRequest
+        Pytest request object (provides access to CLI options).
+
+    Returns
+    -------
+    str
+        The base URL of the deployment (without trailing slash).
+    """
+    import os
+
+    url = request.config.getoption("--server-url") or os.environ.get("SERVER_URL")
+    if not url:
+        pytest.skip("Server URL not provided. Use --server-url or set SERVER_URL env var.")
     return url.rstrip("/")
 
 

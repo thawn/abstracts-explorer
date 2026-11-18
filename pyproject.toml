@@ -94,11 +94,12 @@ markers = [
     "integration: marks tests as integration tests (require real data)",
     "e2e: marks tests as end-to-end tests (require browser automation)",
     "staging: marks tests as staging end-to-end tests (run against a live deployment)",
+    "stress: marks stress tests that send waves of concurrent requests to a live server",
     "requires_lm_studio: test requires a reachable OpenAI-compatible backend",
 ]
 addopts = [
     "--verbose",
-    "-m not slow",
+    "-m not slow and not stress",
 ]
 
 [tool.coverage.run]

@@ -192,3 +192,20 @@ Alternatively, set the ``STAGING_URL`` environment variable::
 
     STAGING_URL=https://staging.example.com uv run pytest tests/test_staging_e2e.py -m staging
 ```
+
+## Stress tests
+
+The stress test in
+[`tests/test_stress.py`](https://github.com/thawn/abstracts-explorer/blob/main/tests/test_stress.py)
+measures how many parallel RAG chat requests a deployment can handle. It sends
+waves of ``/api/chat`` requests with concurrency 1, 2, 4, 8, ... up to 256 and
+stops at the first wave in which any request fails. The last fully successful
+wave is printed as the measured capacity.
+
+Run it against any deployment URL::
+
+    uv run pytest tests/test_stress.py -m stress --server-url http://localhost:5000 -s
+
+Alternatively, set the ``SERVER_URL`` environment variable::
+
+    SERVER_URL=https://staging.example.com uv run pytest tests/test_stress.py -m stress -s
