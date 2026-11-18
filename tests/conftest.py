@@ -39,6 +39,16 @@ def _reset_process_caches():
     reset_metadata_cache()
 
 
+@pytest.fixture(autouse=True)
+def _reset_mcp_resources():
+    """Close cached MCP database/embeddings resources between tests."""
+    from abstracts_explorer.mcp import close_mcp_resources
+
+    close_mcp_resources()
+    yield
+    close_mcp_resources()
+
+
 def get_base_env_test_path() -> Path:
     """
     Get the path to the tracked .env.tests file.

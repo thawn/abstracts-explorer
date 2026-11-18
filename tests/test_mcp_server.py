@@ -4,6 +4,7 @@ Tests for MCP server functionality.
 
 import asyncio
 import json
+import threading
 import pytest
 from unittest.mock import Mock, patch
 import numpy as np
@@ -13,6 +14,7 @@ from abstracts_explorer.mcp_server import (
     analyze_cluster_topics,
     ClusterAnalysisError,
 )
+from abstracts_explorer.mcp.errors import ToolError
 from abstracts_explorer.utils.conference_utils import parse_conference_year
 from abstracts_explorer.clustering import ClusteringManager
 from abstracts_explorer.database import DatabaseManager
@@ -108,8 +110,8 @@ class TestMCPResources:
     @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
     @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
-    def test_mcp_resources_closes_on_exception(self, mock_config, mock_db_class, mock_em_class):
-        """Resources are closed when the managed block raises."""
+    def test_mcp_resources_reuses_thread_local_instances(self, mock_config, mock_db_class, mock_em_class):
+        """The same thread reuses cached database and embeddings managers."""
         mock_config_obj = Mock()
         mock_config_obj.collection_name = "papers"
         mock_config.return_value = mock_config_obj
@@ -118,14 +120,21 @@ class TestMCPResources:
         mock_em_class.return_value = mock_em
         mock_db_class.return_value = mock_db
 
-        from abstracts_explorer.mcp_server import _get_mcp_resources
+        from abstracts_explorer.mcp_server import _get_mcp_resources, close_mcp_resources
 
-        with pytest.raises(RuntimeError):
-            with _get_mcp_resources() as (em, db):
-                assert em is mock_em
-                assert db is mock_db
-                raise RuntimeError("boom")
+        with _get_mcp_resources() as (em, db):
+            assert em is mock_em
+            assert db is mock_db
+        with _get_mcp_resources() as (em, db):
+            assert em is mock_em
+            assert db is mock_db
 
+        mock_em_class.assert_called_once()
+        mock_db_class.assert_called_once()
+        mock_em.close.assert_not_called()
+        mock_db.close.assert_not_called()
+
+        close_mcp_resources()
         mock_em.close.assert_called_once()
         mock_db.close.assert_called_once()
 
@@ -136,18 +145,66 @@ class TestMCPResources:
         mock_db = Mock()
         mock_db_class.return_value = mock_db
 
-        from abstracts_explorer.mcp_server import _get_mcp_resources
+        from abstracts_explorer.mcp_server import _get_mcp_resources, close_mcp_resources
 
         with _get_mcp_resources(with_embeddings=False) as (em, db):
             assert em is None
             assert db is mock_db
 
         mock_em_class.assert_not_called()
+        mock_db.close.assert_not_called()
+        close_mcp_resources()
         mock_db.close.assert_called_once()
 
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
+    def test_embeddings_are_cached_per_collection(self, mock_config, mock_db_class, mock_em_class):
+        """Different collections get distinct embeddings managers."""
+        mock_config.return_value = Mock(collection_name="papers")
+        db = Mock()
+        mock_db_class.return_value = db
+        first_em = Mock()
+        second_em = Mock()
+        mock_em_class.side_effect = [first_em, second_em]
+
+        from abstracts_explorer.mcp_server import _get_mcp_resources
+
+        with _get_mcp_resources("first") as (em, _):
+            assert em is first_em
+        with _get_mcp_resources("second") as (em, _):
+            assert em is second_em
+
+        assert mock_em_class.call_count == 2
+        mock_db_class.assert_called_once()
+
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    def test_database_is_cached_per_thread(self, mock_db_class):
+        """Different threads receive distinct database managers."""
+        databases = []
+        mock_db_class.side_effect = lambda: databases.append(Mock()) or databases[-1]
+
+        from abstracts_explorer.mcp_server import _get_mcp_resources
+
+        results = []
+
+        def worker():
+            with _get_mcp_resources(with_embeddings=False) as (_, db):
+                results.append(db)
+
+        threads = [threading.Thread(target=worker) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert len(results) == 2
+        assert results[0] is not results[1]
+        assert mock_db_class.call_count == 2
+
     @patch("abstracts_explorer.mcp.resources.load_clustering_data")
-    def test_clustering_resources_closes_on_exception(self, mock_load):
-        """Clustering resources are closed when the managed block raises."""
+    def test_clustering_resources_does_not_close_cached_resources(self, mock_load):
+        """Clustering resources leave the cached managers open."""
         mock_cm = Mock()
         mock_cm.embeddings_manager = Mock()
         mock_db = Mock()
@@ -155,14 +212,12 @@ class TestMCPResources:
 
         from abstracts_explorer.mcp_server import _get_clustering_resources
 
-        with pytest.raises(RuntimeError):
-            with _get_clustering_resources() as (cm, db):
-                assert cm is mock_cm
-                assert db is mock_db
-                raise RuntimeError("boom")
+        with _get_clustering_resources() as (cm, db):
+            assert cm is mock_cm
+            assert db is mock_db
 
-        mock_cm.embeddings_manager.close.assert_called_once()
-        mock_db.close.assert_called_once()
+        mock_cm.embeddings_manager.close.assert_not_called()
+        mock_db.close.assert_not_called()
 
 
 class TestAnalyzeClusterTopics:
@@ -373,21 +428,14 @@ class TestMCPTools:
         # Verify cache was queried with correct params
         mock_db.get_clustering_cache.assert_called_once()
 
-        # Verify cleanup
-        mock_cm.embeddings_manager.close.assert_called_once()
-        mock_db.close.assert_called_once()
-
     @patch("abstracts_explorer.mcp.resources.load_clustering_data")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_get_conference_topics_no_conference(self, mock_config, mock_load):
-        """Test get_conference_topics returns error when no conference is specified."""
+        """Test get_conference_topics raises when no conference is specified."""
         from abstracts_explorer.mcp_server import get_conference_topics
 
-        result_str = get_conference_topics()
-        result = json.loads(result_str)
-
-        assert "error" in result
-        assert "conference must be specified" in result["error"]
+        with pytest.raises(ToolError, match="conference must be specified"):
+            get_conference_topics()
 
     @patch("abstracts_explorer.mcp.resources.load_clustering_data")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
@@ -406,12 +454,8 @@ class TestMCPTools:
 
         from abstracts_explorer.mcp_server import get_conference_topics
 
-        result_str = get_conference_topics(conferences=["NeurIPS"])
-        result = json.loads(result_str)
-
-        assert "error" in result
-        assert "No pre-computed clustering data" in result["error"]
-        assert "NeurIPS" in result["error"]
+        with pytest.raises(ToolError, match="No pre-computed clustering data"):
+            get_conference_topics(conferences=["NeurIPS"])
 
     @patch("abstracts_explorer.mcp.resources.load_clustering_data")
     @patch("abstracts_explorer.mcp.tools.topics.analyze_cluster_topics")
@@ -471,14 +515,14 @@ class TestMCPTools:
         assert call_args[1]["year"] == 2025
 
 
-class TestToolResourceCleanup:
-    """Tests that tool failures still release MCP resources."""
+class TestToolResourceReuse:
+    """Tests that tool failures raise ToolError without closing cached resources."""
 
     @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
     @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
-    def test_search_papers_closes_on_error(self, mock_config, mock_db_class, mock_em_class):
-        """search_papers closes resources when the database search fails."""
+    def test_search_papers_raises_on_error(self, mock_config, mock_db_class, mock_em_class):
+        """search_papers raises ToolError and keeps cached resources open."""
         mock_config_obj = Mock()
         mock_config_obj.collection_name = "papers"
         mock_config.return_value = mock_config_obj
@@ -490,17 +534,17 @@ class TestToolResourceCleanup:
 
         from abstracts_explorer.mcp_server import search_papers
 
-        result = json.loads(search_papers(topic_keywords="transformers", conference="NeurIPS"))
+        with pytest.raises(ToolError, match="Paper search failed"):
+            search_papers(topic_keywords="transformers", conference="NeurIPS")
 
-        assert "boom" in result["error"]
-        mock_em.close.assert_called_once()
-        mock_db.close.assert_called_once()
+        mock_em.close.assert_not_called()
+        mock_db.close.assert_not_called()
 
     @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
     @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
-    def test_get_topic_evolution_closes_on_error(self, mock_config, mock_db_class, mock_em_class):
-        """get_topic_evolution closes resources when a database lookup fails."""
+    def test_get_topic_evolution_raises_on_error(self, mock_config, mock_db_class, mock_em_class):
+        """get_topic_evolution raises ToolError and keeps cached resources open."""
         mock_config_obj = Mock()
         mock_config_obj.collection_name = "papers"
         mock_config.return_value = mock_config_obj
@@ -512,17 +556,17 @@ class TestToolResourceCleanup:
 
         from abstracts_explorer.mcp_server import get_topic_evolution
 
-        result = json.loads(get_topic_evolution(topic_keywords="transformers", conferences=["NeurIPS"]))
+        with pytest.raises(ToolError, match="Topic evolution analysis failed"):
+            get_topic_evolution(topic_keywords="transformers", conferences=["NeurIPS"])
 
-        assert "boom" in result["error"]
-        mock_em.close.assert_called_once()
-        mock_db.close.assert_called_once()
+        mock_em.close.assert_not_called()
+        mock_db.close.assert_not_called()
 
     @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
     @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
-    def test_analyze_topic_relevance_closes_on_error(self, mock_config, mock_db_class, mock_em_class):
-        """analyze_topic_relevance closes resources when the search fails."""
+    def test_analyze_topic_relevance_raises_on_error(self, mock_config, mock_db_class, mock_em_class):
+        """analyze_topic_relevance raises ToolError and keeps cached resources open."""
         mock_config_obj = Mock()
         mock_config_obj.collection_name = "papers"
         mock_config.return_value = mock_config_obj
@@ -534,11 +578,11 @@ class TestToolResourceCleanup:
 
         from abstracts_explorer.mcp_server import analyze_topic_relevance
 
-        result = json.loads(analyze_topic_relevance(topic="transformers", conferences=["NeurIPS"]))
+        with pytest.raises(ToolError, match="Topic relevance analysis failed"):
+            analyze_topic_relevance(topic="transformers", conferences=["NeurIPS"])
 
-        assert "boom" in result["error"]
-        mock_em.close.assert_called_once()
-        mock_db.close.assert_called_once()
+        mock_em.close.assert_not_called()
+        mock_db.close.assert_not_called()
 
 
 class TestParseConferenceYear:
@@ -595,9 +639,9 @@ class TestParseConferenceYear:
 
         from abstracts_explorer.mcp_server import _get_conference_topics_for_single_conference
 
-        result = _get_conference_topics_for_single_conference("NeurIPS", years=[2025])
+        with pytest.raises(ToolError, match="No pre-computed clustering data"):
+            _get_conference_topics_for_single_conference("NeurIPS", years=[2025])
 
-        assert "error" in result
         assert mock_db.get_clustering_cache.call_count == 1
 
 
@@ -635,8 +679,6 @@ class TestTopicEvolutionAndRelevance:
         assert query_arg.text == "transformers"
         assert mock_em.query_ids_within_distance.call_args.kwargs["distance_threshold"] == 1.1
         assert mock_em.query_ids_within_distance.call_args.kwargs["ids"] == ["a1", "a2", "a3"]
-        mock_em.close.assert_called_once()
-        mock_db.close.assert_called_once()
 
     @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
     @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
@@ -852,9 +894,8 @@ class TestTopicEvolutionAndRelevance:
     def test_get_cluster_visualization_no_conference(self, mock_config, mock_load):
         from abstracts_explorer.mcp_server import get_cluster_visualization
 
-        result = json.loads(get_cluster_visualization())
-        assert "error" in result
-        assert "conference must be specified" in result["error"]
+        with pytest.raises(ToolError, match="conference must be specified"):
+            get_cluster_visualization()
 
     @patch("abstracts_explorer.mcp.resources.load_clustering_data")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
@@ -868,9 +909,8 @@ class TestTopicEvolutionAndRelevance:
 
         from abstracts_explorer.mcp_server import get_cluster_visualization
 
-        result = json.loads(get_cluster_visualization(conferences=["NeurIPS"]))
-        assert "error" in result
-        assert "No pre-computed clustering data" in result["error"]
+        with pytest.raises(ToolError, match="No pre-computed clustering data"):
+            get_cluster_visualization(conferences=["NeurIPS"])
 
 
 class TestMCPServerIntegration:
@@ -1219,12 +1259,11 @@ class TestGetPaperDetails:
         return defaults
 
     def test_no_arguments_returns_error(self):
-        """get_paper_details returns an error when no title or paper_id given."""
+        """get_paper_details raises when no title or paper_id is given."""
         from abstracts_explorer.mcp_server import get_paper_details
 
-        result = json.loads(get_paper_details())
-        assert "error" in result
-        assert "title" in result["error"] or "paper_id" in result["error"]
+        with pytest.raises(ToolError, match="Provide at least one"):
+            get_paper_details()
 
     def test_lookup_by_title(self):
         """get_paper_details searches by title keyword and returns matching papers."""
@@ -1343,18 +1382,17 @@ class TestGetPaperDetails:
         assert result["papers"] == []
 
     def test_exception_returns_error_json(self):
-        """Database exception returns error JSON without raising."""
+        """Database exception raises ToolError without leaking details."""
         from abstracts_explorer.mcp_server import get_paper_details
 
         mock_db = Mock()
         mock_db.keyword_search.side_effect = Exception("DB connection failed")
 
         with patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager", return_value=mock_db):
-            result = json.loads(get_paper_details(title="Paper"))
+            with pytest.raises(ToolError, match="Paper lookup failed"):
+                get_paper_details(title="Paper")
 
-        assert "error" in result
-        assert "DB connection failed" in result["error"]
-        mock_db.close.assert_called_once()
+        mock_db.close.assert_not_called()
 
 
 if __name__ == "__main__":
@@ -1367,8 +1405,8 @@ class TestInterestingPaperMCPTools:
     def test_summarize_without_ratings_returns_error(self):
         from abstracts_explorer.mcp_server import summarize_interesting_papers
 
-        result = json.loads(summarize_interesting_papers())
-        assert "error" in result
+        with pytest.raises(ToolError, match="No interesting papers"):
+            summarize_interesting_papers()
 
     @patch("abstracts_explorer.mcp.shared_dependencies._summarize_interesting_papers")
     @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
@@ -1395,13 +1433,13 @@ class TestInterestingPaperMCPTools:
             conference="ICLR",
             years=[2026],
         )
-        mock_db.close.assert_called_once()
+        mock_db.close.assert_not_called()
 
     def test_recommend_without_ratings_returns_error(self):
         from abstracts_explorer.mcp_server import recommend_related_papers
 
-        result = json.loads(recommend_related_papers())
-        assert "error" in result
+        with pytest.raises(ToolError, match="No interesting papers"):
+            recommend_related_papers()
 
     @patch("abstracts_explorer.mcp.shared_dependencies._recommend_related_papers")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
@@ -1445,8 +1483,8 @@ class TestInterestingPaperMCPTools:
             limit=3,
             exclude_ids=None,
         )
-        mock_em.close.assert_called_once()
-        mock_db.close.assert_called_once()
+        mock_em.close.assert_not_called()
+        mock_db.close.assert_not_called()
 
 
 class TestInterestingPaperLegacyFormatRejection:
@@ -1459,11 +1497,9 @@ class TestInterestingPaperLegacyFormatRejection:
         mock_db = Mock()
         mock_db_class.return_value = mock_db
 
-        result = json.loads(summarize_interesting_papers(priorities={"p1": 5}))
-
-        assert "error" in result
-        assert "Invalid rating format" in result["error"]
-        mock_db.close.assert_called_once()
+        with pytest.raises(ToolError, match="Invalid rating format"):
+            summarize_interesting_papers(priorities={"p1": 5})
+        mock_db.close.assert_not_called()
 
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
@@ -1479,9 +1515,7 @@ class TestInterestingPaperLegacyFormatRejection:
         mock_em = Mock()
         mock_em_class.return_value = mock_em
 
-        result = json.loads(recommend_related_papers(priorities={"p1": 5}))
-
-        assert "error" in result
-        assert "Invalid rating format" in result["error"]
-        mock_em.close.assert_called_once()
-        mock_db.close.assert_called_once()
+        with pytest.raises(ToolError, match="Invalid rating format"):
+            recommend_related_papers(priorities={"p1": 5})
+        mock_em.close.assert_not_called()
+        mock_db.close.assert_not_called()

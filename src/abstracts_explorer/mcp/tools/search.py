@@ -7,6 +7,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from abstracts_explorer.mcp import resources, shared_dependencies
+from abstracts_explorer.mcp.errors import ToolError
 from abstracts_explorer.mcp.server import mcp
 
 logger = logging.getLogger(__name__)
@@ -58,14 +59,7 @@ def search_papers(
     try:
         limit = max(1, min(int(limit), 50))
         if not conference:
-            return json.dumps(
-                {
-                    "error": (
-                        "A conference must be specified for paper search. " "Please provide conference parameter."
-                    )
-                },
-                indent=2,
-            )
+            raise ToolError("A conference must be specified for paper search. Please provide conference parameter.")
         config = shared_dependencies.get_config()
         collection_name = collection_name or config.collection_name
 
@@ -99,9 +93,11 @@ def search_papers(
 
             return json.dumps(result, indent=2)
 
+    except ToolError:
+        raise
     except Exception as e:
-        logger.error(f"Failed to search papers: {str(e)}")
-        return json.dumps({"error": str(e)}, indent=2)
+        logger.exception("Failed to search papers: %s", e)
+        raise ToolError("Paper search failed; check server logs for details.") from e
 
 
 @mcp.tool()
@@ -148,10 +144,7 @@ def get_paper_details(
           poster_position, keywords, award, year, conference, original_id
     """
     if not title and not paper_id:
-        return json.dumps(
-            {"error": "Provide at least one of 'title' or 'paper_id' to look up a paper."},
-            indent=2,
-        )
+        raise ToolError("Provide at least one of 'title' or 'paper_id' to look up a paper.")
 
     try:
         with resources._get_mcp_resources(with_embeddings=False) as (_, db):
@@ -180,6 +173,8 @@ def get_paper_details(
 
             return json.dumps(result, indent=2, default=str)
 
+    except ToolError:
+        raise
     except Exception as e:
-        logger.error(f"Failed to get paper details: {str(e)}")
-        return json.dumps({"error": str(e)}, indent=2)
+        logger.exception("Failed to get paper details: %s", e)
+        raise ToolError("Paper lookup failed; check server logs for details.") from e

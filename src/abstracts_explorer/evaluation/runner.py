@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from abstracts_explorer.evaluation.errors import EvaluationError
 from abstracts_explorer.evaluation.formatting import _strip_reasoning_and_fences, format_eval_summary
-from abstracts_explorer.evaluation.prompts import _JUDGE_SYSTEM_PROMPT, _JUDGE_USER_PROMPT
+from abstracts_explorer.evaluation.prompts import _JUDGE_SYSTEM_PROMPT, format_judge_user_prompt
 from abstracts_explorer.llm_utils import chat_completion_text
 
 logger = logging.getLogger(__name__)
@@ -48,11 +48,7 @@ class RunnerMixin:
         dict
             ``{"score": int, "reasoning": str}``
         """
-        user_prompt = _JUDGE_USER_PROMPT.format(
-            query=query,
-            expected_answer=expected_answer,
-            actual_answer=actual_answer,
-        )
+        user_prompt = format_judge_user_prompt(query, expected_answer, actual_answer)
         try:
             raw = chat_completion_text(
                 client=self.openai_client,
@@ -168,11 +164,15 @@ class RunnerMixin:
                     except (TypeError, ValueError, json.JSONDecodeError):
                         logger.debug("Could not parse source_info context for pair %s", qa_pair_id)
 
+                tools_used: List[str] = []
                 try:
                     result = rag.query(query_text, conferences=conferences, years=years)
                     actual_answer = (result.get("response") or "").strip()
                     tools_used = result.get("metadata", {}).get("tools_executed", [])
-                    actual_tool = tools_used[0] if tools_used else None
+                    if expected_tool and expected_tool in tools_used:
+                        actual_tool = expected_tool
+                    else:
+                        actual_tool = tools_used[0] if tools_used else None
                 except Exception as exc:
                     error_msg = str(exc)
                     logger.warning(f"Query failed for pair {qa_pair_id}: {exc}")

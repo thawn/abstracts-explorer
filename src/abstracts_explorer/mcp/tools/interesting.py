@@ -7,6 +7,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from abstracts_explorer.mcp import resources, shared_dependencies
+from abstracts_explorer.mcp.errors import ToolError
 from abstracts_explorer.mcp.server import mcp
 
 logger = logging.getLogger(__name__)
@@ -51,14 +52,7 @@ def summarize_interesting_papers(
         JSON string containing the interesting-paper summary.
     """
     if not paper_ids and not priorities:
-        return json.dumps(
-            {
-                "error": (
-                    "No interesting papers were provided. Mark papers with stars in the " "web UI and try again."
-                )
-            },
-            indent=2,
-        )
+        raise ToolError("No interesting papers were provided. Mark papers with stars in the web UI and try again.")
 
     try:
         with resources._get_mcp_resources(with_embeddings=False) as (_, db):
@@ -70,9 +64,13 @@ def summarize_interesting_papers(
                 years=years,
             )
             return json.dumps(result, indent=2, default=str)
+    except ToolError:
+        raise
+    except (TypeError, ValueError) as e:
+        raise ToolError(str(e)) from e
     except Exception as e:
-        logger.error(f"Failed to summarize interesting papers: {str(e)}")
-        return json.dumps({"error": str(e)}, indent=2)
+        logger.exception("Failed to summarize interesting papers: %s", e)
+        raise ToolError("Interesting-paper summary failed; check server logs for details.") from e
 
 
 @mcp.tool()
@@ -125,14 +123,7 @@ def recommend_related_papers(
         JSON string containing recommended papers and filter metadata.
     """
     if not paper_ids and not priorities:
-        return json.dumps(
-            {
-                "error": (
-                    "No interesting papers were provided. Mark papers with stars in the " "web UI and try again."
-                )
-            },
-            indent=2,
-        )
+        raise ToolError("No interesting papers were provided. Mark papers with stars in the web UI and try again.")
 
     config = shared_dependencies.get_config()
     collection_name = collection_name or config.collection_name
@@ -151,6 +142,10 @@ def recommend_related_papers(
                 exclude_ids=exclude_ids,
             )
             return json.dumps(result, indent=2, default=str)
+    except ToolError:
+        raise
+    except (TypeError, ValueError) as e:
+        raise ToolError(str(e)) from e
     except Exception as e:
-        logger.error(f"Failed to recommend related papers: {str(e)}")
-        return json.dumps({"error": str(e)}, indent=2)
+        logger.exception("Failed to recommend related papers: %s", e)
+        raise ToolError("Related-paper recommendation failed; check server logs for details.") from e

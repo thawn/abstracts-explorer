@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 
 from abstracts_explorer.embeddings import QueryEmbedding
 from abstracts_explorer.mcp import resources, shared_dependencies
+from abstracts_explorer.mcp.errors import ToolError
 from abstracts_explorer.mcp.server import mcp
 
 logger = logging.getLogger(__name__)
@@ -60,14 +61,9 @@ def get_topic_evolution(
     """
     try:
         if not conferences:
-            return json.dumps(
-                {
-                    "error": (
-                        "A conference must be specified for topic evolution analysis. "
-                        "Please provide conferences parameter."
-                    )
-                },
-                indent=2,
+            raise ToolError(
+                "A conference must be specified for topic evolution analysis. "
+                "Please provide conferences parameter."
             )
         config = shared_dependencies.get_config()
         collection_name = collection_name or config.collection_name
@@ -199,6 +195,8 @@ def get_topic_evolution(
 
             return json.dumps(result, indent=2)
 
+    except ToolError:
+        raise
     except Exception as e:
-        logger.error(f"Failed to get topic evolution: {str(e)}")
-        return json.dumps({"error": str(e)}, indent=2)
+        logger.exception("Failed to get topic evolution: %s", e)
+        raise ToolError("Topic evolution analysis failed; check server logs for details.") from e

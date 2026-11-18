@@ -18,6 +18,7 @@ from abstracts_explorer.mcp import (
     search_papers as mcp_search_papers,
     summarize_interesting_papers as mcp_summarize_interesting_papers,
 )
+from abstracts_explorer.mcp.errors import ToolError
 from abstracts_explorer.mcp_tools import abbreviate_result, format_tool_result_for_llm
 from abstracts_explorer.rag.tool_context import RAGToolContext
 
@@ -71,7 +72,10 @@ def _run_rag_tool(
         return format_tool_result_for_llm(tool_name, cached) + note
 
     logger.info("Tool call: %s(keys=%s)", tool_name, sorted(kwargs))
-    raw = mcp_func(**kwargs)
+    try:
+        raw = mcp_func(**kwargs)
+    except ToolError as exc:
+        raw = json.dumps({"error": str(exc)})
     logger.info("Tool result: %s → %s", tool_name, abbreviate_result(raw))
     with ctx.deps.tool_cache_lock:
         ctx.deps.tool_cache[cache_key] = raw

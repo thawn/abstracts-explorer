@@ -7,6 +7,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from abstracts_explorer.mcp import cache, resources, shared_dependencies
+from abstracts_explorer.mcp.errors import ToolError
 from abstracts_explorer.mcp.server import mcp
 
 logger = logging.getLogger(__name__)
@@ -17,7 +18,6 @@ def get_cluster_visualization(
     conferences: Optional[List[str]] = None,
     years: Optional[List[int]] = None,
     collection_name: Optional[str] = None,
-    **kwargs,
 ) -> str:
     """
     Retrieve pre-computed visualization data for clustered embeddings.
@@ -41,8 +41,6 @@ def get_cluster_visualization(
         Filter by publication years.
     collection_name : str, optional
         Name of ChromaDB collection.
-    **kwargs
-        Ignored (for backwards compatibility with old tool schemas).
 
     Returns
     -------
@@ -51,14 +49,8 @@ def get_cluster_visualization(
     """
     try:
         if not conferences:
-            return json.dumps(
-                {
-                    "error": (
-                        "A conference must be specified for cluster visualization. "
-                        "Please provide conferences parameter."
-                    )
-                },
-                indent=2,
+            raise ToolError(
+                "A conference must be specified for cluster visualization. Please provide conferences parameter."
             )
 
         config = shared_dependencies.get_config()
@@ -81,16 +73,11 @@ def get_cluster_visualization(
                 cached = cache._lookup_clustering_cache(db, config, parsed_conf, vis_years, collection_name)
 
             if not cached:
-                return json.dumps(
-                    {
-                        "error": (
-                            f"No pre-computed clustering data available for conference "
-                            f"'{parsed_conf}'"
-                            + (f" years={vis_years}" if vis_years else "")
-                            + ". Run 'abstracts-explorer clustering pre-generate' first."
-                        ),
-                    },
-                    indent=2,
+                raise ToolError(
+                    f"No pre-computed clustering data available for conference "
+                    f"'{parsed_conf}'"
+                    + (f" years={vis_years}" if vis_years else "")
+                    + ". Run 'abstracts-explorer clustering pre-generate' first."
                 )
 
             all_points.extend(cached.get("points", []))
@@ -114,6 +101,8 @@ def get_cluster_visualization(
 
         return json.dumps(result, indent=2)
 
+    except ToolError:
+        raise
     except Exception as e:
-        logger.error(f"Failed to generate cluster visualization: {str(e)}")
-        return json.dumps({"error": str(e)}, indent=2)
+        logger.exception("Failed to generate cluster visualization: %s", e)
+        raise ToolError("Cluster visualization failed; check server logs for details.") from e

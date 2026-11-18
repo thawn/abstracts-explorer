@@ -428,6 +428,23 @@ class TestRAGToolQueue:
         assert mcp_func.call_count == 1
         assert "do not repeat" in second.lower()
 
+    def test_tool_error_is_converted_and_cached(self):
+        """A raised ToolError becomes an error result and is cached."""
+        from abstracts_explorer.mcp.errors import ToolError
+        from abstracts_explorer.rag import _run_rag_tool, RAGToolContext
+
+        ctx = Mock()
+        ctx.deps = RAGToolContext()
+        mcp_func = Mock(side_effect=ToolError("No pre-computed clustering data"))
+
+        first = _run_rag_tool(ctx, "get_conference_topics", mcp_func, {"conferences": ["NeurIPS"]})
+        second = _run_rag_tool(ctx, "get_conference_topics", mcp_func, {"conferences": ["NeurIPS"]})
+
+        assert "No pre-computed clustering data" in first
+        assert mcp_func.call_count == 1
+        assert len(ctx.deps.tool_results) == 1
+        assert "do not repeat" in second.lower()
+
 
 class TestRAGChatQuery:
     """Test RAGChat query method."""

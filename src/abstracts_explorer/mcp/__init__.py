@@ -12,6 +12,7 @@ from abstracts_explorer.mcp.errors import ClusterAnalysisError
 from abstracts_explorer.mcp.resources import (
     _get_clustering_resources,
     _get_mcp_resources,
+    close_mcp_resources,
     load_clustering_data,
 )
 from abstracts_explorer.mcp.server import mcp, run_mcp_server
@@ -37,6 +38,7 @@ __all__ = [
     "mcp",
     "run_mcp_server",
     "ClusterAnalysisError",
+    "close_mcp_resources",
     "load_clustering_data",
     "analyze_cluster_topics",
     "get_conference_topics",

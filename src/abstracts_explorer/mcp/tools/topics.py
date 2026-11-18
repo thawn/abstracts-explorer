@@ -7,7 +7,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from abstracts_explorer.mcp import cache, resources, shared_dependencies
-from abstracts_explorer.mcp.errors import ClusterAnalysisError
+from abstracts_explorer.mcp.errors import ClusterAnalysisError, ToolError
 from abstracts_explorer.mcp.server import mcp
 
 logger = logging.getLogger(__name__)
@@ -110,8 +110,12 @@ def _get_conference_topics_for_single_conference(
     Returns
     -------
     dict
-        Topics result dict with ``"topic_sizes"`` and ``"topics"``
-        keys, or an ``"error"`` key if no cache is available.
+        Topics result dict with ``"topic_sizes"`` and ``"topics"`` keys.
+
+    Raises
+    ------
+    ToolError
+        If no cached clustering data exists for the requested scope.
     """
     config = shared_dependencies.get_config()
     collection_name = collection_name or config.collection_name
@@ -128,14 +132,12 @@ def _get_conference_topics_for_single_conference(
         cached = cache._lookup_clustering_cache(db, config, conference, years, collection_name)
 
         if not cached:
-            return {
-                "error": (
-                    f"No pre-computed clustering data available for conference "
-                    f"'{conference}'"
-                    + (f" years={years}" if years else "")
-                    + ". Run 'abstracts-explorer clustering pre-generate' first."
-                ),
-            }
+            raise ToolError(
+                f"No pre-computed clustering data available for conference "
+                f"'{conference}'"
+                + (f" years={years}" if years else "")
+                + ". Run 'abstracts-explorer clustering pre-generate' first."
+            )
 
         # Reconstruct shared_dependencies.ClusteringManager state from cached results
         cm.load_embeddings(conferences=[conference], years=years)
@@ -170,7 +172,6 @@ def get_conference_topics(
     conferences: Optional[List[str]] = None,
     years: Optional[List[int]] = None,
     collection_name: Optional[str] = None,
-    **kwargs,
 ) -> str:
     """
     Get the main research topics of a conference.
@@ -191,8 +192,6 @@ def get_conference_topics(
         Filter by publication years.
     collection_name : str, optional
         Name of ChromaDB collection (uses config default if not provided).
-    **kwargs
-        Ignored (for backwards compatibility with old tool schemas).
 
     Returns
     -------
@@ -201,13 +200,8 @@ def get_conference_topics(
     """
     try:
         if not conferences:
-            return json.dumps(
-                {
-                    "error": (
-                        "A conference must be specified for topic analysis. " "Please provide conferences parameter."
-                    )
-                },
-                indent=2,
+            raise ToolError(
+                "A conference must be specified for topic analysis. Please provide conferences parameter."
             )
 
         all_results: List[Dict[str, Any]] = []
@@ -226,6 +220,8 @@ def get_conference_topics(
         # Multiple conferences – combine
         return json.dumps({"conference_results": all_results}, indent=2)
 
+    except ToolError:
+        raise
     except Exception as e:
-        logger.error(f"Failed to get conference topics: {str(e)}")
-        return json.dumps({"error": str(e)}, indent=2)
+        logger.exception("Failed to get conference topics: %s", e)
+        raise ToolError("Conference topic analysis failed; check server logs for details.") from e

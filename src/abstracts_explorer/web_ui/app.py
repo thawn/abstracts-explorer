@@ -806,14 +806,18 @@ def topic_evolution():
         maximum=_MAX_DISTANCE,
     )
 
+    from abstracts_explorer.mcp.errors import ToolError
     from abstracts_explorer.mcp_server import get_topic_evolution as mcp_get_topic_evolution
 
     enforce_client_rate_limit(_client_id())
-    result_json = mcp_get_topic_evolution(
-        topic_keywords=topic_keywords,
-        conferences=conferences,
-        distance_threshold=distance_threshold,
-    )
+    try:
+        result_json = mcp_get_topic_evolution(
+            topic_keywords=topic_keywords,
+            conferences=conferences,
+            distance_threshold=distance_threshold,
+        )
+    except ToolError as exc:
+        return jsonify({"error": str(exc)})
 
     result = json.loads(result_json)
     return jsonify(result)

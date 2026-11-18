@@ -11,9 +11,9 @@ from typing import Any, Dict, List, Optional
 from abstracts_explorer.evaluation.errors import EvaluationError
 from abstracts_explorer.evaluation.formatting import _parse_json_array
 from abstracts_explorer.evaluation.prompts import (
-    _FOLLOWUP_GENERATION_PROMPT,
     _QA_GENERATION_SYSTEM_PROMPT,
-    _QA_GENERATION_USER_PROMPT,
+    format_followup_generation_prompt,
+    format_qa_generation_user_prompt,
 )
 from abstracts_explorer.llm_utils import chat_completion_text
 from abstracts_explorer.mcp_tools import (
@@ -118,7 +118,7 @@ class GeneratorMixin:
             tool_desc = TOOL_DESCRIPTIONS[tool_name]
             tool_args_example = TOOL_ARGUMENT_EXAMPLES[tool_name]
 
-            user_prompt = _QA_GENERATION_USER_PROMPT.format(
+            user_prompt = format_qa_generation_user_prompt(
                 n_pairs=n_pairs_per_tool,
                 tool_name=tool_name,
                 tool_description=tool_desc,
@@ -174,7 +174,7 @@ class GeneratorMixin:
 
                 # Generate follow-ups
                 if generate_followups and n_followups > 0:
-                    followup_prompt = _FOLLOWUP_GENERATION_PROMPT.format(
+                    followup_prompt = format_followup_generation_prompt(
                         n_followups=n_followups,
                         initial_query=entry["query"],
                         initial_answer=entry["expected_answer"],
