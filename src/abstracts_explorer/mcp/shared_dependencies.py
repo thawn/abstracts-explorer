@@ -11,6 +11,7 @@ from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.interesting_papers import (
     recommend_related_papers as _recommend_related_papers,
+    suggest_authors_to_meet as _suggest_authors_to_meet,
     summarize_interesting_papers as _summarize_interesting_papers,
 )
 from abstracts_explorer.utils.conference_utils import parse_conference_year
@@ -22,5 +23,6 @@ __all__ = [
     "get_config",
     "parse_conference_year",
     "_recommend_related_papers",
+    "_suggest_authors_to_meet",
     "_summarize_interesting_papers",
 ]

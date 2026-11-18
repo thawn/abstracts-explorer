@@ -27,6 +27,7 @@ from abstracts_explorer.rag.tools import (
     _tool_get_topic_evolution,
     _tool_recommend_related_papers,
     _tool_search_papers,
+    _tool_suggest_authors_to_meet,
     _tool_summarize_interesting_papers,
 )
 from abstracts_explorer.utils.http_utils import build_llm_timeout
@@ -126,6 +127,7 @@ class AgentMixin:
             "When the user asks about papers they marked, starred, liked, or rated as interesting, "
             "use the summarize_interesting_papers or recommend_related_papers tools; their ratings "
             "are provided automatically by the web UI, so do not ask for paper IDs. "
+            "When the user asks who to meet, talk to, or network with, use suggest_authors_to_meet. "
             f"Today's date is {format_timestamp(datetime.now(), '%Y-%m-%d')}. "
             "When referencing specific papers, cite them using local markdown links: "
             "[Paper-1](#paper-1), [Paper-2](#paper-2), etc. "
@@ -236,6 +238,11 @@ class AgentMixin:
                         _tool_recommend_related_papers,
                         takes_ctx=True,
                         name="recommend_related_papers",
+                    ),
+                    Tool(
+                        _tool_suggest_authors_to_meet,
+                        takes_ctx=True,
+                        name="suggest_authors_to_meet",
                     ),
                 ]
             )

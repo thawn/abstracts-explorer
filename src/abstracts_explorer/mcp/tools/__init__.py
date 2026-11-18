@@ -13,8 +13,9 @@ from abstracts_explorer.mcp.tools.search import (
     get_paper_details,
 )
 from abstracts_explorer.mcp.tools.interesting import (
-    summarize_interesting_papers,
     recommend_related_papers,
+    suggest_authors_to_meet,
+    summarize_interesting_papers,
 )
 from abstracts_explorer.mcp.tools.relevance import (
     analyze_topic_relevance,
@@ -32,6 +33,7 @@ __all__ = [
     "get_paper_details",
     "summarize_interesting_papers",
     "recommend_related_papers",
+    "suggest_authors_to_meet",
     "analyze_topic_relevance",
     "get_cluster_visualization",
 ]

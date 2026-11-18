@@ -1431,3 +1431,72 @@ def test_format_recommend_related_papers_result():
     assert "Recommended Papers" in formatted
     assert "Paper B" in formatted
     assert "Shares keywords" in formatted
+
+
+def test_execute_mcp_tool_suggest_authors_to_meet():
+    """execute_mcp_tool dispatches suggest_authors_to_meet."""
+    mock_result = json.dumps({"authors": [], "authors_count": 0})
+    with patch(
+        "abstracts_explorer.mcp_tools.suggest_authors_to_meet",
+        return_value=mock_result,
+    ) as mock_tool:
+        result = execute_mcp_tool(
+            "suggest_authors_to_meet",
+            {
+                "priorities": {"a": {"priority": 5}},
+                "conferences": ["ICLR"],
+                "years": [2026],
+                "n_results": 3,
+                "paper_limit": 20,
+            },
+        )
+
+    assert result == mock_result
+    mock_tool.assert_called_once_with(
+        priorities={"a": {"priority": 5}},
+        conferences=["ICLR"],
+        years=[2026],
+        limit=3,
+        paper_limit=20,
+    )
+
+
+def test_format_suggest_authors_to_meet_result():
+    """Suggested authors are formatted with stars, counts, and locations."""
+    data = {
+        "authors": [
+            {
+                "name": "Alice Smith",
+                "score": 2.7,
+                "similar_paper_count": 2,
+                "starred_paper_count": 1,
+                "starred_author": True,
+                "why": ["Authored 2 similar papers", "Authored a paper you starred ⭐"],
+                "papers": [
+                    {
+                        "title": "Similar Paper",
+                        "conference": "ICLR",
+                        "year": 2026,
+                        "session": "Poster",
+                        "poster_position": "12",
+                    }
+                ],
+                "starred_papers": [
+                    {
+                        "title": "Starred Paper",
+                        "conference": "ICLR",
+                        "year": 2026,
+                    }
+                ],
+            }
+        ],
+        "filters": {"conferences": ["ICLR"], "years": [2026]},
+    }
+
+    formatted = format_tool_result_for_llm("suggest_authors_to_meet", json.dumps(data))
+
+    assert "Suggested Authors to Meet" in formatted
+    assert "Alice Smith ⭐" in formatted
+    assert "2 similar, 1 starred" in formatted
+    assert "Starred Paper" in formatted
+    assert "poster 12" in formatted

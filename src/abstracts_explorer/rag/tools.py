@@ -16,6 +16,7 @@ from abstracts_explorer.mcp import (
     get_topic_evolution as mcp_get_topic_evolution,
     recommend_related_papers as mcp_recommend_related_papers,
     search_papers as mcp_search_papers,
+    suggest_authors_to_meet as mcp_suggest_authors_to_meet,
     summarize_interesting_papers as mcp_summarize_interesting_papers,
 )
 from abstracts_explorer.mcp.errors import ToolError
@@ -441,3 +442,49 @@ def _tool_recommend_related_papers(
         kwargs["years"] = resolved_years
 
     return _run_rag_tool(ctx, "recommend_related_papers", mcp_recommend_related_papers, kwargs)
+
+
+def _tool_suggest_authors_to_meet(
+    ctx: RunContext[RAGToolContext],
+    conferences: Optional[List[str]] = None,
+    years: Optional[List[int]] = None,
+    limit: int = 10,
+    paper_limit: int = 50,
+) -> str:
+    """Suggest authors to meet based on the user's interesting papers.
+
+    Use this tool when the user asks who to meet, which authors to talk to, or
+    who works on similar topics at the conference. The user's ratings are
+    provided automatically by the web UI, so do not ask for paper IDs.
+
+    Parameters
+    ----------
+    ctx : RunContext[RAGToolContext]
+        Agent context with dependencies.
+    conferences : list of str, optional
+        Restrict similar papers to these conferences. When omitted, the
+        currently selected conferences from the web UI are used automatically.
+    years : list of int, optional
+        Restrict similar papers to these years. When omitted, the currently
+        selected years from the web UI are used automatically.
+    limit : int, optional
+        Maximum number of authors to return (default: 10).
+    paper_limit : int, optional
+        Maximum number of similar papers to consider (default: 50).
+    """
+    priorities = ctx.deps.paper_priorities or {}
+    if not priorities:
+        return (
+            "No papers have been marked as interesting yet. " "Rate papers with the star buttons in the web UI first."
+        )
+
+    resolved_conferences = conferences if conferences else (ctx.deps.conferences or None)
+    resolved_years = years if years is not None else (ctx.deps.years or None)
+
+    kwargs: Dict[str, Any] = {"priorities": priorities, "limit": limit, "paper_limit": paper_limit}
+    if resolved_conferences:
+        kwargs["conferences"] = resolved_conferences
+    if resolved_years:
+        kwargs["years"] = resolved_years
+
+    return _run_rag_tool(ctx, "suggest_authors_to_meet", mcp_suggest_authors_to_meet, kwargs)

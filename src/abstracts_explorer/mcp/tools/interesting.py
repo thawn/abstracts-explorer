@@ -149,3 +149,85 @@ def recommend_related_papers(
     except Exception as e:
         logger.exception("Failed to recommend related papers: %s", e)
         raise ToolError("Related-paper recommendation failed; check server logs for details.") from e
+
+
+@mcp.tool()
+def suggest_authors_to_meet(
+    paper_ids: Optional[List[str]] = None,
+    priorities: Optional[Dict[str, Any]] = None,
+    conferences: Optional[List[str]] = None,
+    years: Optional[List[int]] = None,
+    limit: int = 10,
+    paper_limit: int = 50,
+    exclude_ids: Optional[List[str]] = None,
+    collection_name: Optional[str] = None,
+) -> str:
+    """
+    Suggest authors to meet at a conference based on the user's interesting papers.
+
+    The tool finds papers semantically similar to the user's interesting papers,
+    aggregates their authors, and ranks the authors by similarity-weighted
+    frequency.  Authors of papers the user starred are included and marked with
+    ``starred_author``.  Each author record includes their similar papers,
+    sessions, rooms, and poster positions so the user can find them.
+
+    Use this tool when the user asks who to meet, which authors to talk to, or
+    who works on similar topics at the conference.
+
+    Parameters
+    ----------
+    paper_ids : list of str, optional
+        UIDs of the interesting papers.  When omitted, the keys of
+        *priorities* are used.
+    priorities : dict, optional
+        Mapping of paper UID to a dict with ``priority`` and optional
+        ``searchTerm`` fields.  This is normally supplied automatically from
+        the web UI.
+    conferences : list of str, optional
+        Restrict similar papers to these conferences.  When omitted, the
+        dominant conference of the interesting papers is used.
+    years : list of int, optional
+        Restrict similar papers to these years.  When omitted, the years of
+        the interesting papers are used.
+    limit : int, optional
+        Maximum number of authors to return (default: 10).
+    paper_limit : int, optional
+        Maximum number of similar papers to consider (default: 50).
+    exclude_ids : list of str, optional
+        Additional paper UIDs to exclude from the similar-paper search.
+    collection_name : str, optional
+        Name of the ChromaDB collection (uses config default if not provided).
+
+    Returns
+    -------
+    str
+        JSON string containing ranked authors and filter metadata.
+    """
+    if not paper_ids and not priorities:
+        raise ToolError("No interesting papers were provided. Mark papers with stars in the web UI and try again.")
+
+    config = shared_dependencies.get_config()
+    collection_name = collection_name or config.collection_name
+
+    try:
+        with resources._get_mcp_resources(collection_name) as (em, db):
+            assert em is not None
+            result = shared_dependencies._suggest_authors_to_meet(
+                database=db,
+                embeddings_manager=em,
+                priorities=priorities,
+                paper_ids=paper_ids,
+                conferences=conferences,
+                years=years,
+                limit=limit,
+                paper_limit=paper_limit,
+                exclude_ids=exclude_ids,
+            )
+            return json.dumps(result, indent=2, default=str)
+    except ToolError:
+        raise
+    except (TypeError, ValueError) as e:
+        raise ToolError(str(e)) from e
+    except Exception as e:
+        logger.exception("Failed to suggest authors to meet: %s", e)
+        raise ToolError("Author suggestion failed; check server logs for details.") from e

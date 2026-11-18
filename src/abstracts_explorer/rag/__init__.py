@@ -18,6 +18,7 @@ from abstracts_explorer.rag.tools import (
     _tool_get_topic_evolution,
     _tool_recommend_related_papers,
     _tool_search_papers,
+    _tool_suggest_authors_to_meet,
     _tool_summarize_interesting_papers,
 )
 
@@ -34,4 +35,5 @@ __all__ = [
     "_tool_get_paper_details",
     "_tool_summarize_interesting_papers",
     "_tool_recommend_related_papers",
+    "_tool_suggest_authors_to_meet",
 ]

@@ -2094,6 +2094,54 @@ class TestRAGChatInterestingPaperTools:
         )
         assert "recommend_related_papers" in result["metadata"]["tools_executed"]
 
+    @patch("abstracts_explorer.rag.tools.mcp_suggest_authors_to_meet")
+    def test_query_calls_suggest_authors_to_meet(
+        self,
+        mock_suggest,
+        mock_embeddings_manager,
+        mock_database,
+    ):
+        mock_suggest.return_value = json.dumps({"authors": [], "authors_count": 0})
+
+        def model_fn(messages, info):
+            for msg in messages:
+                for part in msg.parts:
+                    if getattr(part, "part_kind", None) == "tool-return":
+                        return ModelResponse(parts=[TextPart(content="Here are people to meet.")])
+            return ModelResponse(parts=[ToolCallPart(tool_name="suggest_authors_to_meet", args={})])
+
+        chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+
+        with chat.agent.override(model=FunctionModel(model_fn)):
+            result = chat.query(
+                "Who should I meet based on my interesting papers?",
+                conferences=["ICLR"],
+                years=[2026],
+                paper_priorities={"p1": {"priority": 5}},
+            )
+
+        mock_suggest.assert_called_once_with(
+            priorities={"p1": {"priority": 5}},
+            limit=10,
+            paper_limit=50,
+            conferences=["ICLR"],
+            years=[2026],
+        )
+        assert "suggest_authors_to_meet" in result["metadata"]["tools_executed"]
+
+    def test_suggest_authors_without_ratings_returns_message(
+        self,
+        mock_embeddings_manager,
+        mock_database,
+    ):
+        from abstracts_explorer.rag import RAGToolContext, _tool_suggest_authors_to_meet
+
+        ctx = Mock()
+        ctx.deps = RAGToolContext()
+
+        message = _tool_suggest_authors_to_meet(ctx)
+        assert "No papers have been marked" in message
+
     def test_interesting_tools_without_ratings_return_message(
         self,
         mock_embeddings_manager,

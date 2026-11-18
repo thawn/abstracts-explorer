@@ -44,6 +44,7 @@ The LLM picks the right tool automatically from your plain-English question.
 | `get_paper_details`         | "Who wrote that paper? Where is the poster?"           |
 | `summarize_interesting_papers` | "Summarize the papers I marked as interesting for ICLR'26" |
 | `recommend_related_papers`  | "Suggest other papers based on my interesting papers"  |
+| `suggest_authors_to_meet`   | "Who should I meet based on my interesting papers?"    |
 
 ## Quick Start
 

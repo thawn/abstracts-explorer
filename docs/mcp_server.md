@@ -125,7 +125,29 @@ reasons (shared keywords, authors, session, or semantic closeness).
 
 **Example use case:** "Based on my interesting papers, suggest other papers that may interest me."
 
-### 7. `get_paper_details`
+### 7. `suggest_authors_to_meet`
+
+Suggests authors to meet at the conference based on the user's interesting
+papers. The tool reuses the related-paper semantic search, aggregates authors
+across similar papers, and ranks them by similarity-weighted frequency. Authors
+of papers the user starred are included and marked.
+
+**Parameters:**
+- `paper_ids` (list of str, optional): Paper UIDs. When omitted, the keys of `priorities` are used.
+- `priorities` (dict, optional): Mapping of paper UID to a dict with `priority` and optional `searchTerm`.
+- `conferences` (list of str, optional): Restrict similar papers to these conferences. Defaults to the dominant conference of the interesting papers.
+- `years` (list of int, optional): Restrict similar papers to these years. Defaults to the years of the interesting papers.
+- `limit` (int, optional): Number of authors to return (default: 10).
+- `paper_limit` (int, optional): Number of similar papers to consider (default: 50).
+- `exclude_ids` (list of str, optional): Additional UIDs to exclude.
+
+**Returns:** JSON with ranked authors, each including a similarity-weighted
+score, similar/starred paper counts, a star marker for authors of starred
+papers, and the sessions, rooms, and poster positions where they can be found.
+
+**Example use case:** "Who should I meet at ICLR'26 based on my interesting papers?"
+
+### 8. `get_paper_details`
 
 Fetches detailed metadata for one or more papers — for follow-up questions
 after a semantic search, not for topic searches.
@@ -144,7 +166,7 @@ after a semantic search, not for topic searches.
 
 **Example use case:** "Who wrote that paper? Where is the poster?"
 
-### 8. `analyze_topic_relevance`
+### 9. `analyze_topic_relevance`
 
 Counts papers within a distance threshold of a topic's embedding to gauge
 how prominent a research area is.
