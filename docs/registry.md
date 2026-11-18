@@ -226,7 +226,7 @@ abstracts-explorer download --conference neurips --year 2025
 abstracts-explorer create-embeddings
 
 # 3. (Optional) cluster embeddings to pre-populate the cache
-abstracts-explorer cluster-embeddings
+abstracts-explorer clustering run
 
 # 4. Upload to registry
 abstracts-explorer registry upload \
@@ -294,4 +294,4 @@ The Blablador token is read from the `BLABLADOR_TOKEN` repository secret.
 
 When running Abstracts Explorer in Docker, you can pre-populate the databases by running a one-off download command inside the container.
 
-See [Docker Setup](docker.md#get-pre-computed-data-from-the-registry) for details.
+See [Docker Setup](docker.md#get-pre-generated-data-from-the-registry) for details.

@@ -46,6 +46,7 @@ describe('Paper Card Module', () => {
             </button>
             <select id="year-selector"><option value="">All</option></select>
             <select id="conference-selector"><option value="">All</option></select>
+            <div id="search-results"></div>
         `;
     });
 
@@ -334,6 +335,22 @@ describe('Paper Card Module', () => {
 
             // Should show error but not crash
             expect(global.fetch).toHaveBeenCalled();
+        });
+
+        it('should show a friendly message for an HTML 503 response', async () => {
+            global.fetch.mockResolvedValueOnce({
+                ok: false,
+                status: 503,
+                json: async () => {
+                    throw new SyntaxError('Unexpected token <');
+                }
+            });
+
+            await showPaperDetails('p1');
+
+            const results = document.getElementById('search-results');
+            expect(results.innerHTML).toContain('The server is temporarily unavailable');
+            expect(results.innerHTML).not.toContain('Unexpected token');
         });
     });
 

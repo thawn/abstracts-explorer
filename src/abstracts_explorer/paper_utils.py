@@ -53,7 +53,7 @@ def format_search_results(
 
     Examples
     --------
-    >>> results = embeddings_manager.search_similar("transformers", n_results=5)
+    >>> results = embeddings_manager.search_similar(QueryEmbedding("transformers", embeddings_manager), limit=5)
     >>> papers = format_search_results(results, database)
     >>> for paper in papers:
     ...     print(paper['title'], paper['similarity'])
@@ -118,76 +118,6 @@ def format_search_results(
         )
 
     return papers
-
-
-def build_context_from_papers(papers: List[Dict[str, Any]]) -> str:
-    """
-    Build a formatted context string from papers for RAG.
-
-    Parameters
-    ----------
-    papers : list
-        List of paper dictionaries with at minimum: title/name, authors, abstract.
-
-    Returns
-    -------
-    str
-        Formatted context string for LLM consumption.
-
-    Raises
-    ------
-    PaperFormattingError
-        If papers list is invalid or papers missing required fields.
-
-    Examples
-    --------
-    >>> papers = format_search_results(results, database)
-    >>> context = build_context_from_papers(papers)
-    >>> print(context)
-    """
-    if not isinstance(papers, list):
-        raise PaperFormattingError("papers must be a list.")
-
-    if not papers:
-        raise PaperFormattingError("papers list is empty. Cannot build context.")
-
-    context_parts = []
-    for i, paper in enumerate(papers, 1):
-        if not isinstance(paper, dict):
-            raise PaperFormattingError(f"Paper {i} is not a dictionary.")
-
-        # Validate required fields
-        title = paper.get("title")
-        if not title:
-            raise PaperFormattingError(f"Paper {i} missing required 'title' field.")
-
-        authors = paper.get("authors")
-        if not authors:
-            logger.warning(f"Paper {i} ({title}) has no authors.")
-            authors = "N/A"
-        elif isinstance(authors, list):
-            authors = ", ".join(authors) if authors else "N/A"
-
-        abstract = paper.get("abstract", "")
-        if not abstract:
-            logger.warning(f"Paper {i} ({title}) has no abstract.")
-            abstract = "N/A"
-
-        # Build context for this paper
-        context_parts.append(f"Paper {i}:")
-        context_parts.append(f"Title: {title}")
-        context_parts.append(f"Authors: {authors}")
-
-        # Optional fields
-        if paper.get("topic"):
-            context_parts.append(f"Topic: {paper['topic']}")
-        if paper.get("decision"):
-            context_parts.append(f"Decision: {paper['decision']}")
-
-        context_parts.append(f"Abstract: {abstract}")
-        context_parts.append("")  # Empty line between papers
-
-    return "\n".join(context_parts)
 
 
 def extract_top_keywords(papers: list, n_keywords: int = 5) -> list:

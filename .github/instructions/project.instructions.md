@@ -95,7 +95,7 @@ See `docs/plugins.md` for adding one.
   `tests/conftest.py` fixtures (`db_manager`, `connected_db`, `test_database`,
   `mock_lm_studio`, `embeddings_manager`, `web_test_papers`, ...) and
   `tests/helpers.py` (`requires_lm_studio`, `create_test_db_with_paper`,
-  `find_free_port`, `create_webdriver`, ...).
+  `find_free_port`, Playwright fixtures, ...).
 - Mock external services (APIs, LLM backends, databases). Tests must skip
   gracefully when optional services are unavailable.
 - Markers: `slow` (deselected by default), `integration`, `e2e`, `staging`.
@@ -132,6 +132,7 @@ to `.env`. Full reference: `docs/configuration.md`.
 | `ENABLE_QUERY_REWRITING`, `QUERY_SIMILARITY_THRESHOLD` | RAG query behavior |
 | `DEFAULT_CONFERENCE`, `DEFAULT_YEAR` | Web UI initial filters |
 | `LOG_LEVEL`, `PROXY_X_*`, `IMPRINT_LINK` | Web/deployment settings |
+| `WEB_UI_THREADS` | Waitress worker threads (default `6`) |
 | `REQUESTS_PER_MINUTE` | API rate limit |
 | `GITHUB_TOKEN`, `REGISTRY_REPOSITORY` | OCI registry access |
 
@@ -181,9 +182,10 @@ them from `static/modules/`.
 - **Feature**: branch → implement (types + NumPy docstrings) → unit and
   integration tests → update docs → run tests → PR.
 - **Bugfix**: branch → failing regression test → fix → verify → PR.
-- **New plugin**: implement in `plugins/`, inherit `DownloaderPlugin` or
-  `LightweightDownloaderPlugin`, register in `plugins/__init__.py`, add
-  `tests/test_plugins_<name>.py`, update `docs/plugins.md`.
+- **New plugin**: implement in `plugins/`, inherit `DownloaderPlugin` (or
+  `HTTPDownloaderPlugin`/`JSONConferenceDownloaderPlugin`), register in
+  `plugins/__init__.py`, add `tests/test_plugins_<name>.py`, update
+  `docs/plugins.md`.
 - **Docs**: edit `docs/*.md` and docstrings, then `cd docs && uv run make html`.
 
 CLI groups: `download`, `create-embeddings`, `pre-process`, `search`, `chat`,

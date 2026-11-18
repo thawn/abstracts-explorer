@@ -432,21 +432,19 @@ class RegistryClient:
         if "_" not in tag:
             return tag
 
-        # first split off the version suffix, then iteratively strip components from the end of the prefix until we find candidates that match the start of the tag.  This allows us to resolve to a tag with a different version and/or model, as long as the conference and year match.
-        candidates: List[str] = []
-        prefix: str = tag
-        maxsplit: int = 1
-        while candidates == [] and "_" in prefix:
-            prefix = prefix.rsplit("_", 1)[0]
-            candidates = [t for t in available_tags if t.rsplit("_", maxsplit=maxsplit)[0] == prefix]
-            maxsplit += 1
-
-        if not candidates:
+        # Only the version suffix may change.  The model component is part of
+        # the cache identity and must never be substituted.
+        prefix, _, _requested_version = tag.rpartition("_")
+        candidates = [t for t in available_tags if t.rpartition("_")[0] == prefix]
+        versions: List[Tuple[Version, str]] = []
+        for candidate in candidates:
+            candidate_version = _parse_version_from_tag(candidate)
+            if candidate_version is not None:
+                versions.append((candidate_version, candidate))
+        if not versions:
             return tag
 
-        # Return the candidate with the highest lexicographic version suffix.
-        # This works correctly for standard semver strings (e.g. "0.4.1" < "0.4.2").
-        resolved = max(candidates)
+        resolved = max(versions, key=lambda item: item[0])[1]
         logger.debug("Tag '%s' not found; resolved to closest match '%s'", tag, resolved)
         return resolved
 
@@ -761,12 +759,90 @@ class RegistryClient:
         if embedding_model:
             self._check_embedding_model(paper_db_file, embedding_model, ignore_embedding_model_mismatch, progress)
 
+        from abstracts_explorer.plugin import LightweightPaper
+
+        old_papers: List[Dict[str, Any]] = []
+        old_uids: List[str] = []
+        old_embedding_backup: Optional[Dict[str, Any]] = None
+        old_cache_backup: Dict[str, Any] = {}
+        imported_embedding_ids: List[str] = []
+        embeddings_data: Optional[Dict[str, Any]] = None
+
+        try:
+            with DatabaseManager() as db:
+                db.create_tables()
+                old_papers = db.get_paper({"conference": conference, "year": year}, limit=0)
+                old_uids = [str(paper["uid"]) for paper in old_papers]
+                old_cache_backup = db.export_clustering_cache_to_json(conference, year)
+        except Exception as backup_err:
+            raise RegistryError(
+                f"Could not back up existing {conference}/{year} data before import: {backup_err}"
+            ) from backup_err
+
+        if old_uids:
+            em = EmbeddingsManager()
+            try:
+                old_embedding_backup = em.export_embeddings(old_uids)
+            except Exception as backup_err:
+                logger.warning("Could not back up old embeddings: %s", backup_err)
+            finally:
+                em.close()
+
+        def _restore_old_state() -> None:
+            progress(f"  Restoring previous {conference}/{year} data...")
+            restore_errors: List[str] = []
+            try:
+                with DatabaseManager() as db:
+                    db.create_tables()
+                    db.delete_papers_by_conference_year(conference, year)
+                    if old_papers:
+                        restored = []
+                        for paper in old_papers:
+                            paper_data = {
+                                key: value for key, value in paper.items() if key not in ("uid", "created_at")
+                            }
+                            restored.append(LightweightPaper(**paper_data))
+                        db.add_papers(restored)
+            except Exception as restore_err:
+                restore_errors.append(f"papers: {restore_err}")
+
+            try:
+                em = EmbeddingsManager()
+                try:
+                    if imported_embedding_ids:
+                        em.delete_embeddings_by_ids(imported_embedding_ids)
+                    if old_embedding_backup and old_embedding_backup.get("ids"):
+                        em.import_embeddings(old_embedding_backup)
+                finally:
+                    em.close()
+            except Exception as restore_err:
+                restore_errors.append(f"embeddings: {restore_err}")
+
+            try:
+                with DatabaseManager() as db:
+                    db.create_tables()
+                    db.import_clustering_cache_from_json(
+                        old_cache_backup,
+                        conference,
+                        year,
+                    )
+            except Exception as restore_err:
+                restore_errors.append(f"clustering cache: {restore_err}")
+
+            if restore_errors:
+                logger.warning(
+                    "Failed to fully restore previous data for %s/%s: %s",
+                    conference,
+                    year,
+                    "; ".join(restore_errors),
+                    exc_info=True,
+                )
+
         # --- import paper DB first ---
         progress(f"Importing paper database for {conference}/{year}...")
         try:
             with DatabaseManager() as db:
                 db.create_tables()
-                old_uids = db.get_paper_uids({"conference": conference, "year": year})
                 paper_count = db.import_papers_from_sqlite(paper_db_file, conference, year)
         except Exception as db_err:
             from abstracts_explorer.database import EmbeddingModelConflictError
@@ -776,10 +852,11 @@ class RegistryClient:
             raise RegistryError(f"Paper DB import failed for {conference}/{year}: {db_err}") from db_err
         progress(f"  Imported {paper_count} papers")
 
-        # --- import embeddings; rollback paper DB on failure ---
+        # --- import embeddings; restore previous data on failure ---
         try:
             progress(f"Importing embeddings for {conference}/{year}...")
             embeddings_data = json.loads(embeddings_file.read_text())
+            imported_embedding_ids = [str(uid) for uid in embeddings_data.get("ids", [])]
             em = EmbeddingsManager()
             try:
                 embedding_count = em.import_embeddings(embeddings_data, replace_ids=old_uids)
@@ -787,25 +864,10 @@ class RegistryClient:
                 em.close()
             progress(f"  Imported {embedding_count} embeddings")
         except Exception as embed_err:
-            # Roll back paper DB import so both stay consistent
-            progress(f"  Embedding import failed — rolling back paper DB for {conference}/{year}...")
-            try:
-                from sqlalchemy import and_ as sa_and
-                from sqlalchemy import delete as sa_delete
-
-                from abstracts_explorer.db_models import Paper
-
-                with DatabaseManager() as db:
-                    db.create_tables()
-                    db._session.execute(  # type: ignore[union-attr]
-                        sa_delete(Paper).where(sa_and(Paper.conference == conference, Paper.year == year))
-                    )
-                    db._session.commit()  # type: ignore[union-attr]
-            except Exception:
-                logger.warning("Failed to roll back paper DB import after embedding failure", exc_info=True)
+            _restore_old_state()
             raise RegistryError(
                 f"Embedding import failed for {conference}/{year}: {embed_err}. "
-                "Paper DB changes have been rolled back."
+                "Paper DB changes have been rolled back; previous data has been restored."
             ) from embed_err
 
         # --- import clustering cache from separate layer ---
@@ -823,7 +885,11 @@ class RegistryClient:
                 )
             progress(f"  Imported {clustering_cache_count} clustering cache entries")
         except Exception as cache_err:
-            raise RegistryError(f"Clustering cache import failed for {conference}/{year}: {cache_err}") from cache_err
+            _restore_old_state()
+            raise RegistryError(
+                f"Clustering cache import failed for {conference}/{year}: {cache_err}. "
+                "Previous data has been restored (rolled back)."
+            ) from cache_err
 
         return {
             "paper_count": paper_count,
@@ -1235,6 +1301,12 @@ class RegistryClient:
                 imported_years.append(yr)
 
             if not imported_years:
+                if year is not None:
+                    available = ", ".join(str(yr) for yr in sorted(year_files.keys())) or "none"
+                    raise RegistryError(
+                        f"Artifact '{tag}' does not contain the requested year {year}. "
+                        f"Available years: {available}."
+                    )
                 _progress("Warning: No data found in artifact to import")
 
             _progress("Download complete!")
@@ -1641,25 +1713,24 @@ class RegistryClient:
                 # Skip untagged (dangling) versions
                 continue
 
-            # A package version may carry multiple tags; check whether *any*
-            # of them belongs to the requested conference and is old enough.
-            should_delete = False
+            # A package version may carry multiple tags.  Only delete when
+            # *all* tags on the version are old (and match the conference
+            # filter), otherwise deleting would remove newer/other artifacts.
             matched_tags: List[Tuple[str, Version]] = []
+            all_tags_old = True
+            all_tags_match_conference = True
+            conf_prefix = _sanitize_str_for_oci_tag(conference) if conference is not None else None
             for tag in tags:
-                # Optional conference filter
-                if conference is not None:
-                    base = tag.split("_", 1)[0]
-                    conf_prefix = _sanitize_str_for_oci_tag(conference)
-                    # Accept both exact match (e.g. "neurips") and year-specific
-                    # (e.g. "neurips-2024").
-                    if not (base == conf_prefix or base.startswith(conf_prefix + "-")):
-                        continue
-
+                base = tag.split("_", 1)[0]
+                if conf_prefix is not None and not (base == conf_prefix or base.startswith(conf_prefix + "-")):
+                    all_tags_match_conference = False
                 tag_version = _parse_version_from_tag(tag)
-                if tag_version is not None and tag_version < threshold:
+                if tag_version is None or tag_version >= threshold:
+                    all_tags_old = False
+                else:
                     matched_tags.append((tag, tag_version))
-                    should_delete = True
 
+            should_delete = bool(matched_tags) and all_tags_old and all_tags_match_conference
             if not should_delete:
                 continue
 

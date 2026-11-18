@@ -10,6 +10,7 @@ import requests
 from abstracts_explorer.plugins.json_conference_downloader import (
     JSONConferenceDownloaderPlugin,
 )
+from abstracts_explorer.plugin.persistence import FailureSidecar
 
 
 class ExampleJSONDownloader(JSONConferenceDownloaderPlugin):
@@ -180,3 +181,48 @@ class TestJSONConferenceDownloader:
         assert papers == []
         assert "No valid papers produced from 1 source records" in caplog.text
         mock_get.assert_called_once()
+
+    @patch("requests.Session.get")
+    def test_companion_failure_writes_sidecar_and_retries(self, mock_get, tmp_path):
+        """Persist companion failures and refresh the cache on the next run."""
+        output_path = tmp_path / "example_2025.json"
+        plugin = ExampleJSONDownloader()
+        mock_get.side_effect = [
+            make_response({"results": [make_paper(1, "Existing abstract"), make_paper(2)]}),
+            requests.exceptions.RequestException("not found"),
+        ]
+
+        papers = plugin.download(year=2025, output_path=str(output_path))
+
+        assert [paper.abstract for paper in papers] == ["Existing abstract"]
+        sidecar = FailureSidecar(str(output_path), "Example", 2025)
+        failures = sidecar.load()
+        assert len(failures) == 1
+        assert failures[0]["type"] == "companion"
+        assert failures[0]["ids"] == ["2"]
+
+        mock_get.reset_mock()
+        mock_get.side_effect = [
+            make_response({"results": [make_paper(1, "Existing abstract"), make_paper(2)]}),
+            make_response({"2": "Recovered abstract"}),
+        ]
+
+        retried = plugin.download(year=2025, output_path=str(output_path))
+
+        assert [paper.abstract for paper in retried] == ["Existing abstract", "Recovered abstract"]
+        assert sidecar.load() == []
+        assert mock_get.call_count == 2
+
+    @patch("requests.Session.get")
+    def test_unmatched_companion_records_do_not_write_sidecar(self, mock_get, tmp_path):
+        """Records absent from a successful companion file are genuine absences."""
+        output_path = tmp_path / "example_2025.json"
+        mock_get.side_effect = [
+            make_response({"results": [make_paper(1, "Existing abstract"), make_paper(2)]}),
+            make_response({"1": "Ignored"}),
+        ]
+
+        papers = ExampleJSONDownloader().download(year=2025, output_path=str(output_path))
+
+        assert [paper.abstract for paper in papers] == ["Existing abstract"]
+        assert FailureSidecar(str(output_path), "Example", 2025).load() == []

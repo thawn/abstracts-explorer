@@ -10,8 +10,8 @@ Model Context Protocol (MCP) is a protocol that allows tools and servers to prov
 
 ## Features
 
-The MCP server provides tools for conference analysis plus two personalized
-tools that work with the papers a user marked as interesting.
+The MCP server provides eight tools for conference analysis, including two
+personalized tools that work with the papers a user marked as interesting.
 
 ### 1. `get_conference_topics`
 
@@ -36,12 +36,11 @@ Analyzes how specific topics have evolved over the years.
 
 **Parameters:**
 - `topic_keywords` (str): Keywords describing the topic (e.g., "transformers attention")
-- `conference` (str, optional): Filter by conference name
-- `start_year` (int, optional): Start year for analysis
-- `end_year` (int, optional): End year for analysis
-- `embeddings_path` (str, optional): Path to ChromaDB embeddings database
+- `conferences` (list of str, optional): Conference names to analyze (e.g., `["NeurIPS", "ICLR"]`)
+- `start_year` (int, optional): Start year for analysis (inclusive)
+- `end_year` (int, optional): End year for analysis (inclusive)
+- `distance_threshold` (float, optional): Maximum embedding distance for papers to count (default: 1.1)
 - `collection_name` (str, optional): Name of ChromaDB collection
-- `db_path` (str, optional): Path to SQLite database
 
 **Returns:** JSON with topic evolution data including:
 - Year-by-year paper counts
@@ -56,12 +55,11 @@ Finds the most important recent developments in a specific topic.
 
 **Parameters:**
 - `topic_keywords` (str): Keywords describing the topic
-- `years` (list): List of years to consider (default: None, which means all years)
-- `n_results` (int): Number of papers to return (default: 10)
-- `conference` (str, optional): Filter by conference name
-- `embeddings_path` (str, optional): Path to ChromaDB embeddings database
+- `conference` (str, optional): Filter by conference name (required in practice; pass a conference)
+- `years` (list, optional): Years to consider (default: all years)
+- `limit` (int): Number of papers to return (default: 10)
+- `where_filters` (dict, optional): SQL-style paper filters (e.g. `{"session": {"$in": ["Oral"]}}`)
 - `collection_name` (str, optional): Name of ChromaDB collection
-- `db_path` (str, optional): Path to SQLite database
 
 **Returns:** JSON with recent papers including:
 - Paper titles and abstracts
@@ -119,13 +117,50 @@ user's interesting papers. Papers the user already rated are excluded.
 - `priorities` (dict, optional): Mapping of paper UID to a dict with `priority` and optional `searchTerm`.
 - `conferences` (list of str, optional): Restrict recommendations to these conferences. Defaults to the dominant conference of the interesting papers.
 - `years` (list of int, optional): Restrict recommendations to these years. Defaults to the years of the interesting papers.
-- `n_results` (int, optional): Number of recommendations (default: 10).
+- `limit` (int, optional): Number of recommendations (default: 10).
 - `exclude_ids` (list of str, optional): Additional UIDs to exclude.
 
 **Returns:** JSON with recommended papers, each including a relevance score and
 reasons (shared keywords, authors, session, or semantic closeness).
 
 **Example use case:** "Based on my interesting papers, suggest other papers that may interest me."
+
+### 7. `get_paper_details`
+
+Fetches detailed metadata for one or more papers — for follow-up questions
+after a semantic search, not for topic searches.
+
+**Parameters:**
+- `title` (str, optional): Title or partial title to search for (case-insensitive)
+- `paper_id` (str, optional): Paper UID or original conference/OpenReview ID
+- `conference` (str, optional): Filter by conference name (e.g., `"NeurIPS"`)
+- `year` (int, optional): Filter by publication year
+- `limit` (int, optional): Maximum number of papers to return when searching by title (default: 5)
+
+**Returns:** JSON with full paper metadata:
+- Authors, URLs, PDF and poster links
+- Session and room information
+- Keywords, awards, and other stored fields
+
+**Example use case:** "Who wrote that paper? Where is the poster?"
+
+### 8. `analyze_topic_relevance`
+
+Counts papers within a distance threshold of a topic's embedding to gauge
+how prominent a research area is.
+
+**Parameters:**
+- `topic` (str): The topic or research question to analyze (e.g., "Uncertainty quantification")
+- `conferences` (list of str): Conference names to analyze (e.g., `["NeurIPS"]`). Required.
+- `years` (list of int, optional): Filter by specific years (e.g., `[2024, 2025]`)
+- `distance_threshold` (float, optional): Maximum embedding distance for a paper to count (default: 1.1)
+- `collection_name` (str, optional): Name of ChromaDB collection
+
+**Returns:** JSON with relevance statistics:
+- Number of matching papers per year and overall
+- Share relative to the total number of papers
+
+**Example use case:** "How prominent is uncertainty quantification at this year's conference?"
 
 ## Starting the MCP Server
 
@@ -162,7 +197,7 @@ The MCP server uses the same configuration as the rest of Abstracts Explorer. Co
 ```bash
 # Database Configuration
 PAPER_DB=abstracts.db
-EMBEDDING_DB_PATH=chroma_db
+EMBEDDING_DB=chroma_db
 COLLECTION_NAME=papers
 
 # LLM Backend (for embeddings in tools)
@@ -230,7 +265,7 @@ When an LLM assistant needs to analyze topics, it can call:
 ```
 
 The server will:
-1. Load pre-computed clustering results from the database cache
+1. Load pre-generated clustering results from the database cache
 2. Analyze topics in each cluster
 3. Return structured JSON results
 
@@ -299,7 +334,7 @@ Check that the database paths in `.env` are correct:
 ```bash
 # .env
 PAPER_DB=data/abstracts.db
-EMBEDDING_DB_PATH=chroma_db
+EMBEDDING_DB=chroma_db
 ```
 
 ### Port already in use
@@ -314,7 +349,7 @@ abstracts-explorer mcp-server --port 8001
 
 ### Clustering Configuration
 
-The MCP tools read pre-computed clustering results from the database cache. The
+The MCP tools read pre-generated clustering results from the database cache. The
 pipeline is fixed to Agglomerative clustering (ward linkage, distance threshold
 150) with t-SNE dimensionality reduction. Generate the cache with:
 

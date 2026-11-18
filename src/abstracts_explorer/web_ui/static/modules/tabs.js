@@ -5,7 +5,8 @@
  */
 
 import { API_BASE } from './utils/constants.js';
-import { getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
+import { parseJsonResponse } from './utils/api-utils.js';
+import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
 import { setCurrentTab, getCurrentTab } from './state.js';
 import { getInterestingPapersSortOrder } from './state.js';
 import { areClustersLoaded } from './clustering.js';
@@ -72,12 +73,15 @@ export async function loadStats() {
         if (selectedConference) statsParams.append('conference', selectedConference);
 
         const response = await fetch(`${API_BASE}/api/stats?${statsParams.toString()}`);
-        const data = await response.json();
+        const data = await parseJsonResponse(response);
 
         if (data.error) {
-            document.getElementById('stats').innerHTML = `
-                <div class="text-sm text-red-200">${data.error}</div>
-            `;
+            const errorBox = document.createElement('div');
+            errorBox.className = 'text-sm text-red-200';
+            errorBox.textContent = data.error;
+            const statsBox = document.getElementById('stats');
+            statsBox.innerHTML = '';
+            statsBox.appendChild(errorBox);
             return;
         }
 
@@ -96,14 +100,20 @@ export async function loadStats() {
             displayText = 'All Papers';
         }
 
-        document.getElementById('stats').innerHTML = `
-            <div class="text-sm font-semibold">${data.total_papers.toLocaleString()} Abstracts</div>
-            <div class="text-xs opacity-90">${displayText}</div>
-        `;
+        const statsBox = document.getElementById('stats');
+        statsBox.innerHTML = '';
+        const totalLine = document.createElement('div');
+        totalLine.className = 'text-sm font-semibold';
+        totalLine.textContent = `${data.total_papers.toLocaleString()} Abstracts`;
+        const contextLine = document.createElement('div');
+        contextLine.className = 'text-xs opacity-90';
+        contextLine.textContent = displayText;
+        statsBox.appendChild(totalLine);
+        statsBox.appendChild(contextLine);
     } catch (error) {
         console.error('Error loading stats:', error);
         document.getElementById('stats').innerHTML = `
-            <div class="text-sm text-red-200">Error loading stats</div>
+            <div class="text-sm text-red-200">${escapeHtml(error.message || 'Could not load stats. Please try again.')}</div>
         `;
     }
 }
@@ -115,12 +125,7 @@ export async function loadStats() {
 export async function checkEmbeddingModelCompatibility() {
     try {
         const response = await fetch(`${API_BASE}/api/embedding-model-check`);
-        if (!response.ok) {
-            console.error('Failed to check embedding model compatibility');
-            return;
-        }
-        
-        const data = await response.json();
+        const data = await parseJsonResponse(response);
         
         if (!data.compatible && data.warning) {
             const banner = document.getElementById('embedding-warning-banner');

@@ -5,7 +5,8 @@
  */
 
 import { API_BASE } from './utils/constants.js';
-import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
+import { parseJsonResponse } from './utils/api-utils.js';
+import { escapeAttr, escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
 import { renderEmptyState } from './utils/ui-utils.js';
 import { naturalSortPosterPosition } from './utils/sort-utils.js';
 import {
@@ -137,7 +138,7 @@ export async function loadInterestingPapers() {
             body: JSON.stringify({ paper_ids: paperIds })
         });
 
-        const data = await response.json();
+        const data = await parseJsonResponse(response);
 
         if (data.error) {
             listDiv.innerHTML = `
@@ -153,7 +154,7 @@ export async function loadInterestingPapers() {
         console.error('Error loading interesting papers:', error);
         listDiv.innerHTML = `
             <div class="bg-red-50 border border-red-200 rounded-lg p-6">
-                <p class="text-red-700">Error loading papers. Please try again.</p>
+                <p class="text-red-700">${escapeHtml(error.message || 'Could not load papers. Please try again.')}</p>
             </div>
         `;
     }
@@ -280,7 +281,7 @@ export function displayInterestingPapers(papers) {
         const activeClass = isActive ? 'border-b-2 border-purple-600 text-purple-600 dark:text-purple-400' : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:border-gray-300';
         tabsHtml += `
             <button 
-                onclick="switchInterestingSession('${escapeHtml(session).replace(/'/g, "\\'")}')"
+                onclick="switchInterestingSession(${escapeAttr(JSON.stringify(session))})"
                 class="px-6 py-3 text-sm font-medium ${activeClass} border-b-2 border-transparent focus:outline-none transition-colors whitespace-nowrap">
                 <i class="fas fa-calendar-alt mr-2"></i>${escapeHtml(session)}
             </button>
@@ -325,7 +326,7 @@ export function displayInterestingPapers(papers) {
                 html += '</div>';
             } else {
                 const editButton = (sortOrder === 'search-rating-poster')
-                    ? `<button onclick="editSearchTerm('${escapeHtml(currentSession).replace(/'/g, "\\'")}', '${escapeHtml(groupKey).replace(/'/g, "\\'")}', event)" 
+                    ? `<button onclick="editSearchTerm(${escapeAttr(JSON.stringify(currentSession))}, ${escapeAttr(JSON.stringify(groupKey))}, event)" 
                               class="ml-2 text-sm text-purple-600 hover:text-purple-800 focus:outline-none" 
                               title="Edit search term">
                            <i class="fas fa-edit"></i>
@@ -418,8 +419,7 @@ export async function saveInterestingPapersAsMarkdown(event) {
         });
 
         if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to generate export');
+            await parseJsonResponse(response);
         }
 
         const blob = await response.blob();
@@ -696,83 +696,6 @@ export function changeInterestingPapersSortOrder(sortOrder) {
 }
 
 /**
- * Generate markdown content for interesting papers (legacy function for compatibility)
- * @param {Array} papers - Array of paper objects
- * @returns {string} Markdown content
- */
-export function generateInterestingPapersMarkdown(papers) {
-    const priorities = getAllPaperPriorities();
-    
-    papers.forEach(paper => {
-        paper.priority = priorities[paper.uid]?.priority || 0;
-    });
-
-    papers.sort((a, b) => {
-        const sessionCompare = (a.session || '').localeCompare(b.session || '');
-        if (sessionCompare !== 0) return sessionCompare;
-        if (a.priority !== b.priority) return b.priority - a.priority;
-        return naturalSortPosterPosition(a.poster_position, b.poster_position);
-    });
-
-    const searchInput = document.getElementById('search-input');
-    const searchQuery = searchInput ? searchInput.value : '';
-
-    let markdown = `# Interesting Papers from NeurIPS 2025\n\n`;
-    markdown += `Generated: ${new Date().toLocaleString()}\n\n`;
-
-    if (searchQuery) {
-        markdown += `## Search Context\n\n`;
-        markdown += `**Search Query:** ${searchQuery}\n\n`;
-    }
-
-    markdown += `**Total Papers:** ${papers.length}\n\n`;
-    markdown += `---\n\n`;
-
-    const groupedBySession = {};
-    papers.forEach(paper => {
-        const session = paper.session || 'No Session';
-        if (!groupedBySession[session]) {
-            groupedBySession[session] = [];
-        }
-        groupedBySession[session].push(paper);
-    });
-
-    for (const [session, sessionPapers] of Object.entries(groupedBySession)) {
-        markdown += `## ${session}\n\n`;
-
-        sessionPapers.forEach(paper => {
-            const stars = '⭐'.repeat(paper.priority);
-            markdown += `### ${paper.title || 'Untitled'}\n\n`;
-            markdown += `**Rating:** ${stars} (${paper.priority}/5)\n\n`;
-
-            if (paper.authors && paper.authors.length > 0) {
-                markdown += `**Authors:** ${paper.authors.join(', ')}\n\n`;
-            }
-
-            if (paper.poster_position) {
-                markdown += `**Poster:** ${paper.poster_position}\n\n`;
-            }
-
-            if (paper.paper_url) {
-                markdown += `**Paper URL:** ${paper.paper_url}\n\n`;
-            }
-
-            if (paper.url) {
-                markdown += `**Source URL:** ${paper.url}\n\n`;
-            }
-
-            if (paper.abstract) {
-                markdown += `**Abstract:**\n\n${paper.abstract}\n\n`;
-            }
-
-            markdown += `---\n\n`;
-        });
-    }
-
-    return markdown;
-}
-
-/**
  * Donate interesting papers data for validation purposes
  * @async
  */
@@ -804,11 +727,7 @@ export async function donateInterestingPapersData() {
             })
         });
 
-        const result = await response.json();
-
-        if (!response.ok) {
-            throw new Error(result.error || 'Failed to donate data');
-        }
+        const result = await parseJsonResponse(response);
 
         // Mark data as donated
         markDataAsDonated();

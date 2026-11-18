@@ -1,5 +1,5 @@
 """
-Configuration management for neurips-abstracts package.
+Configuration management for abstracts-explorer package.
 
 This module loads configuration from environment variables and .env files.
 Uses only standard library (no python-dotenv dependency required).
@@ -75,7 +75,7 @@ def load_env_file(env_path: Optional[Path] = None) -> Dict[str, str]:
 
 class Config:
     """
-    Configuration manager for neurips-abstracts package.
+    Configuration manager for abstracts-explorer package.
 
     Loads configuration from environment variables with fallback to defaults.
     Automatically loads from .env file if present.
@@ -108,6 +108,23 @@ class Config:
     metadata_cache_ttl : int
         Time-to-live in seconds for the PostgreSQL metadata cache. ``0``
         disables the cache.
+    rag_max_parallel_tools : int
+        Maximum number of RAG tool calls executed concurrently (default: 8).
+        Excess calls are queued by the agent's thread pool.
+    rag_request_limit : int
+        Maximum number of model requests per RAG query (default: 50).
+    rag_query_timeout : int
+        Wall-clock timeout in seconds for one RAG query (default: 120).
+    chat_history_ttl : int
+        Idle time in seconds after which a web chat session's history is
+        expired (default: 86400). ``0`` disables expiry.
+    llm_connect_timeout : int
+        TCP/TLS connect timeout in seconds for LLM and embedding HTTP
+        requests (default: 10).
+    llm_request_timeout : int
+        Timeout in seconds for one HTTP request to the LLM backend
+        (default: 60). Clamped to ``rag_query_timeout`` so it never exceeds
+        the overall RAG limit.
     chat_temperature : float
         Default temperature for chat generation.
     chat_max_tokens : int
@@ -142,6 +159,14 @@ class Config:
     requests_per_minute : int
         Maximum number of embedding API requests per minute (default: 60).
         Set to 0 to disable rate limiting.
+    web_rate_limit_per_minute : int
+        Maximum number of expensive web API requests per client per minute
+        (chat, semantic search, cluster search, and topic evolution).
+        Set to 0 to disable client rate limiting (default: 30).
+    web_ui_threads : int
+        Number of Waitress worker threads for the web UI (default: 6).
+        Values below 1 are clamped to 1. Ignored when the Flask development
+        server is used.
 
     Examples
     --------
@@ -250,6 +275,22 @@ class Config:
         # RAG Settings
         self.max_context_papers = self._get_env_int("MAX_CONTEXT_PAPERS", default=5)
         self.metadata_cache_ttl = self._get_env_int("METADATA_CACHE_TTL", default=86400)
+        self.rag_max_parallel_tools = max(1, self._get_env_int("RAG_MAX_PARALLEL_TOOLS", default=8))
+        self.rag_request_limit = max(1, self._get_env_int("RAG_REQUEST_LIMIT", default=50))
+        self.rag_query_timeout = max(1, self._get_env_int("RAG_QUERY_TIMEOUT", default=120))
+        self.chat_history_ttl = max(0, self._get_env_int("CHAT_HISTORY_TTL", default=86400))
+
+        # LLM HTTP Timeout Settings
+        # Per-request timeout is clamped to the overall RAG query timeout so a
+        # single HTTP request can never outlive the RAG query ceiling.
+        self.llm_connect_timeout = max(
+            1,
+            self._get_env_int("LLM_CONNECT_TIMEOUT", default=10),
+        )
+        self.llm_request_timeout = min(
+            max(1, self._get_env_int("LLM_REQUEST_TIMEOUT", default=60)),
+            self.rag_query_timeout,
+        )
 
         # Query Rewriting Settings
         self.enable_query_rewriting = self._get_env_bool("ENABLE_QUERY_REWRITING", default=True)
@@ -263,12 +304,12 @@ class Config:
         self.log_level = self._get_env("LOG_LEVEL", default="").upper()
 
         # Reverse-proxy hop counts for werkzeug ProxyFix.
-        # Set to 0 to disable; set to the number of reverse-proxy layers in front of
-        # the app (default 1 matches the single nginx layer in docker-compose.yml).
-        self.proxy_x_for = self._get_env_int("PROXY_X_FOR", default=1)
-        self.proxy_x_proto = self._get_env_int("PROXY_X_PROTO", default=1)
-        self.proxy_x_host = self._get_env_int("PROXY_X_HOST", default=1)
-        self.proxy_x_prefix = self._get_env_int("PROXY_X_PREFIX", default=1)
+        # Default to 0 (trust no forwarded headers). Deployments behind a
+        # reverse proxy must set the number of trusted hops explicitly.
+        self.proxy_x_for = self._get_env_int("PROXY_X_FOR", default=0)
+        self.proxy_x_proto = self._get_env_int("PROXY_X_PROTO", default=0)
+        self.proxy_x_host = self._get_env_int("PROXY_X_HOST", default=0)
+        self.proxy_x_prefix = self._get_env_int("PROXY_X_PREFIX", default=0)
 
         # Web UI Footer Configuration
         # Optional imprint/legal notice URL shown in the footer (empty = not shown)
@@ -277,6 +318,12 @@ class Config:
         # Embedding API Rate Limiting
         # Maximum number of API requests per minute (0 = no limit)
         self.requests_per_minute = self._get_env_int("REQUESTS_PER_MINUTE", default=60)
+
+        # Web API client rate limiting for expensive endpoints (0 = disabled)
+        self.web_rate_limit_per_minute = max(0, self._get_env_int("WEB_RATE_LIMIT_PER_MINUTE", default=30))
+
+        # Waitress worker threads for the web UI
+        self.web_ui_threads = max(1, self._get_env_int("WEB_UI_THREADS", default=6))
 
         # Registry Settings
         # GitHub Personal Access Token for registry operations
@@ -394,56 +441,12 @@ class Config:
         # Resolve relative to data_dir and make absolute
         return str((Path(self.data_dir) / path).absolute())
 
-    def get_supported_env_vars(self) -> set:
-        """
-        Get a set of all supported environment variable names.
+    @property
+    def masked_database_url(self) -> str:
+        """Return the database URL with any password masked for display."""
+        from abstracts_explorer.db.session import mask_database_url
 
-        Returns
-        -------
-        set
-            Set of supported environment variable names.
-
-        Examples
-        --------
-        >>> config = Config()
-        >>> env_vars = config.supported_env_vars()
-        >>> print("CHAT_MODEL" in env_vars)
-        True
-        """
-        return {
-            "DATA_DIR",
-            "CHAT_MODEL",
-            "CHAT_TEMPERATURE",
-            "CHAT_MAX_TOKENS",
-            "CLUSTER_LABEL_MODEL",
-            "EMBEDDING_MODEL",
-            "EMBEDDING_MAX_INPUT_TOKENS",
-            "LLM_BACKEND_URL",
-            "LLM_BACKEND_AUTH_TOKEN",
-            "PAPER_DB",
-            "POSTGRES_USER",
-            "POSTGRES_HOST",
-            "POSTGRES_PORT",
-            "POSTGRES_DB",
-            "ABSTRACTS_DB_PASSWORD",
-            "EMBEDDING_DB",
-            "COLLECTION_NAME",
-            "MAX_CONTEXT_PAPERS",
-            "METADATA_CACHE_TTL",
-            "ENABLE_QUERY_REWRITING",
-            "QUERY_SIMILARITY_THRESHOLD",
-            "DEFAULT_CONFERENCE",
-            "DEFAULT_YEAR",
-            "LOG_LEVEL",
-            "PROXY_X_FOR",
-            "PROXY_X_PROTO",
-            "PROXY_X_HOST",
-            "PROXY_X_PREFIX",
-            "IMPRINT_LINK",
-            "REQUESTS_PER_MINUTE",
-            "GITHUB_TOKEN",
-            "REGISTRY_REPOSITORY",
-        }
+        return mask_database_url(self.database_url)
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -474,6 +477,14 @@ class Config:
             "collection_name": self.collection_name,
             "max_context_papers": self.max_context_papers,
             "metadata_cache_ttl": self.metadata_cache_ttl,
+            "rag_max_parallel_tools": self.rag_max_parallel_tools,
+            "rag_request_limit": self.rag_request_limit,
+            "rag_query_timeout": self.rag_query_timeout,
+            "chat_history_ttl": self.chat_history_ttl,
+            "llm_connect_timeout": self.llm_connect_timeout,
+            "llm_request_timeout": self.llm_request_timeout,
+            "web_rate_limit_per_minute": self.web_rate_limit_per_minute,
+            "web_ui_threads": self.web_ui_threads,
         }
 
     def _mask_database_url(self, url: str) -> str:

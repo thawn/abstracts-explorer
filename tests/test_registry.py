@@ -461,6 +461,31 @@ class TestDatabaseExportImport:
         finally:
             db.close()
 
+    def test_resolve_conference_name_db_error_still_uses_plugin_fallback(self, tmp_path):
+        """A failing DB lookup is logged but does not block plugin fallback."""
+        set_test_db(tmp_path / "empty.db")
+        db = DatabaseManager()
+        db.create_tables()
+        try:
+            with patch.object(db, "get_conferences", side_effect=DatabaseError("boom")):
+                assert db.resolve_conference_name("neurips") == "NeurIPS"
+        finally:
+            db.close()
+
+    def test_resolve_conference_name_chains_db_error(self, tmp_path):
+        """The underlying DB error is attached as the cause of the resolution failure."""
+        set_test_db(tmp_path / "empty.db")
+        db = DatabaseManager()
+        db.create_tables()
+        try:
+            original = DatabaseError("database unavailable")
+            with patch.object(db, "get_conferences", side_effect=original):
+                with pytest.raises(DatabaseError, match="Failed to resolve conference name") as excinfo:
+                    db.resolve_conference_name("unknown-conf-xyz-999")
+            assert excinfo.value.__cause__ is original
+        finally:
+            db.close()
+
     def test_import_with_resolved_conference_name(self, tmp_path):
         """Import works correctly when conference name is resolved before calling import."""
         from abstracts_explorer.db_models import Paper
@@ -565,6 +590,24 @@ class TestDatabaseExportImport:
         try:
             assert db.export_papers_to_sqlite(export_path, "neurips", 2024) == 0
             assert export_path.exists()
+        finally:
+            db.close()
+
+    def test_import_rejects_empty_source_without_deleting_local_data(self, tmp_path):
+        """An empty export must not wipe the destination conference/year."""
+        target_path = tmp_path / "target.db"
+        db = _populate_test_db(target_path)
+        before = db.get_paper_count()
+        try:
+            empty_source_path = tmp_path / "empty-source.db"
+            other_db = _populate_test_db(tmp_path / "other-source.db")
+            assert other_db.export_papers_to_sqlite(empty_source_path, "neurips", 1999) == 0
+            other_db.close()
+
+            with pytest.raises(DatabaseError, match="contains no papers"):
+                db.import_papers_from_sqlite(empty_source_path, "neurips", 2024)
+
+            assert db.get_paper_count() == before
         finally:
             db.close()
 
@@ -2370,7 +2413,7 @@ class TestCLICommands:
         """A failed local data check returns True so the caller still confirms."""
         from abstracts_explorer.cli import _registry_download_has_existing_data
 
-        with patch("abstracts_explorer.cli.DatabaseManager") as MockDatabase:
+        with patch("abstracts_explorer.cli.registry.DatabaseManager") as MockDatabase:
             MockDatabase.return_value.__enter__.return_value.create_tables.side_effect = DatabaseError("boom")
 
             assert _registry_download_has_existing_data("neurips", 2024) is True
@@ -2509,11 +2552,11 @@ class TestCLICommands:
                 "tok",
                 "-c",
                 "n",
-                "-y",
+                "--year",
                 "24",
             ],
         ):
-            with patch("abstracts_explorer.cli.registry_upload_command", return_value=0) as mock_cmd:
+            with patch("abstracts_explorer.cli.main.registry_upload_command", return_value=0) as mock_cmd:
                 result = main()
 
         assert result == 0
@@ -2535,11 +2578,11 @@ class TestCLICommands:
                 "tok",
                 "-c",
                 "n",
-                "-y",
+                "--year",
                 "24",
             ],
         ):
-            with patch("abstracts_explorer.cli.registry_download_command", return_value=0) as mock_cmd:
+            with patch("abstracts_explorer.cli.main.registry_download_command", return_value=0) as mock_cmd:
                 result = main()
 
         assert result == 0
@@ -2550,7 +2593,7 @@ class TestCLICommands:
         from abstracts_explorer.cli import main
 
         with patch("sys.argv", ["abstracts-explorer", "registry", "list", "-r", "ghcr.io/o/r"]):
-            with patch("abstracts_explorer.cli.registry_list_command", return_value=0) as mock_cmd:
+            with patch("abstracts_explorer.cli.main.registry_list_command", return_value=0) as mock_cmd:
                 result = main()
 
         assert result == 0
@@ -3516,7 +3559,7 @@ class TestRegistryDeleteCommand:
             dry_run=False,
             yes=True,
         )
-        with patch("abstracts_explorer.cli.get_config", return_value=mock_cfg):
+        with patch("abstracts_explorer.cli._common.get_config", return_value=mock_cfg):
             # Override repository to None (mock_cfg.registry_repository is None)
             args.repository = None
             mock_cfg.registry_repository = None
@@ -3540,7 +3583,7 @@ class TestRegistryDeleteCommand:
             dry_run=False,
             yes=True,
         )
-        with patch("abstracts_explorer.cli.get_config", return_value=mock_cfg):
+        with patch("abstracts_explorer.cli._common.get_config", return_value=mock_cfg):
             result = registry_delete_command(args)
         assert result == 1
         assert "Authentication token" in capsys.readouterr().err
@@ -3604,7 +3647,7 @@ class TestRegistryDeleteCommand:
                 "--yes",
             ],
         ):
-            with patch("abstracts_explorer.cli.registry_delete_command", return_value=0) as mock_cmd:
+            with patch("abstracts_explorer.cli.main.registry_delete_command", return_value=0) as mock_cmd:
                 result = main()
 
         assert result == 0

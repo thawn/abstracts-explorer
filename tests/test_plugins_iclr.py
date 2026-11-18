@@ -15,6 +15,7 @@ import requests
 from abstracts_explorer.plugins.iclr_downloader import ICLRDownloaderPlugin
 from abstracts_explorer.database import DatabaseManager
 from tests.conftest import set_test_db
+from tests.helpers import raw_query
 
 pytestmark = pytest.mark.usefixtures("mock_current_year_probe")
 
@@ -121,9 +122,10 @@ class TestICLRPlugin:
         mock_get.return_value = mock_response
 
         plugin = ICLRDownloaderPlugin()
+        plugin.supported_years = [2025]
         data = plugin.download()  # No year specified
 
-        # Should default to 2025
+        # Should default to the newest supported year
         call_args = mock_get.call_args
         assert "iclr-2025-orals-posters.json" in call_args[0][0]
 
@@ -331,7 +333,7 @@ class TestICLRPluginDatabaseIntegration:
                 db.add_papers(data)
 
                 # Verify paper was stored (lightweight schema uses 'title' not 'name', and 'uid' not 'id')
-                papers = db._query("SELECT uid, title, abstract, year, conference, authors FROM papers")
+                papers = raw_query(db, "SELECT uid, title, abstract, year, conference, authors FROM papers")
                 assert len(papers) == 1
 
                 paper = papers[0]

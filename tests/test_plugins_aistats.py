@@ -15,6 +15,7 @@ import requests
 from abstracts_explorer.plugins.aistats_downloader import AISTATSDownloaderPlugin
 from abstracts_explorer.database import DatabaseManager
 from tests.conftest import set_test_db
+from tests.helpers import raw_query
 
 pytestmark = pytest.mark.usefixtures("mock_current_year_probe")
 
@@ -131,6 +132,7 @@ class TestAISTATSPlugin:
         mock_get.return_value = mock_response
 
         plugin = AISTATSDownloaderPlugin()
+        plugin.supported_years = [2025]
         data = plugin.download()
 
         call_args = mock_get.call_args
@@ -374,7 +376,7 @@ class TestAISTATSPluginDatabaseIntegration:
                 db.create_tables()
                 db.add_papers(data)
 
-                papers = db._query("SELECT uid, title, abstract, year, conference, authors FROM papers")
+                papers = raw_query(db, "SELECT uid, title, abstract, year, conference, authors FROM papers")
                 assert len(papers) == 1
 
                 paper = papers[0]

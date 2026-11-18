@@ -24,7 +24,7 @@ from abstracts_explorer.rag import RAGChat, RAGError
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.config import get_config
 from tests.conftest import set_test_embedding_db
-from tests.helpers import requires_lm_studio, create_test_db_with_paper
+from tests.helpers import raw_query, requires_lm_studio, create_test_db_with_paper
 
 # Fixtures imported from conftest.py:
 # - mock_embeddings_manager: Mock embeddings manager with predefined search results
@@ -56,7 +56,7 @@ def mock_embeddings_manager_empty():
 @pytest.fixture
 def mock_search_papers():
     """Mock mcp_server.search_papers to return test papers."""
-    with patch("abstracts_explorer.rag.mcp_search_papers") as mock_sp:
+    with patch("abstracts_explorer.rag.tools.mcp_search_papers") as mock_sp:
         mock_sp.return_value = json.dumps(
             {
                 "topic": "test query",
@@ -99,7 +99,7 @@ def mock_search_papers():
 @pytest.fixture
 def mock_cluster_topics():
     """Mock mcp_server.get_conference_topics to return test data."""
-    with patch("abstracts_explorer.rag.mcp_get_conference_topics") as mock_ct:
+    with patch("abstracts_explorer.rag.tools.mcp_get_conference_topics") as mock_ct:
         mock_ct.return_value = json.dumps(
             {
                 "n_topics": 8,
@@ -119,7 +119,7 @@ def mock_cluster_topics():
 @pytest.fixture
 def mock_topic_evolution():
     """Mock mcp_server.get_topic_evolution to return test data."""
-    with patch("abstracts_explorer.rag.mcp_get_topic_evolution") as mock_te:
+    with patch("abstracts_explorer.rag.tools.mcp_get_topic_evolution") as mock_te:
         mock_te.return_value = json.dumps(
             {
                 "topic": "transformers",
@@ -140,7 +140,7 @@ def mock_topic_evolution():
 @pytest.fixture
 def mock_analyze_topic():
     """Mock mcp_server.analyze_topic_relevance to return test data."""
-    with patch("abstracts_explorer.rag.mcp_analyze_topic_relevance") as mock_at:
+    with patch("abstracts_explorer.rag.tools.mcp_analyze_topic_relevance") as mock_at:
         mock_at.return_value = json.dumps(
             {
                 "topic": "uncertainty quantification",
@@ -167,7 +167,7 @@ def mock_analyze_topic():
 @pytest.fixture
 def mock_all_tools(mock_search_papers, mock_cluster_topics, mock_topic_evolution, mock_analyze_topic):
     """Mock all MCP server tools."""
-    with patch("abstracts_explorer.rag.mcp_get_cluster_visualization") as mock_viz:
+    with patch("abstracts_explorer.rag.tools.mcp_get_cluster_visualization") as mock_viz:
         mock_viz.return_value = json.dumps(
             {
                 "n_dimensions": 2,
@@ -195,8 +195,8 @@ class TestRAGChatInit:
 
         assert chat.embeddings_manager == mock_embeddings_manager
         assert chat.database == mock_database
-        assert chat.backend_url == "https://api.helmholtz-blablador.fz-juelich.de"
-        assert chat.model == "deepseek-v4.1-flash-at-hzdr"
+        assert chat.backend_url.rstrip("/") == get_config().llm_backend_url.rstrip("/")
+        assert chat.model == get_config().chat_model
         assert chat.max_context_papers > 0
         assert 0 <= chat.temperature <= 1
         assert chat.max_tokens == get_config().chat_max_tokens
@@ -365,6 +365,87 @@ class TestRAGChatInstructions:
         assert "response" in result
 
 
+class TestRAGToolQueue:
+    """Tests for bounded parallel tool execution and duplicate coalescing."""
+
+    def test_agent_uses_bounded_thread_executor(self, mock_embeddings_manager, mock_database):
+        """The agent receives a thread-pool executor with the configured worker count."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        try:
+            assert chat.max_parallel_tools == 8
+            assert chat._tool_executor._max_workers == 8
+            capabilities = chat.agent._root_capability.capabilities
+            assert any(capability.__class__.__name__ == "UseThreadExecutor" for capability in capabilities)
+        finally:
+            chat.close()
+
+    def test_query_has_no_tool_call_limit_and_uses_budget(self, mock_embeddings_manager, mock_database):
+        """Tool calls are not capped; request limit and timeout are applied."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        result = Mock(output="ok")
+        result.all_messages.return_value = []
+        try:
+            with patch.object(chat.agent, "run_sync", return_value=result) as run_sync:
+                chat.query("What are the main topics?")
+        finally:
+            chat.close()
+
+        kwargs = run_sync.call_args.kwargs
+        assert kwargs["usage_limits"].tool_calls_limit is None
+        assert kwargs["usage_limits"].request_limit == 50
+        assert kwargs["timeout"] == 120
+        assert kwargs["model_settings"]["timeout"] == 60
+        assert kwargs["model_settings"]["request_timeout"] == 120
+        assert chat.query_timeout == 120
+
+    def test_duplicate_tool_call_is_reused(self):
+        """Identical calls execute once and the second result is marked cached."""
+        from abstracts_explorer.rag import _run_rag_tool, RAGToolContext
+
+        ctx = Mock()
+        ctx.deps = RAGToolContext()
+        mcp_func = Mock(return_value=json.dumps({"papers": []}))
+
+        first = _run_rag_tool(ctx, "search_papers", mcp_func, {"topic_keywords": "transformers"})
+        second = _run_rag_tool(ctx, "search_papers", mcp_func, {"topic_keywords": "transformers"})
+
+        assert mcp_func.call_count == 1
+        assert "cache" in second.lower()
+        assert "cache" not in first.lower()
+        assert len(ctx.deps.tool_results) == 1
+
+    def test_duplicate_error_tells_model_not_to_retry(self):
+        """Cached errors include an explicit no-retry instruction."""
+        from abstracts_explorer.rag import _run_rag_tool, RAGToolContext
+
+        ctx = Mock()
+        ctx.deps = RAGToolContext()
+        mcp_func = Mock(return_value=json.dumps({"error": "No pre-computed clustering data"}))
+
+        _run_rag_tool(ctx, "get_conference_topics", mcp_func, {"conferences": ["NeurIPS"]})
+        second = _run_rag_tool(ctx, "get_conference_topics", mcp_func, {"conferences": ["NeurIPS"]})
+
+        assert mcp_func.call_count == 1
+        assert "do not repeat" in second.lower()
+
+    def test_tool_error_is_converted_and_cached(self):
+        """A raised ToolError becomes an error result and is cached."""
+        from abstracts_explorer.mcp.errors import ToolError
+        from abstracts_explorer.rag import _run_rag_tool, RAGToolContext
+
+        ctx = Mock()
+        ctx.deps = RAGToolContext()
+        mcp_func = Mock(side_effect=ToolError("No pre-computed clustering data"))
+
+        first = _run_rag_tool(ctx, "get_conference_topics", mcp_func, {"conferences": ["NeurIPS"]})
+        second = _run_rag_tool(ctx, "get_conference_topics", mcp_func, {"conferences": ["NeurIPS"]})
+
+        assert "No pre-computed clustering data" in first
+        assert mcp_func.call_count == 1
+        assert len(ctx.deps.tool_results) == 1
+        assert "do not repeat" in second.lower()
+
+
 class TestRAGChatQuery:
     """Test RAGChat query method."""
 
@@ -410,7 +491,7 @@ class TestRAGChatQuery:
 
     def test_query_no_results(self, mock_embeddings_manager_empty, mock_database):
         """Test query when no papers are found."""
-        with patch("abstracts_explorer.rag.mcp_search_papers") as mock_sp:
+        with patch("abstracts_explorer.rag.tools.mcp_search_papers") as mock_sp:
             mock_sp.return_value = json.dumps(
                 {"topic": "Unknown topic", "papers_found": 0, "papers": []},
                 indent=2,
@@ -440,7 +521,7 @@ class TestRAGChatQuery:
     def test_query_general_exception(self, mock_embeddings_manager, mock_database):
         """Test query with general exception."""
         # Mock the search_papers tool to raise exception
-        with patch("abstracts_explorer.rag.mcp_search_papers") as mock_sp:
+        with patch("abstracts_explorer.rag.tools.mcp_search_papers") as mock_sp:
             mock_sp.side_effect = Exception("Unexpected error")
 
             chat = RAGChat(mock_embeddings_manager, mock_database)
@@ -515,23 +596,6 @@ class TestRAGChatSingleSystemMessage:
         assert "ICLR" in payloads[1]["messages"][0]["content"]
         assert "NeurIPS" not in payloads[1]["messages"][0]["content"]
 
-    def test_chat_without_context_sends_single_system_message(self, mock_embeddings_manager, mock_database):
-        """The no-context chat path must also send exactly one system message."""
-        payloads = []
-        model, close_client = self._make_mock_model(payloads)
-        chat = RAGChat(mock_embeddings_manager, mock_database)
-
-        try:
-            with chat.agent.override(model=model):
-                chat.chat("hello", use_context=False)
-        finally:
-            close_client()
-
-        assert len(payloads) == 1
-        roles = [message["role"] for message in payloads[0]["messages"]]
-        assert roles.count("system") == 1
-        assert roles[0] == "system"
-
 
 class TestRAGChatHTTPClient:
     """Verify the rate-limited provider uses httpx2 without legacy warnings."""
@@ -557,43 +621,89 @@ class TestRAGChatHTTPClient:
         async_client = provider._client._client
         assert isinstance(async_client, httpx2.AsyncClient)
         assert isinstance(async_client._transport, RateLimitedTransport)
+        assert async_client.timeout.connect == 10
+        assert async_client.timeout.read == 60
         asyncio.run(async_client.aclose())
 
+    def test_non_rate_limited_agent_uses_structured_timeout(
+        self, mock_embeddings_manager, mock_database, monkeypatch
+    ):
+        """Without rate limiting, the agent still uses the structured timeout."""
+        import asyncio
 
-class TestRAGChatChat:
-    """Test RAGChat chat method."""
+        import httpx2
 
-    def test_chat_with_context(self, mock_embeddings_manager, mock_database, mock_search_papers):
-        """Test chat with context retrieval."""
+        from abstracts_explorer.rate_limiter import RateLimitedTransport
+
+        config = get_config()
+        monkeypatch.setattr(config, "requests_per_minute", 0)
+
         chat = RAGChat(mock_embeddings_manager, mock_database)
+        provider = getattr(chat.agent.model, "provider")
+        async_client = provider._client._client
+        assert isinstance(async_client, httpx2.AsyncClient)
+        assert not isinstance(async_client._transport, RateLimitedTransport)
+        assert async_client.timeout.connect == 10
+        assert async_client.timeout.read == 60
+        asyncio.run(async_client.aclose())
 
-        with chat.agent.override(model=TestModel()):
-            result = chat.chat("Tell me about transformers")
+    def test_separate_chats_work_across_worker_threads(self, mock_embeddings_manager, mock_database, monkeypatch):
+        """Per-request chats must work on the event loop of their worker thread."""
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
 
-        assert "response" in result
-        assert len(result["papers"]) > 0
-        mock_search_papers.assert_called()
+        import httpx2
 
-    def test_chat_without_context(self, mock_embeddings_manager, mock_database):
-        """Test chat without context retrieval."""
-        chat = RAGChat(mock_embeddings_manager, mock_database)
+        import abstracts_explorer.rag.agent as agent_module
 
-        with chat.agent.override(model=TestModel()):
-            result = chat.chat("Hello, how are you?", use_context=False)
+        config = get_config()
+        monkeypatch.setattr(config, "requests_per_minute", 0)
 
-        assert "response" in result
-        assert result["papers"] == []
-        assert result["metadata"]["n_papers"] == 0
+        def handler(request):
+            body = json.loads(request.content)
+            return httpx2.Response(
+                200,
+                json={
+                    "id": "chatcmpl-test",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": body.get("model", "test-model"),
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "ok"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                },
+            )
 
-    def test_chat_custom_n_results(self, mock_embeddings_manager, mock_database, mock_search_papers):
-        """Test chat with custom n_results."""
-        chat = RAGChat(mock_embeddings_manager, mock_database)
+        def create_client(*, timeout, transport=None):
+            return httpx2.AsyncClient(transport=httpx2.MockTransport(handler), timeout=timeout)
 
-        with chat.agent.override(model=TestModel()):
-            chat.chat("What is AI?", n_results=7)
+        monkeypatch.setattr(agent_module, "create_async_httpx2_client", create_client)
 
-        # Verify search was called
-        mock_search_papers.assert_called()
+        barrier = threading.Barrier(2)
+
+        def run_query(question):
+            barrier.wait(timeout=5)
+            chat = RAGChat(
+                mock_embeddings_manager,
+                mock_database,
+                backend_url="http://test",
+                model="test-model",
+            )
+            try:
+                return chat.query(question, limit=1)
+            finally:
+                chat.close()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(run_query, question) for question in ("first", "second")]
+            results = [future.result(timeout=15) for future in futures]
+
+        assert [result["response"] for result in results] == ["ok", "ok"]
 
 
 class TestRAGChatConversation:
@@ -613,6 +723,18 @@ class TestRAGChatConversation:
         chat.reset_conversation()
 
         assert len(chat.conversation_history) == 0
+
+    def test_message_history_can_be_restored(self, mock_embeddings_manager, mock_database):
+        """A new chat can continue from a previously retained message history."""
+        first = RAGChat(mock_embeddings_manager, mock_database, message_history=["first"])
+        assert first.message_history == ["first"]
+
+        first.message_history = ["first", "second"]
+        restored = RAGChat(mock_embeddings_manager, mock_database, message_history=first.message_history)
+        assert restored.message_history == ["first", "second"]
+
+        first.close()
+        restored.close()
 
     def test_conversation_history_accumulates(self, mock_embeddings_manager, mock_database, mock_search_papers):
         """Test that conversation history accumulates across queries."""
@@ -1214,7 +1336,7 @@ class TestRAGChatIntegration:
         )
 
         # Get the generated UID from the database
-        papers = db._query("SELECT uid FROM papers LIMIT 1")
+        papers = raw_query(db, "SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_integration"
@@ -1278,7 +1400,7 @@ class TestRAGChatIntegration:
             },
         )
 
-        papers = db._query("SELECT uid FROM papers LIMIT 1")
+        papers = raw_query(db, "SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_conversation"
@@ -1309,7 +1431,7 @@ class TestRAGChatIntegration:
         assert len(result1["response"]) > 0
 
         # Follow-up query
-        result2 = chat.chat("Tell me more about their architecture")
+        result2 = chat.query("Tell me more about their architecture")
         assert len(result2["response"]) > 0
 
         # Check history
@@ -1342,7 +1464,7 @@ class TestRAGChatIntegration:
             },
         )
 
-        papers = db._query("SELECT uid FROM papers LIMIT 1")
+        papers = raw_query(db, "SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_export"
@@ -1390,24 +1512,24 @@ class TestRAGToolLogging:
 
     def test_search_papers_logs_call_and_result(self, caplog, mock_search_papers):
         """_tool_search_papers logs the call arguments and abbreviated result."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
 
         with caplog.at_level("INFO", logger="abstracts_explorer.rag"):
-            _tool_search_papers(ctx, topic_keywords="transformers", n_results=5)
+            _tool_search_papers(ctx, topic_keywords="transformers", limit=5)
 
         assert "Tool call: search_papers" in caplog.text
         assert "Tool result: search_papers" in caplog.text
 
     def test_get_conference_topics_logs_call_and_result(self, caplog, mock_cluster_topics):
         """_tool_get_conference_topics logs the call arguments and abbreviated result."""
-        from abstracts_explorer.rag import _tool_get_conference_topics, RAGDeps
+        from abstracts_explorer.rag import _tool_get_conference_topics, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
 
         with caplog.at_level("INFO", logger="abstracts_explorer.rag"):
@@ -1418,10 +1540,10 @@ class TestRAGToolLogging:
 
     def test_get_topic_evolution_logs_call_and_result(self, caplog, mock_topic_evolution):
         """_tool_get_topic_evolution logs the call arguments and abbreviated result."""
-        from abstracts_explorer.rag import _tool_get_topic_evolution, RAGDeps
+        from abstracts_explorer.rag import _tool_get_topic_evolution, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
 
         with caplog.at_level("INFO", logger="abstracts_explorer.rag"):
             _tool_get_topic_evolution(ctx, topic_keywords="attention", conferences=["NeurIPS"])
@@ -1431,10 +1553,10 @@ class TestRAGToolLogging:
 
     def test_analyze_topic_relevance_logs_call_and_result(self, caplog, mock_analyze_topic):
         """_tool_analyze_topic_relevance logs the call arguments and abbreviated result."""
-        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGDeps
+        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
 
         with caplog.at_level("INFO", logger="abstracts_explorer.rag"):
             _tool_analyze_topic_relevance(ctx, topic="diffusion models", conference="NeurIPS")
@@ -1444,13 +1566,13 @@ class TestRAGToolLogging:
 
     def test_get_cluster_visualization_logs_call_and_result(self, caplog):
         """_tool_get_cluster_visualization logs the call arguments and abbreviated result."""
-        from abstracts_explorer.rag import _tool_get_cluster_visualization, RAGDeps
+        from abstracts_explorer.rag import _tool_get_cluster_visualization, RAGToolContext
 
-        with patch("abstracts_explorer.rag.mcp_get_cluster_visualization") as mock_viz:
+        with patch("abstracts_explorer.rag.tools.mcp_get_cluster_visualization") as mock_viz:
             mock_viz.return_value = json.dumps({"points": [], "n_points": 0})
 
             ctx = Mock()
-            ctx.deps = RAGDeps()
+            ctx.deps = RAGToolContext()
             ctx.deps.conferences = ["ICLR"]
 
             with caplog.at_level("INFO", logger="abstracts_explorer.rag"):
@@ -1465,10 +1587,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_search_papers_uses_deps_conference_when_not_specified(self, mock_search_papers):
         """_tool_search_papers uses ctx.deps.conferences[0] when no conference provided."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = []
 
@@ -1479,10 +1601,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_search_papers_explicit_conference_overrides_deps(self, mock_search_papers):
         """_tool_search_papers uses the explicitly provided conference over deps."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = []
 
@@ -1493,10 +1615,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_search_papers_uses_deps_years_when_not_specified(self, mock_search_papers):
         """_tool_search_papers uses ctx.deps.years when no years provided."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = [2024]
 
@@ -1507,10 +1629,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_search_papers_explicit_years_overrides_deps(self, mock_search_papers):
         """_tool_search_papers uses explicitly provided years over deps."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = [2024]
 
@@ -1521,10 +1643,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_search_papers_no_years_when_deps_empty(self, mock_search_papers):
         """_tool_search_papers does not filter by years when deps.years is empty."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = []
 
@@ -1533,64 +1655,64 @@ class TestRAGToolConferenceDefaults:
         call_kwargs = mock_search_papers.call_args[1]
         assert "years" not in call_kwargs
 
-    def test_search_papers_explicit_n_results(self, mock_search_papers):
-        """_tool_search_papers passes explicit n_results."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+    def test_search_papers_explicit_limit(self, mock_search_papers):
+        """_tool_search_papers passes an explicit limit."""
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
 
-        _tool_search_papers(ctx, topic_keywords="transformers", n_results=20)
+        _tool_search_papers(ctx, topic_keywords="transformers", limit=20)
 
         call_kwargs = mock_search_papers.call_args[1]
-        assert call_kwargs.get("n_results") == 20
+        assert call_kwargs.get("limit") == 20
 
-    def test_search_papers_limit_alias(self, mock_search_papers):
-        """_tool_search_papers maps limit alias to n_results."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+    def test_search_papers_n_results_alias(self, mock_search_papers):
+        """_tool_search_papers maps the n_results alias to limit."""
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
 
-        _tool_search_papers(ctx, topic_keywords="transformers", limit=15)
+        _tool_search_papers(ctx, topic_keywords="transformers", n_results=15)
 
         call_kwargs = mock_search_papers.call_args[1]
-        assert call_kwargs.get("n_results") == 15
+        assert call_kwargs.get("limit") == 15
 
-    def test_search_papers_uses_deps_n_results(self, mock_search_papers):
-        """_tool_search_papers uses ctx.deps.n_results when not provided."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
-
-        ctx = Mock()
-        ctx.deps = RAGDeps(n_results=25)
-        ctx.deps.conferences = ["NeurIPS"]
-
-        _tool_search_papers(ctx, topic_keywords="transformers")
-
-        call_kwargs = mock_search_papers.call_args[1]
-        assert call_kwargs.get("n_results") == 25
-
-    def test_search_papers_default_n_results(self, mock_search_papers):
-        """_tool_search_papers defaults to 10 when neither param nor deps provide n_results."""
-        from abstracts_explorer.rag import _tool_search_papers, RAGDeps
+    def test_search_papers_uses_deps_limit(self, mock_search_papers):
+        """_tool_search_papers uses ctx.deps.limit when not provided."""
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext(limit=25)
         ctx.deps.conferences = ["NeurIPS"]
 
         _tool_search_papers(ctx, topic_keywords="transformers")
 
         call_kwargs = mock_search_papers.call_args[1]
-        assert call_kwargs.get("n_results") == 10
+        assert call_kwargs.get("limit") == 25
+
+    def test_search_papers_default_limit(self, mock_search_papers):
+        """_tool_search_papers defaults to 10 when neither param nor deps provide a limit."""
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
+
+        ctx = Mock()
+        ctx.deps = RAGToolContext()
+        ctx.deps.conferences = ["NeurIPS"]
+
+        _tool_search_papers(ctx, topic_keywords="transformers")
+
+        call_kwargs = mock_search_papers.call_args[1]
+        assert call_kwargs.get("limit") == 10
 
     def test_analyze_topic_relevance_uses_deps_conference_when_not_specified(self, mock_analyze_topic):
         """_tool_analyze_topic_relevance uses ctx.deps.conferences when no conference provided."""
-        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGDeps
+        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["ICLR"]
         ctx.deps.years = []
 
@@ -1601,10 +1723,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_analyze_topic_relevance_explicit_conference_overrides_deps(self, mock_analyze_topic):
         """_tool_analyze_topic_relevance uses explicitly provided conference over deps."""
-        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGDeps
+        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["ICLR"]
         ctx.deps.years = []
 
@@ -1615,10 +1737,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_analyze_topic_relevance_uses_deps_years_when_not_specified(self, mock_analyze_topic):
         """_tool_analyze_topic_relevance uses ctx.deps.years when no years provided."""
-        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGDeps
+        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = [2024]
 
@@ -1629,10 +1751,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_analyze_topic_relevance_explicit_years_overrides_deps(self, mock_analyze_topic):
         """_tool_analyze_topic_relevance uses explicitly provided years over deps."""
-        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGDeps
+        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = [2024]
 
@@ -1643,10 +1765,10 @@ class TestRAGToolConferenceDefaults:
 
     def test_analyze_topic_relevance_no_years_when_deps_empty(self, mock_analyze_topic):
         """_tool_analyze_topic_relevance does not filter by years when deps.years is empty."""
-        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGDeps
+        from abstracts_explorer.rag import _tool_analyze_topic_relevance, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = []
 
@@ -1662,7 +1784,7 @@ class TestRAGToolGetPaperDetails:
     @pytest.fixture
     def mock_paper_details(self):
         """Mock mcp_server.get_paper_details to return test data."""
-        with patch("abstracts_explorer.rag.mcp_get_paper_details") as mock_gpd:
+        with patch("abstracts_explorer.rag.tools.mcp_get_paper_details") as mock_gpd:
             mock_gpd.return_value = json.dumps(
                 {
                     "papers_found": 1,
@@ -1684,10 +1806,10 @@ class TestRAGToolGetPaperDetails:
 
     def test_get_paper_details_uses_deps_conference_when_not_specified(self, mock_paper_details):
         """_tool_get_paper_details uses ctx.deps.conferences[0] when no conference provided."""
-        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = []
 
@@ -1698,10 +1820,10 @@ class TestRAGToolGetPaperDetails:
 
     def test_get_paper_details_explicit_conference_overrides_deps(self, mock_paper_details):
         """_tool_get_paper_details uses explicitly provided conference over deps."""
-        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = []
 
@@ -1712,10 +1834,10 @@ class TestRAGToolGetPaperDetails:
 
     def test_get_paper_details_uses_deps_year_when_not_specified(self, mock_paper_details):
         """_tool_get_paper_details uses ctx.deps.years[0] when no year provided."""
-        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = [2024]
 
@@ -1726,10 +1848,10 @@ class TestRAGToolGetPaperDetails:
 
     def test_get_paper_details_explicit_year_overrides_deps(self, mock_paper_details):
         """_tool_get_paper_details uses explicitly provided year over deps."""
-        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = [2024]
 
@@ -1740,10 +1862,10 @@ class TestRAGToolGetPaperDetails:
 
     def test_get_paper_details_no_year_when_deps_empty(self, mock_paper_details):
         """_tool_get_paper_details does not filter by year when deps.years is empty."""
-        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = []
 
@@ -1754,10 +1876,10 @@ class TestRAGToolGetPaperDetails:
 
     def test_get_paper_details_no_conference_when_deps_empty(self, mock_paper_details):
         """_tool_get_paper_details does not filter by conference when deps.conferences is empty."""
-        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = []
         ctx.deps.years = []
 
@@ -1768,10 +1890,10 @@ class TestRAGToolGetPaperDetails:
 
     def test_get_paper_details_stores_tool_result(self, mock_paper_details):
         """_tool_get_paper_details appends result to ctx.deps.tool_results."""
-        from abstracts_explorer.rag import _tool_get_paper_details, RAGDeps
+        from abstracts_explorer.rag import _tool_get_paper_details, RAGToolContext
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
         ctx.deps.conferences = ["NeurIPS"]
         ctx.deps.years = []
 
@@ -1837,7 +1959,7 @@ class TestParallelRAGRateLimiting:
             },
         )
 
-        papers = db._query("SELECT uid FROM papers LIMIT 1")
+        papers = raw_query(db, "SELECT uid FROM papers LIMIT 1")
         generated_uid = papers[0]["uid"]
 
         chroma_path = tmp_path / "chroma_parallel"
@@ -1905,7 +2027,7 @@ class TestParallelRAGRateLimiting:
 class TestRAGChatInterestingPaperTools:
     """Tests for the interesting-paper summary and recommendation tools."""
 
-    @patch("abstracts_explorer.rag.mcp_summarize_interesting_papers")
+    @patch("abstracts_explorer.rag.tools.mcp_summarize_interesting_papers")
     def test_query_calls_summarize_interesting_papers(
         self,
         mock_summarize,
@@ -1938,7 +2060,7 @@ class TestRAGChatInterestingPaperTools:
         )
         assert "summarize_interesting_papers" in result["metadata"]["tools_executed"]
 
-    @patch("abstracts_explorer.rag.mcp_recommend_related_papers")
+    @patch("abstracts_explorer.rag.tools.mcp_recommend_related_papers")
     def test_query_calls_recommend_related_papers(
         self,
         mock_recommend,
@@ -1966,7 +2088,7 @@ class TestRAGChatInterestingPaperTools:
 
         mock_recommend.assert_called_once_with(
             priorities={"p1": {"priority": 5}},
-            n_results=10,
+            limit=10,
             conferences=["ICLR"],
             years=[2026],
         )
@@ -1977,10 +2099,10 @@ class TestRAGChatInterestingPaperTools:
         mock_embeddings_manager,
         mock_database,
     ):
-        from abstracts_explorer.rag import RAGDeps, _tool_summarize_interesting_papers
+        from abstracts_explorer.rag import RAGToolContext, _tool_summarize_interesting_papers
 
         ctx = Mock()
-        ctx.deps = RAGDeps()
+        ctx.deps = RAGToolContext()
 
         message = _tool_summarize_interesting_papers(ctx)
         assert "No papers have been marked" in message

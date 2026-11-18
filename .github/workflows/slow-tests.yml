@@ -66,10 +66,8 @@ jobs:
                   npm run install:vendor
 
 
-            - name: Install Chrome for E2E tests
-              uses: browser-actions/setup-chrome@v1
-              with:
-                  chrome-version: stable
+            - name: Install Playwright Chromium for E2E tests
+              run: uv run playwright install --with-deps chromium
 
             - name: Run slow tests
               env:

@@ -47,10 +47,8 @@ jobs:
                   npm --version
                   npm list --depth=0
 
-            - name: Install Chrome for E2E tests
-              uses: browser-actions/setup-chrome@v1
-              with:
-                  chrome-version: stable
+            - name: Install Playwright Chromium for E2E tests
+              run: uv run playwright install --with-deps chromium
 
             - name: Run quick tests
               run: |

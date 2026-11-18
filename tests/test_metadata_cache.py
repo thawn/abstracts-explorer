@@ -60,14 +60,6 @@ class TestMetadataCache:
 
         assert cache.get("key", ttl_seconds=0) is None
 
-    def test_invalidate(self):
-        cache = MetadataCache()
-        cache.set("key", [2025], ttl_seconds=60)
-
-        cache.invalidate("key")
-
-        assert cache.get("key", ttl_seconds=60) is None
-
     def test_invalidate_database_only_matching_entries(self):
         cache = MetadataCache()
         cache.set(("postgresql://a", "years"), [2025], ttl_seconds=60)
@@ -87,3 +79,13 @@ class TestMetadataCache:
         cache.clear()
 
         assert cache.get("key", ttl_seconds=60) is None
+
+    def test_max_entries_evicts_oldest(self):
+        cache = MetadataCache(max_entries=2)
+        cache.set("a", 1, ttl_seconds=60)
+        cache.set("b", 2, ttl_seconds=60)
+        cache.set("c", 3, ttl_seconds=60)
+
+        assert cache.get("a", ttl_seconds=60) is None
+        assert cache.get("b", ttl_seconds=60) == 2
+        assert cache.get("c", ttl_seconds=60) == 3

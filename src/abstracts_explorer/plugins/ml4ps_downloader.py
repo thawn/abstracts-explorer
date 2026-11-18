@@ -8,14 +8,15 @@ Uses the lightweight plugin API for simplified implementation.
 
 from typing import Any, Dict, List, Optional
 import logging
-from requests.adapters import HTTPAdapter
+import threading
+import time
 from bs4 import BeautifulSoup
 import re
 from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Lock
 
 from abstracts_explorer.plugin import (
+    DownloadOptions,
     HTTPDownloaderPlugin,
     LightweightPaper,
     sanitize_author_names,
@@ -46,6 +47,7 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
     conference_name = "ML4PS"
     _USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     _SOURCE_LABEL = "ML4PS data"
+    _DEFAULT_MAX_WORKERS = 10
 
     # NeurIPS virtual page base URL for fetching abstracts (years >= 2022 only)
     _NEURIPS_VIRTUAL_BASES = {
@@ -71,34 +73,14 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
     def __init__(self):
         """Initialize the ML4PS downloader plugin."""
         super().__init__()
-        # Match pool_maxsize to the maximum number of concurrent workers used in
-        # _fetch_abstracts_for_papers to avoid urllib3 "Connection pool is full" warnings.
-        adapter = HTTPAdapter(pool_maxsize=20)
-        self._session.mount("https://", adapter)
-        self._session.mount("http://", adapter)
-        self.stats_lock = Lock()
-        self._current_year: int = max(self.supported_years)
+        self.configure_pool(20)
+        self._current_year: int = self._start_year
+        self._download_lock = threading.Lock()
 
     @property
     def session(self):
         """Return the shared HTTP session for backwards compatibility."""
         return self._session
-
-    def _get_base_url(self, year: int) -> str:
-        """
-        Get the ML4PS workshop page URL for a given year.
-
-        Parameters
-        ----------
-        year : int
-            Workshop year
-
-        Returns
-        -------
-        str
-            URL of the workshop page
-        """
-        return f"https://ml4physicalsciences.github.io/{year}/"
 
     def _get_neurips_virtual_base(self, year: int) -> Optional[str]:
         """
@@ -120,73 +102,57 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
             return None
         return self._NEURIPS_VIRTUAL_BASES.get(year, f"https://neurips.cc/virtual/{year}/poster/")
 
-    def download(
+    def _download_uncached(
         self,
-        year: Optional[int] = None,
-        output_path: Optional[str] = None,
-        force_download: bool = False,
-        **kwargs: Any,
+        year: int,
+        output_path: Optional[str],
+        options: DownloadOptions,
     ) -> List[LightweightPaper]:
         """
-        Download papers from ML4PS workshop.
+        Scrape the ML4PS workshop page and fetch abstracts for *year*.
 
         Parameters
         ----------
-        year : int, optional
-            Workshop year (default: 2025)
+        year : int
+            Workshop year.
         output_path : str, optional
-            Path to save the downloaded JSON file
-        force_download : bool
-            Force re-download even if file exists
-        max_workers : int, optional
-            Maximum parallel workers for fetching abstracts (default: 10)
-        **kwargs : Any
-            Additional parameters
+            Cache path (unused here; the template persists the result).
+        options : DownloadOptions
+            Resolved download options. ``max_workers`` controls parallel
+            abstract fetching.
 
         Returns
         -------
         list of LightweightPaper
-            List of validated paper objects ready for database insertion
+            List of validated paper objects ready for database insertion.
         """
-        if year is None:
-            year = max(self.supported_years)
+        with self._download_lock:
+            self._current_year = year
 
-        # Validate year
-        self.validate_year(year)
+            logger.info(f"Scraping ML4PS {year} workshop papers...")
 
-        # Store year for use by internal methods
-        self._current_year = year
+            papers_raw = self._scrape_papers(
+                year,
+                timeout=options.timeout,
+                verify_ssl=options.verify_ssl,
+                request_delay=options.request_delay,
+            )
 
-        # Check if file already exists and should be loaded
-        if output_path and not force_download:
-            cached_papers = self._load_papers_json(output_path, "web")
-            if cached_papers is not None:
-                return cached_papers
+            if not papers_raw:
+                raise RuntimeError("No papers were scraped; refusing to report an empty successful download.")
 
-        # Get options from kwargs
-        max_workers = kwargs.get("max_workers", 10)
+            logger.info(f"Fetching abstracts for {len(papers_raw)} papers...")
+            self._fetch_abstracts_for_papers(
+                papers_raw,
+                year,
+                max_workers=options.max_workers,
+                timeout=options.timeout,
+                verify_ssl=options.verify_ssl,
+                request_delay=options.request_delay,
+            )
 
-        logger.info(f"Scraping ML4PS {year} workshop papers...")
-
-        # Scrape papers
-        papers_raw = self._scrape_papers()
-
-        if not papers_raw:
-            logger.error("No papers were scraped")
-            return []
-
-        # Fetch abstracts (required field)
-        logger.info(f"Fetching abstracts for {len(papers_raw)} papers...")
-        self._fetch_abstracts_for_papers(papers_raw, max_workers=max_workers)
-
-        # Convert to lightweight format
-        lightweight_papers_data = self._convert_to_lightweight_format(papers_raw)
-
-        # Convert to LightweightPaper objects (skip papers that fail validation)
+        lightweight_papers_data = self._convert_to_lightweight_format(papers_raw, year)
         papers = validate_lightweight_papers(lightweight_papers_data)
-
-        # Save to file only if path provided and papers were found
-        self._save_papers_json(papers, output_path, "ML4PS")
 
         logger.info(f"Successfully downloaded {len(papers)} papers from ML4PS {year}")
 
@@ -211,7 +177,7 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
                     "type": "int",
                     "required": True,
                     "description": "Workshop year to download",
-                    "default": max(self.supported_years),
+                    "default": max(self.supported_years, default=self._start_year),
                 },
                 "output_path": {"type": "str", "required": False, "description": "Path to save the downloaded data"},
                 "force_download": {
@@ -224,17 +190,31 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
                     "type": "int",
                     "required": False,
                     "description": "Maximum parallel workers for fetching abstracts",
-                    "default": 20,
+                    "default": self._DEFAULT_MAX_WORKERS,
                 },
             },
         }
 
     # Internal helper methods
 
-    def _fetch_page(self, url: str, max_retries: int = 3) -> Optional[BeautifulSoup]:
+    def _fetch_page(
+        self,
+        url: str,
+        max_retries: int = 3,
+        timeout: Optional[float] = None,
+        verify_ssl: Optional[bool] = None,
+        request_delay: float = 0.0,
+    ) -> Optional[BeautifulSoup]:
         """Fetch and parse a web page, returning ``None`` after retries fail."""
         try:
-            response = self._request(url, self.timeout, self.verify_ssl, max_attempts=max_retries)
+            if request_delay > 0:
+                time.sleep(request_delay)
+            response = self._request(
+                url,
+                timeout if timeout is not None else self.timeout,
+                verify_ssl if verify_ssl is not None else self.verify_ssl,
+                max_attempts=max_retries,
+            )
             return BeautifulSoup(response.content, "html.parser")
         except RuntimeError as exc:
             logger.warning("Failed to fetch %s: %s", url, exc)
@@ -258,14 +238,27 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
             return match.group(1)
         return None
 
-    def _fetch_abstract_and_openreview(self, paper_id: str) -> tuple[Optional[str], Optional[str]]:
+    def _fetch_abstract_and_openreview(
+        self,
+        paper_id: str,
+        year: Optional[int] = None,
+        timeout: Optional[float] = None,
+        verify_ssl: Optional[bool] = None,
+        request_delay: float = 0.0,
+    ) -> tuple[Optional[str], Optional[str]]:
         """Fetch abstract and OpenReview URL from NeurIPS virtual conference page."""
-        virtual_base = self._get_neurips_virtual_base(self._current_year)
+        resolved_year = self._current_year if year is None else year
+        virtual_base = self._get_neurips_virtual_base(resolved_year)
         if not virtual_base:
             return None, None
 
         url = f"{virtual_base}{paper_id}"
-        soup = self._fetch_page(url)
+        soup = self._fetch_page(
+            url,
+            timeout=timeout,
+            verify_ssl=verify_ssl,
+            request_delay=request_delay,
+        )
 
         if not soup:
             return None, None
@@ -305,13 +298,14 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
 
         return abstract_text, openreview_url
 
-    def _extract_paper_info_from_row(self, row) -> Optional[Dict]:
+    def _extract_paper_info_from_row(self, row, year: Optional[int] = None) -> Optional[Dict]:
         """Extract paper information from a table row."""
         cells = row.find_all("td")
         if len(cells) < 2:
             return None
 
-        base_url = self._get_base_url(self._current_year)
+        resolved_year = self._current_year if year is None else year
+        base_url = self.get_url(resolved_year)
 
         try:
             # Extract paper ID
@@ -424,12 +418,24 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
             logger.warning(f"Error parsing paper row: {e}")
             return None
 
-    def _scrape_papers(self) -> List[Dict]:
+    def _scrape_papers(
+        self,
+        year: Optional[int] = None,
+        timeout: Optional[float] = None,
+        verify_ssl: Optional[bool] = None,
+        request_delay: float = 0.0,
+    ) -> List[Dict]:
         """Scrape all papers from the workshop page."""
-        base_url = self._get_base_url(self._current_year)
-        logger.info(f"Scraping ML4PS {self._current_year} workshop papers...")
+        resolved_year = self._current_year if year is None else year
+        base_url = self.get_url(resolved_year)
+        logger.info(f"Scraping ML4PS {resolved_year} workshop papers...")
 
-        soup = self._fetch_page(base_url)
+        soup = self._fetch_page(
+            base_url,
+            timeout=timeout,
+            verify_ssl=verify_ssl,
+            request_delay=request_delay,
+        )
         if not soup:
             return []
 
@@ -451,7 +457,7 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
         logger.info(f"Processing {len(rows)} rows...")
 
         for row in rows:
-            paper = self._extract_paper_info_from_row(row)
+            paper = self._extract_paper_info_from_row(row, resolved_year)
             if paper:
                 papers.append(paper)
                 if len(papers) % 50 == 0:
@@ -460,8 +466,16 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
         logger.info(f"Successfully scraped {len(papers)} papers")
         return papers
 
-    def _fetch_single_abstract(self, paper: Dict) -> tuple[Dict, bool]:
+    def _fetch_single_abstract(
+        self,
+        paper: Dict,
+        year: Optional[int] = None,
+        timeout: Optional[float] = None,
+        verify_ssl: Optional[bool] = None,
+        request_delay: float = 0.0,
+    ) -> tuple[Dict, bool]:
         """Fetch abstract for a single paper."""
+        resolved_year = self._current_year if year is None else year
         if not paper.get("poster_url"):
             return paper, False
 
@@ -473,7 +487,13 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
         paper["neurips_paper_id"] = neurips_paper_id
 
         # Fetch abstract and OpenReview URL
-        abstract, openreview_url = self._fetch_abstract_and_openreview(neurips_paper_id)
+        abstract, openreview_url = self._fetch_abstract_and_openreview(
+            neurips_paper_id,
+            resolved_year,
+            timeout=timeout,
+            verify_ssl=verify_ssl,
+            request_delay=request_delay,
+        )
 
         if abstract:
             paper["abstract"] = abstract
@@ -484,8 +504,17 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
         success = abstract is not None or openreview_url is not None
         return paper, success
 
-    def _fetch_abstracts_for_papers(self, papers: List[Dict], max_workers: int = 20):
+    def _fetch_abstracts_for_papers(
+        self,
+        papers: List[Dict],
+        year: Optional[int] = None,
+        max_workers: int = 20,
+        timeout: Optional[float] = None,
+        verify_ssl: Optional[bool] = None,
+        request_delay: float = 0.0,
+    ):
         """Fetch abstracts for all papers in parallel."""
+        resolved_year = self._current_year if year is None else year
         logger.info(f"Fetching abstracts for {len(papers)} papers using {max_workers} parallel workers...")
 
         success_count = 0
@@ -493,27 +522,36 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
         processed_count = 0
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_paper = {executor.submit(self._fetch_single_abstract, paper): paper for paper in papers}
+            future_to_paper = {
+                executor.submit(
+                    self._fetch_single_abstract,
+                    paper,
+                    resolved_year,
+                    timeout,
+                    verify_ssl,
+                    request_delay,
+                ): paper
+                for paper in papers
+            }
 
             for future in as_completed(future_to_paper):
                 paper, success = future.result()
 
-                with self.stats_lock:
-                    processed_count += 1
-                    if success:
-                        success_count += 1
-                    else:
-                        fail_count += 1
+                processed_count += 1
+                if success:
+                    success_count += 1
+                else:
+                    fail_count += 1
 
-                    if processed_count % 10 == 0:
-                        logger.info(
-                            f"Progress: {processed_count}/{len(papers)} papers processed "
-                            f"({success_count} abstracts fetched, {fail_count} failed)"
-                        )
+                if processed_count % 10 == 0:
+                    logger.info(
+                        f"Progress: {processed_count}/{len(papers)} papers processed "
+                        f"({success_count} abstracts fetched, {fail_count} failed)"
+                    )
 
         logger.info(f"Abstract fetching complete: {success_count} successful, {fail_count} failed")
 
-    def _convert_to_lightweight_format(self, papers: List[Dict]) -> List[Dict]:
+    def _convert_to_lightweight_format(self, papers: List[Dict], year: Optional[int] = None) -> List[Dict]:
         """
         Convert scraped papers to lightweight format.
 
@@ -533,7 +571,7 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
         - keywords: list
         """
         lightweight_papers = []
-        year = self._current_year
+        resolved_year = self._current_year if year is None else year
 
         for paper in papers:
             # Extract author names from authors_str
@@ -542,9 +580,9 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
             authors = sanitize_author_names(authors)
 
             # Determine session based on event type
-            session = f"ML4PhysicalSciences {year} Workshop"
+            session = f"ML4PhysicalSciences {resolved_year} Workshop"
             if paper.get("eventtype") == "Spotlight":
-                session = f"ML4PhysicalSciences {year} Workshop - Spotlight"
+                session = f"ML4PhysicalSciences {resolved_year} Workshop - Spotlight"
 
             # Extract award from awards list if present
             awards_list = paper.get("awards", [])
@@ -558,12 +596,12 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
                 "session": session,
                 "poster_position": str(paper["id"]),  # Use paper ID as position
                 # Optional fields
-                "id": paper["id"],
+                "original_id": paper["id"],
                 "paper_pdf_url": paper.get("paper_url"),
                 "poster_image_url": paper.get("poster_url"),
                 "url": paper.get("openreview_url") or paper.get("paper_url"),
                 "award": award_str,
-                "year": year,
+                "year": resolved_year,
                 "conference": self.conference_name,  # Use plugin's conference_name for consistency
             }
 

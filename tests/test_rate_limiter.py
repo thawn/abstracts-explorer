@@ -67,6 +67,28 @@ class TestTokenBucketAcquire:
         assert limiter._tokens == pytest.approx(0.0, abs=0.1)
 
 
+class TestTokenBucketTryAcquire:
+    def test_try_acquire_success(self):
+        limiter = TokenBucketRateLimiter(requests_per_minute=2)
+        assert limiter.try_acquire() is True
+        assert limiter.try_acquire() is True
+        assert limiter.try_acquire() is False
+
+    def test_time_until_available_zero_when_ready(self):
+        limiter = TokenBucketRateLimiter(requests_per_minute=60)
+        assert limiter.time_until_available() == 0.0
+
+    def test_time_until_available_reports_positive_wait(self):
+        limiter = TokenBucketRateLimiter(requests_per_minute=60)
+        limiter._tokens = 0.0
+        wait = limiter.time_until_available()
+        assert 0.0 < wait <= 1.0
+
+    def test_time_until_available_zero_rate_is_infinite(self):
+        limiter = TokenBucketRateLimiter(requests_per_minute=0)
+        assert limiter.time_until_available() == float("inf")
+
+
 class TestTokenBucketRefill:
     def test_refill_rate(self):
         limiter = TokenBucketRateLimiter(requests_per_minute=120)

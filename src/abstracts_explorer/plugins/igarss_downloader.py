@@ -18,14 +18,16 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
-from requests.adapters import HTTPAdapter
 from pydantic import ValidationError
 
 from abstracts_explorer.plugin import (
+    DownloadOptions,
     HTTPDownloaderPlugin,
     LightweightPaper,
     sanitize_author_names,
 )
+from abstracts_explorer.plugin.persistence import FailureSidecar
+from abstracts_explorer.utils.url_utils import normalize_doi_url
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +94,7 @@ class IGARSSDownloaderPlugin(HTTPDownloaderPlugin):
 
     #: Default delay between paginated requests (seconds).
     _PAGE_DELAY = 1.0
+    _DEFAULT_PAGE_DELAY = _PAGE_DELAY
 
     _USER_AGENT = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -106,7 +109,10 @@ class IGARSSDownloaderPlugin(HTTPDownloaderPlugin):
     }
     _SOURCE_LABEL = "IGARSS data"
 
-    def __init__(self, timeout: int = 30, verify_ssl: bool = True):
+    #: IEEE Xplore search uses POST for read-only queries, so retries are safe.
+    _RETRY_NON_IDEMPOTENT = True
+
+    def __init__(self, timeout: float = 30, verify_ssl: bool = True):
         """
         Initialize the IGARSS downloader plugin.
 
@@ -118,9 +124,7 @@ class IGARSSDownloaderPlugin(HTTPDownloaderPlugin):
             Whether to verify SSL certificates (default: True).
         """
         super().__init__(timeout=timeout, verify_ssl=verify_ssl)
-        adapter = HTTPAdapter(pool_maxsize=5)
-        self._session.mount("https://", adapter)
-        self._session.mount("http://", adapter)
+        self.configure_pool(1)
 
     def get_url(self, year: int) -> str:
         """
@@ -211,7 +215,7 @@ class IGARSSDownloaderPlugin(HTTPDownloaderPlugin):
         self,
         year: int,
         page_number: int,
-        timeout: int,
+        timeout: float,
         verify_ssl: bool,
     ) -> Dict[str, Any]:
         """
@@ -318,7 +322,7 @@ class IGARSSDownloaderPlugin(HTTPDownloaderPlugin):
         # DOI → URL
         doi = record.get("doi")
         if doi:
-            paper_dict["url"] = f"https://doi.org/{doi}"
+            paper_dict["url"] = normalize_doi_url(doi)
 
         # PDF URL
         pdf_link = record.get("pdfUrl") or record.get("pdfLink")
@@ -382,31 +386,23 @@ class IGARSSDownloaderPlugin(HTTPDownloaderPlugin):
 
         return keywords if keywords else None
 
-    def download(
+    def _download_uncached(
         self,
-        year: Optional[int] = None,
-        output_path: Optional[str] = None,
-        force_download: bool = False,
-        **kwargs: Any,
+        year: int,
+        output_path: Optional[str],
+        options: DownloadOptions,
     ) -> List[LightweightPaper]:
         """
         Download IGARSS papers from IEEE Xplore for a given year.
 
         Parameters
         ----------
-        year : int, optional
-            Conference year to download (default: latest supported year).
+        year : int
+            Conference year to download.
         output_path : str, optional
-            Path to save the downloaded JSON file. If the file already exists
-            and ``force_download`` is ``False``, it is loaded directly.
-        force_download : bool
-            Force re-download even if a cached file exists.
-        **kwargs : Any
-            Additional parameters:
-
-            - ``timeout`` (int): Override default HTTP timeout.
-            - ``verify_ssl`` (bool): Override default SSL verification.
-            - ``page_delay`` (float): Delay between paginated requests.
+            Cache path (unused here; the template persists the result).
+        options : DownloadOptions
+            Resolved download options. ``page_delay`` controls pagination.
 
         Returns
         -------
@@ -415,32 +411,19 @@ class IGARSSDownloaderPlugin(HTTPDownloaderPlugin):
 
         Raises
         ------
-        ValueError
-            If the year is not supported.
         RuntimeError
             If the download or JSON parsing fails.
         """
-        if year is None:
-            year = max(self.supported_years) if self.supported_years else 2025
-
-        self.validate_year(year)
-
-        timeout = kwargs.get("timeout", self.timeout)
-        verify_ssl = kwargs.get("verify_ssl", self.verify_ssl)
-        page_delay = kwargs.get("page_delay", self._PAGE_DELAY)
-
-        # Load from local file if it exists and force_download is False
-        if output_path and not force_download:
-            cached_papers = self._load_papers_json(output_path, "IEEE Xplore")
-            if cached_papers is not None:
-                return cached_papers
+        timeout = options.timeout
+        verify_ssl = options.verify_ssl
+        page_delay = options.page_delay
 
         logger.info("Downloading IGARSS %d data from IEEE Xplore...", year)
 
-        # Fetch first page to get total record count
         first_page_data = self._fetch_page(year, 1, timeout, verify_ssl)
         total_records = first_page_data.get("totalRecords", 0)
         records = first_page_data.get("records", [])
+        failures: List[Dict[str, Any]] = []
 
         logger.info(
             "IGARSS %d: found %d total records on IEEE Xplore",
@@ -448,7 +431,17 @@ class IGARSSDownloaderPlugin(HTTPDownloaderPlugin):
             total_records,
         )
 
-        # Fetch remaining pages
+        if total_records > 0 and not records:
+            failures.append(
+                {
+                    "url": f"{self._API_URL}#page=1",
+                    "type": "page",
+                    "page": 1,
+                    "expected": total_records,
+                    "collected": 0,
+                }
+            )
+
         if total_records > self._ROWS_PER_PAGE:
             total_pages = (total_records + self._ROWS_PER_PAGE - 1) // self._ROWS_PER_PAGE
             for page_num in range(2, total_pages + 1):
@@ -462,18 +455,25 @@ class IGARSSDownloaderPlugin(HTTPDownloaderPlugin):
                 page_data = self._fetch_page(year, page_num, timeout, verify_ssl)
                 page_records = page_data.get("records", [])
                 if not page_records:
+                    failures.append(
+                        {
+                            "url": f"{self._API_URL}#page={page_num}",
+                            "type": "page",
+                            "page": page_num,
+                            "expected": total_records,
+                            "collected": len(records),
+                        }
+                    )
                     break
                 records.extend(page_records)
 
-        # Convert records to LightweightPaper objects
         papers: List[LightweightPaper] = []
         for record in records:
             paper = self._convert_paper(record, year)
             if paper is not None:
                 papers.append(paper)
 
-        # Save to file only if path provided and papers were found
-        self._save_papers_json(papers, output_path, "IGARSS")
+        FailureSidecar(output_path, self.conference_name, year).save(failures)
 
         logger.info(
             "Successfully downloaded %d papers from IGARSS %d",
@@ -481,6 +481,45 @@ class IGARSSDownloaderPlugin(HTTPDownloaderPlugin):
             year,
         )
 
+        return papers
+
+    def _handle_cached(
+        self,
+        cached: List[LightweightPaper],
+        year: int,
+        output_path: str,
+        options: DownloadOptions,
+    ) -> List[LightweightPaper]:
+        """
+        Refresh a cached result when a previous download lost pages.
+
+        Parameters
+        ----------
+        cached : list of LightweightPaper
+            Papers loaded from *output_path*.
+        year : int
+            Requested year.
+        output_path : str
+            Cache file that was loaded.
+        options : DownloadOptions
+            Resolved download options.
+
+        Returns
+        -------
+        list of LightweightPaper
+            Refreshed papers, or the cached papers when no sidecar exists.
+        """
+        failures = FailureSidecar(output_path, self.conference_name, year).load()
+        if not failures:
+            return cached
+
+        logger.info(
+            "Retrying IGARSS %d download after %d previously failed page(s).",
+            year,
+            len(failures),
+        )
+        papers = self._download_uncached(year, output_path, options)
+        self._save_papers_json(papers, output_path, self._save_label)
         return papers
 
     def get_metadata(self) -> Dict[str, Any]:

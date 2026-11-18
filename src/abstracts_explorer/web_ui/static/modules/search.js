@@ -7,9 +7,20 @@
 
 import { API_BASE } from './utils/constants.js';
 import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
+import { parseJsonResponse } from './utils/api-utils.js';
 import { showError, renderEmptyState } from './utils/ui-utils.js';
 import { setCurrentSearchTerm } from './state.js';
 import { formatPaperCard } from './paper-card.js';
+
+let latestSearchRequest = 0;
+
+/**
+ * Invalidate any in-flight search request so its response is ignored.
+ * Call this when filters change while a search may still be running.
+ */
+export function cancelPendingSearch() {
+    latestSearchRequest += 1;
+}
 
 /**
  * Search papers using the search API
@@ -33,6 +44,8 @@ export async function searchPapers() {
         showError('Please enter a search query');
         return;
     }
+
+    const requestId = ++latestSearchRequest;
 
     // Store the current search term for rating papers
     setCurrentSearchTerm(query);
@@ -80,7 +93,11 @@ export async function searchPapers() {
             body: JSON.stringify(requestBody)
         });
 
-        const data = await response.json();
+        if (requestId !== latestSearchRequest) return;
+
+        const data = await parseJsonResponse(response);
+
+        if (requestId !== latestSearchRequest) return;
 
         if (data.error) {
             showError(data.error);
@@ -89,8 +106,9 @@ export async function searchPapers() {
 
         displaySearchResults(data);
     } catch (error) {
+        if (requestId !== latestSearchRequest) return;
         console.error('Search error:', error);
-        showError('An error occurred while searching. Please try again.');
+        showError(error && error.message ? error.message : 'We could not complete the search. Please try again.');
     }
 }
 

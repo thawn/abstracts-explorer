@@ -8,6 +8,7 @@ Note: This module requires Flask and related dependencies.
 Install with: uv sync --extra web
 """
 
+
 def _initialize():
     """Lazy initialization of web UI components."""
     import importlib

@@ -37,7 +37,7 @@ from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.mcp_tools import execute_mcp_tool
 from abstracts_explorer.plugin import LightweightPaper
-from abstracts_explorer.profiling import (
+from tools.profiling import (
     AggregatedCase,
     SqlProfiler,
     explain_statement,

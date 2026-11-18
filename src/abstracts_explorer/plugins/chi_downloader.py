@@ -20,16 +20,17 @@ from typing import Any, Dict, List, Optional
 
 from abstracts_explorer.config import get_config
 from abstracts_explorer.plugin import (
-    LightweightDownloaderPlugin,
+    DownloaderPlugin,
     LightweightPaper,
     validate_lightweight_papers,
 )
+from abstracts_explorer.utils.url_utils import normalize_doi_url
 from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
 
-class CHIDownloaderPlugin(LightweightDownloaderPlugin):
+class CHIDownloaderPlugin(DownloaderPlugin):
     """
     Plugin for loading CHI conference papers from the SIGCHI program JSON.
 
@@ -60,6 +61,7 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
     """
 
     plugin_name = "chi"
+    requires_manual_input = True
     plugin_description = "CHI (ACM CHI) conference data loaded from the SIGCHI program JSON"
     _start_year = 2018
     conference_name = "CHI"
@@ -139,17 +141,15 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
             self.validate_year(year)
 
         # Return cached lightweight data when it already exists
-        if output_path and not force_download and Path(output_path).exists():
-            logger.info("Loading CHI papers from cached file: %s", output_path)
-            try:
-                return self._load_lightweight_papers(output_path)
-            except Exception as exc:  # pragma: no cover – edge case
-                logger.warning("Failed to load %s (%s); re-parsing CHI JSON.", output_path, exc)
+        if output_path and not force_download:
+            cached = self._load_papers_json(output_path, "CHI cache")
+            if cached is not None and year is not None and self._cache_matches_requested_year(cached, year):
+                return cached
 
         # Require the CHI program JSON for a fresh parse
         if not input_path:
             # Auto-detect well-known file location
-            example_year = year if year is not None else max(self.supported_years)
+            example_year = self._resolve_year(year)
             default_path = self._get_default_input_path(example_year)
             if default_path.exists():
                 logger.info("Auto-detected CHI program JSON: %s", default_path)
@@ -169,7 +169,7 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
         papers = self._parse_chi_json(input_path, year)
 
         # Save to file only if path provided and papers were found
-        self._save_papers_json(papers, output_path, "CHI")
+        self._save_papers_json(papers, output_path, self.conference_name)
 
         return papers
 
@@ -193,25 +193,6 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
         """
         config = get_config()
         return Path(config.data_dir) / f"CHI_{year}_program.json"
-
-    def _load_lightweight_papers(self, path: str) -> List[LightweightPaper]:
-        """
-        Load previously-converted lightweight papers from a JSON file.
-
-        Parameters
-        ----------
-        path : str
-            Path to the lightweight JSON file.
-
-        Returns
-        -------
-        list of LightweightPaper
-        """
-        with open(path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        if not isinstance(data, list):
-            raise ValueError(f"Expected a list of papers in {path}, got {type(data).__name__}")
-        return validate_lightweight_papers(data)
 
     def _parse_chi_json(self, input_path: str, year: Optional[int]) -> List[LightweightPaper]:
         """
@@ -336,18 +317,7 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
         doi_addon = (item.get("addons") or {}).get("doi", {})
         doi_value = (doi_addon.get("url") or "").strip()
         if doi_value:
-            if doi_value.startswith("https://"):
-                url = doi_value
-            elif doi_value.startswith("http://"):
-                url = doi_value.replace("http://", "https://", 1)
-            else:
-                # Strip any leading doi.org/ prefix before normalising
-                doi_path = doi_value
-                for prefix in ("doi.org/",):
-                    if doi_path.startswith(prefix):
-                        doi_path = doi_path[len(prefix) :]
-                        break
-                url = f"https://doi.org/{doi_path}"
+            url = normalize_doi_url(doi_value)
 
         # Human-readable award string
         award: Optional[str] = None
@@ -368,7 +338,7 @@ class CHIDownloaderPlugin(LightweightDownloaderPlugin):
                 session=session_name,
                 poster_position=str(item.get("id", "")),
                 year=year,
-                conference="CHI",
+                conference=self.conference_name,
                 original_id=item.get("id"),
                 url=url,
                 paper_pdf_url=url,

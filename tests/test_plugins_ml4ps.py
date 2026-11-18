@@ -13,7 +13,6 @@ from bs4 import BeautifulSoup
 
 from abstracts_explorer.plugins.ml4ps_downloader import ML4PSDownloaderPlugin
 from abstracts_explorer.plugins import (
-    LightweightDownloaderPlugin,
     DownloaderPlugin,
     get_plugin,
     list_plugins,
@@ -39,7 +38,7 @@ def _check_ml4ps_website_available() -> bool:
 @pytest.fixture(autouse=True)
 def _mock_network_delays(monkeypatch):
     """Avoid retry backoff sleeps in unit tests."""
-    monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", lambda seconds: None)
+    monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", lambda seconds: None)
 
 
 @pytest.fixture
@@ -186,8 +185,8 @@ class TestML4PSPluginProperties:
         assert isinstance(ml4ps_plugin, ML4PSDownloaderPlugin)
 
     def test_plugin_inheritance(self, ml4ps_plugin):
-        """Test that plugin inherits from LightweightDownloaderPlugin."""
-        assert isinstance(ml4ps_plugin, LightweightDownloaderPlugin)
+        """Test that plugin inherits from DownloaderPlugin."""
+        assert isinstance(ml4ps_plugin, DownloaderPlugin)
         assert isinstance(ml4ps_plugin, DownloaderPlugin)
 
     def test_plugin_metadata(self, ml4ps_plugin):
@@ -211,8 +210,8 @@ class TestML4PSPluginProperties:
 
     def test_plugin_base_url(self, ml4ps_plugin):
         """Test base URL construction for different years."""
-        assert ml4ps_plugin._get_base_url(2025) == "https://ml4physicalsciences.github.io/2025/"
-        assert ml4ps_plugin._get_base_url(2019) == "https://ml4physicalsciences.github.io/2019/"
+        assert ml4ps_plugin.get_url(2025) == "https://ml4physicalsciences.github.io/2025/"
+        assert ml4ps_plugin.get_url(2019) == "https://ml4physicalsciences.github.io/2019/"
 
     def test_plugin_neurips_virtual_base(self, ml4ps_plugin):
         """Test NeurIPS virtual base URL construction."""
@@ -328,7 +327,7 @@ class TestML4PSLightweightConversion:
         assert paper1["abstract"] == "This is a test abstract."
         assert paper1["session"] == f"ML4PhysicalSciences {expected_year} Workshop"
         assert paper1["poster_position"] == "1"
-        assert paper1["id"] == 1
+        assert paper1["original_id"] == 1
 
     def test_convert_spotlight_session(self, ml4ps_plugin, sample_scraped_papers):
         """Test that spotlight papers get special session name."""
@@ -461,6 +460,15 @@ class TestML4PSLightweightConversion:
         # Semicolons in author names should be replaced with spaces
         for author in lightweight[0]["authors"]:
             assert ";" not in author
+
+    def test_convert_uses_explicit_year(self, ml4ps_plugin, sample_scraped_papers):
+        """An explicit year wins over the shared mutable _current_year."""
+        ml4ps_plugin._current_year = 2022
+
+        lightweight = ml4ps_plugin._convert_to_lightweight_format(sample_scraped_papers, 2024)
+
+        assert all(paper["year"] == 2024 for paper in lightweight)
+        assert all("2024" in paper["session"] for paper in lightweight)
 
 
 # ============================================================================
@@ -922,6 +930,15 @@ class TestML4PSWebScraping:
 
             assert papers == []
 
+    def test_scrape_papers_uses_explicit_year(self, ml4ps_plugin):
+        """The workshop URL comes from the explicit year, not _current_year."""
+        ml4ps_plugin._current_year = 2022
+
+        with patch.object(ml4ps_plugin, "_fetch_page", return_value=None) as mock_fetch:
+            ml4ps_plugin._scrape_papers(2024)
+
+        assert mock_fetch.call_args.args[0] == "https://ml4physicalsciences.github.io/2024/"
+
     def test_scrape_papers_no_table(self, ml4ps_plugin):
         """Test scraping when table not found."""
         html = """
@@ -1277,7 +1294,7 @@ class TestML4PSParallelFetching:
 
         with patch.object(ml4ps_plugin, "_fetch_single_abstract") as mock_fetch:
             # Simulate different outcomes for different papers
-            def side_effect(paper):
+            def side_effect(paper, *args, **kwargs):
                 return paper, paper["id"] % 2 == 0
 
             mock_fetch.side_effect = side_effect
@@ -1353,9 +1370,9 @@ class TestML4PSDownloadIntegration:
         """Test download when scraping returns empty list."""
         mock_scrape.return_value = []
 
-        result = ml4ps_plugin.download(year=2025)
+        with pytest.raises(RuntimeError, match="No papers were scraped"):
+            ml4ps_plugin.download(year=2025)
 
-        assert result == []
         mock_fetch.assert_not_called()
 
     @patch.object(ML4PSDownloaderPlugin, "_scrape_papers")

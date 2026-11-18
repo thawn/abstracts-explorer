@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from abstracts_explorer.database import DatabaseManager
 from tests.conftest import set_test_db
-from tests.helpers import requires_lm_studio, find_free_port
+from tests.helpers import raw_query, requires_lm_studio, find_free_port
 
 # Helper functions imported from test_helpers:
 # - check_lm_studio_available(): Check if LM Studio is running
@@ -115,14 +115,18 @@ def web_server(test_database, tmp_path_factory):
     original_paper_db = os.environ.get("PAPER_DB")
     original_embedding_db = os.environ.get("EMBEDDING_DB")
     original_collection_name = os.environ.get("COLLECTION_NAME")
+    original_cors_origins = os.environ.get("CORS_ORIGINS")
+    services_module = None
+    original_embeddings_manager = None
 
     os.environ["PAPER_DB"] = str(test_database)
     os.environ["EMBEDDING_DB"] = str(embeddings_path)
     os.environ["COLLECTION_NAME"] = collection_name
+    os.environ["CORS_ORIGINS"] = "*"
 
     # Mock the OpenAI API for embedding generation
     # Integration tests should not require a real API connection
-    mock_openai_patcher = patch("abstracts_explorer.embeddings.OpenAI")
+    mock_openai_patcher = patch("abstracts_explorer.embeddings.models.OpenAI")
     mock_openai_class = mock_openai_patcher.start()
 
     try:
@@ -142,7 +146,7 @@ def web_server(test_database, tmp_path_factory):
         mock_client.embeddings.create.return_value = mock_embedding_response
 
         # Import after setting environment variables and mocking
-        from abstracts_explorer.web_ui import app as flask_app
+        from abstracts_explorer.web_ui.app import app as flask_app
         from abstracts_explorer.embeddings import EmbeddingsManager
         from abstracts_explorer.config import get_config
 
@@ -160,7 +164,7 @@ def web_server(test_database, tmp_path_factory):
 
         set_test_db(str(test_database))
         db = DatabaseManager()
-        papers = db._query("SELECT * FROM papers")
+        papers = raw_query(db, "SELECT * FROM papers")
 
         for paper in papers:
             em.add_paper(paper)
@@ -168,12 +172,11 @@ def web_server(test_database, tmp_path_factory):
         db.close()
 
         # Inject the pre-created embeddings manager directly
-        import sys
+        import abstracts_explorer.web_ui.request_services as services_module
 
-        app_module = sys.modules["abstracts_explorer.web_ui.app"]
-
-        app_module.embeddings_manager = em
-        app_module._reset_rag_chat_local()
+        original_embeddings_manager = services_module.embeddings_manager
+        services_module.embeddings_manager = em
+        services_module._reset_rag_chat_local()
 
         # Use werkzeug's make_server for better cross-platform compatibility
         # This works more reliably in threads than Flask's app.run()
@@ -210,6 +213,10 @@ def web_server(test_database, tmp_path_factory):
         # Ensure mock is always stopped
         mock_openai_patcher.stop()
 
+        if services_module is not None:
+            services_module.embeddings_manager = original_embeddings_manager
+            services_module._reset_rag_chat_local()
+
         # Restore original environment variables
         if original_paper_db is not None:
             os.environ["PAPER_DB"] = original_paper_db
@@ -225,6 +232,11 @@ def web_server(test_database, tmp_path_factory):
             os.environ["COLLECTION_NAME"] = original_collection_name
         elif "COLLECTION_NAME" in os.environ:
             del os.environ["COLLECTION_NAME"]
+
+        if original_cors_origins is not None:
+            os.environ["CORS_ORIGINS"] = original_cors_origins
+        elif "CORS_ORIGINS" in os.environ:
+            del os.environ["CORS_ORIGINS"]
 
 
 class TestWebUIIntegration:
@@ -822,7 +834,7 @@ class TestWebUIChatEndpointFull:
         Test chat endpoint with custom n_papers parameter.
 
         This integration test verifies custom paper count with real API.
-        For unit testing without LM Studio, see TestRAGChatQuery.test_query_with_n_results in test_rag.py.
+        For unit testing without LM Studio, see TestRAGChatQuery.test_query_with_limit in test_rag.py.
         """
         host, port, base_url = web_server
 
@@ -983,18 +995,6 @@ class TestWebUIErrorHandlingPaths:
 
         data = response.json()
         assert isinstance(data, dict)
-        assert "error" in data
-
-    def test_clusters_cached_endpoint_not_found(self, web_server):
-        """Test that cached clusters endpoint returns 404 when no cache exists."""
-        host, port, base_url = web_server
-
-        response = requests.get(f"{base_url}/api/clusters/cached", timeout=10)
-
-        # Should return 404 when no cached file exists
-        assert response.status_code == 404
-
-        data = response.json()
         assert "error" in data
 
     def test_clusters_compute_with_conference_year_filter(self, web_server):

@@ -51,10 +51,13 @@ em.add_paper({
 ### Semantic Search
 
 ```python
-# Search by semantic similarity
-results = em.search_similar("transformer architecture", n_results=10)
+from abstracts_explorer.embeddings import QueryEmbedding
 
-for paper_id, distance in zip(results["ids"][0], results["distances"][0]):
+# Search by semantic similarity
+query = QueryEmbedding("transformer architecture", em)
+results = em.search_similar(query, limit=10)
+
+for paper_id, distance in results:
     print(f"{paper_id}: similarity={1 - distance:.3f}")
 ```
 
@@ -70,8 +73,8 @@ db = DatabaseManager()
 uids = db.resolve_paper_uids(conferences=["NeurIPS"], years=[2025])
 
 results = em.search_similar(
-    query="deep learning",
-    n_results=5,
+    QueryEmbedding("deep learning", em),
+    limit=5,
     ids=uids,
 )
 ```
@@ -138,23 +141,20 @@ print(f"Total papers: {collection.count()}")
 
 # Reset the collection
 em.create_collection(reset=True)
-
-# Check whether a paper's embedding is current
-needs_update = em.paper_needs_update(paper_dict)
 ```
 
 ## Search Results Format
 
-`search_similar` returns nested ID/distance lists:
+`search_similar` returns ordered `(paper_uid, distance)` tuples:
 
 ```python
-results = em.search_similar("deep learning", n_results=5)
-for paper_id, distance in zip(results["ids"][0], results["distances"][0]):
+results = em.search_similar(QueryEmbedding("deep learning", em), limit=5)
+for paper_id, distance in results:
     print(f"{paper_id}: distance={distance:.3f}")  # Lower is more similar
 ```
 
-For distance-threshold workflows, `query_ids_within_distance` returns flat
-``ids``/``distances`` lists plus ``total_considered``.
+For distance-threshold workflows, `query_ids_within_distance` returns matching
+``(paper_uid, distance)`` tuples that fall within the requested threshold.
 
 ## Performance Considerations
 

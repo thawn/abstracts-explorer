@@ -43,20 +43,6 @@ export function renderErrorBlock(message) {
 }
 
 /**
- * Render loading spinner
- * @param {string} message - Loading message
- * @returns {string} HTML string
- */
-export function renderLoadingSpinner(message) {
-    return `
-        <div class="flex justify-center items-center py-12">
-            <div class="spinner"></div>
-            ${message ? `<p class="ml-4 text-gray-600">${escapeHtml(message)}</p>` : ''}
-        </div>
-    `;
-}
-
-/**
  * Show loading in element
  * @param {string} elementId - Element ID
  * @param {string} message - Loading message

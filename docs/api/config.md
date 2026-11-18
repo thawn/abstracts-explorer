@@ -89,7 +89,7 @@ Settings are loaded in order (later overrides earlier):
 
 ```bash
 # 1. Default in code
-chat_model = "gemma-3-4b-it-qat"
+chat_model = "diffbot-small-xl-2508"
 
 # 2. .env file (overrides default)
 CHAT_MODEL=llama-3.2-3b-instruct
@@ -107,7 +107,7 @@ The `.env` file uses simple `KEY=VALUE` format:
 
 ```bash
 # Comments start with #
-CHAT_MODEL=gemma-3-4b-it-qat
+CHAT_MODEL=diffbot-small-xl-2508
 
 # Quotes are optional
 LLM_BACKEND_URL=http://localhost:1234
@@ -140,7 +140,7 @@ The Config class automatically converts types:
 
 ```python
 # String values
-config.chat_model          # str: "gemma-3-4b-it-qat"
+config.chat_model          # str: "diffbot-small-xl-2508"
 config.llm_backend_url     # str: "http://localhost:1234"
 
 # Integer values
@@ -164,7 +164,7 @@ CHAT_MAX_TOKENS = 2000
 
 EMBEDDING_MODEL = "text-embedding-qwen3-embedding-4b"
 EMBEDDING_MAX_INPUT_TOKENS = 8192
-EMBEDDING_DB_PATH = "chroma_db"
+EMBEDDING_DB = "chroma_db"
 EMBEDDING_DB_URL = ""
 
 LLM_BACKEND_URL = "http://localhost:1234"
@@ -241,7 +241,7 @@ export LLM_BACKEND_URL="https://production-api.example.com"
 
 ```bash
 # .env.example (commit this)
-CHAT_MODEL=gemma-3-4b-it-qat
+CHAT_MODEL=diffbot-small-xl-2508
 LLM_BACKEND_URL=http://localhost:1234
 LLM_BACKEND_AUTH_TOKEN=
 

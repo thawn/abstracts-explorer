@@ -1294,13 +1294,34 @@ describe('Clustering Module', () => {
         it('should handle fetch error', async () => {
             global.fetch.mockResolvedValueOnce({
                 ok: false,
-                status: 500
+                status: 500,
+                json: async () => {
+                    throw new SyntaxError('Unexpected token <');
+                }
             });
 
             await loadPapersPerYear();
 
             expect(global.Plotly.newPlot).not.toHaveBeenCalled();
-            expect(document.getElementById('papers-per-year-plot').innerHTML).toContain('Failed to load');
+            expect(document.getElementById('papers-per-year-plot').innerHTML).toContain(
+                'unexpected response'
+            );
+        });
+
+        it('should show a friendly message for an HTML 503 response', async () => {
+            global.fetch.mockResolvedValueOnce({
+                ok: false,
+                status: 503,
+                json: async () => {
+                    throw new SyntaxError('Unexpected token <');
+                }
+            });
+
+            await loadPapersPerYear();
+
+            const plot = document.getElementById('papers-per-year-plot');
+            expect(plot.innerHTML).toContain('The server is temporarily unavailable');
+            expect(plot.innerHTML).not.toContain('Unexpected token');
         });
 
         it('should include conference in query params', async () => {
@@ -1511,7 +1532,7 @@ describe('Clustering Module', () => {
             // Container should still be shown with error message
             const container = document.getElementById('topic-evolution-container');
             expect(container.classList.contains('hidden')).toBe(false);
-            expect(container.innerHTML).toContain('Failed to load topic evolution');
+            expect(container.innerHTML).toContain('Server error');
         });
     });
 });

@@ -456,6 +456,24 @@ class TestAGUConcurrency:
 
         assert sorted(papers) == [f"Paper/{index}" for index in range(4)]
 
+    def test_run_parallel_reports_worker_failures(self, agu_plugin):
+        """A failed worker aborts the batch with a clear error, not a None entry."""
+
+        def worker(item):
+            if item == 2:
+                raise RuntimeError("boom")
+            return item
+
+        with pytest.raises(RuntimeError, match="1 of 2 fetching test request"):
+            agu_plugin._run_parallel(
+                [1, 2],
+                worker,
+                max_workers=2,
+                desc="Fetching test",
+                unit="item",
+                show_progress=False,
+            )
+
 
 class TestAGUCheckpoint:
     @staticmethod
@@ -593,7 +611,7 @@ class TestAGURetryHandling:
 
         with (
             patch.object(agu_plugin._session, "get", side_effect=[rate_limited, success]) as mock_get,
-            patch("abstracts_explorer.plugin.time.sleep") as mock_sleep,
+            patch("abstracts_explorer.plugin.base.time.sleep") as mock_sleep,
         ):
             result = agu_plugin._fetch_json("https://example.com/api", 30, True)
 
@@ -609,7 +627,7 @@ class TestAGURetryHandling:
 
         with (
             patch.object(agu_plugin._session, "get", return_value=rate_limited) as mock_get,
-            patch("abstracts_explorer.plugin.time.sleep"),
+            patch("abstracts_explorer.plugin.base.time.sleep"),
         ):
             with pytest.raises(RuntimeError, match="429"):
                 agu_plugin._fetch_json("https://example.com/api", 30, True)

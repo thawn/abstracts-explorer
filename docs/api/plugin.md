@@ -7,7 +7,7 @@ with custom conference data downloaders.
 
 The framework includes:
 
-- **Base classes** for plugin implementation (`DownloaderPlugin`, `LightweightDownloaderPlugin`)
+- **Base class** for plugin implementation (`DownloaderPlugin`, plus `HTTPDownloaderPlugin`)
 - **Schema conversion** utilities for standardizing paper data
 - **Plugin registry** for managing and discovering plugins
 - **Data validation** via the `LightweightPaper` Pydantic model
@@ -16,12 +16,14 @@ The framework includes:
 
 Built-in plugins for downloading conference data:
 
-| Plugin | Conference | Years | API |
-|--------|-----------|-------|-----|
-| `neurips` | NeurIPS | 2020–2025 | Full Schema |
-| `iclr` | ICLR | 2024–2026 | Lightweight |
-| `icml` | ICML | 2024–2025 | Lightweight |
-| `ml4ps` | ML4PS Workshop | 2025 | Lightweight |
+All built-in plugins return `LightweightPaper` objects.
+
+| Plugin | Conference | Years |
+|--------|-----------|-------|
+| `neurips` | NeurIPS | 2020–2025 |
+| `iclr` | ICLR | 2024–2026 |
+| `icml` | ICML | 2024–2025 |
+| `ml4ps` | ML4PS Workshop | 2025 |
 
 ## Quick Start
 
@@ -45,11 +47,11 @@ papers = plugin.download(year=2025)
 
 ```python
 from abstracts_explorer.plugin import (
-    LightweightDownloaderPlugin,
+    DownloaderPlugin,
     register_plugin,
 )
 
-class MyConferencePlugin(LightweightDownloaderPlugin):
+class MyConferencePlugin(DownloaderPlugin):
     plugin_name = "myconf"
     plugin_description = "My Conference Downloader"
     supported_years = [2025]

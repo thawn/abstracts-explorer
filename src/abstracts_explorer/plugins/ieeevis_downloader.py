@@ -9,7 +9,8 @@ import logging
 from bs4 import BeautifulSoup, Tag
 from typing import Any, Dict, List, Optional
 
-from abstracts_explorer.plugin import sanitize_author_names, LightweightPaper
+from abstracts_explorer.plugin import DownloadOptions, sanitize_author_names, LightweightPaper
+from abstracts_explorer.utils.url_utils import normalize_doi_url
 from pydantic import ValidationError
 from abstracts_explorer.plugins.json_conference_downloader import JSONConferenceDownloaderPlugin
 
@@ -150,7 +151,7 @@ class IEEEVISDownloaderPlugin(JSONConferenceDownloaderPlugin):
         if url:
             paper_dict["url"] = url
         elif doi:
-            paper_dict["url"] = f"https://doi.org/{doi}"
+            paper_dict["url"] = normalize_doi_url(doi)
 
         award = (item.get("award") or "").strip()
         if award:
@@ -259,52 +260,36 @@ class IEEEVISDownloaderPlugin(JSONConferenceDownloaderPlugin):
 
         return papers
 
-    def download(
+    def _download_uncached(
         self,
-        year: Optional[int] = None,
-        output_path: Optional[str] = None,
-        force_download: bool = False,
-        **kwargs: Any,
+        year: int,
+        output_path: Optional[str],
+        options: DownloadOptions,
     ) -> List[LightweightPaper]:
         """
-        Download papers from IEEE VIS.
+        Download and parse IEEE VIS papers for *year*.
 
         Parameters
         ----------
-        year : int, optional
-            Conference year to download (default: 2025)
+        year : int
+            Conference year to download.
         output_path : str, optional
-            Path to save the downloaded JSON file
-        force_download : bool
-            Force re-download even if file exists
-        **kwargs : Any
-            Additional parameters (``timeout``, ``verify_ssl`` can override defaults)
+            Cache path (unused here; the template persists the result).
+        options : DownloadOptions
+            Resolved download options.
 
         Returns
         -------
         list of LightweightPaper
-            List of validated paper objects ready for database insertion
+            List of validated paper objects ready for database insertion.
 
         Raises
         ------
-        ValueError
-            If the year is not supported
         RuntimeError
-            If the download or parsing fails
+            If the download or parsing fails.
         """
-        if year is None:
-            year = 2025
-
-        self.validate_year(year)
-
-        timeout = kwargs.get("timeout", self.timeout)
-        verify_ssl = kwargs.get("verify_ssl", self.verify_ssl)
-
-        # Load from local file if it exists and force_download is False
-        if output_path and not force_download:
-            cached_papers = self._load_papers_json(output_path, "URL")
-            if cached_papers is not None:
-                return cached_papers
+        timeout = options.timeout
+        verify_ssl = options.verify_ssl
 
         logger.info(f"Downloading {self.conference_name} {year} data...")
 
@@ -318,7 +303,6 @@ class IEEEVISDownloaderPlugin(JSONConferenceDownloaderPlugin):
         if self._uses_html_program(year):
             response.encoding = "utf-8"
             html_papers = self._parse_program_html(response.text, year)
-            self._save_papers_json(html_papers, output_path, self.conference_name)
             logger.info(f"Successfully downloaded {len(html_papers)} papers from {self.conference_name} {year}")
             return html_papers
 
@@ -337,9 +321,6 @@ class IEEEVISDownloaderPlugin(JSONConferenceDownloaderPlugin):
             paper = self._convert_paper(item, year)
             if paper is not None:
                 papers.append(paper)
-
-        # Save to file only if path provided and papers were found
-        self._save_papers_json(papers, output_path, self.conference_name)
 
         logger.info(f"Successfully downloaded {len(papers)} papers from {self.conference_name} {year}")
 

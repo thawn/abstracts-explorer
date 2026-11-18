@@ -22,6 +22,7 @@ from bs4 import BeautifulSoup
 from pydantic import ValidationError
 
 from abstracts_explorer.plugin import (
+    DownloadOptions,
     HTTPDownloaderPlugin,
     LightweightPaper,
     sanitize_author_names,
@@ -72,6 +73,7 @@ class HAICONDownloaderPlugin(HTTPDownloaderPlugin):
 
     #: Delay in seconds between paginated HTTP requests.
     _REQUEST_DELAY = 0.5
+    _DEFAULT_REQUEST_DELAY = _REQUEST_DELAY
 
     _USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0"
     _ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
@@ -99,32 +101,23 @@ class HAICONDownloaderPlugin(HTTPDownloaderPlugin):
         short_year = str(year)[-2:]
         return f"{self._CONFTOOL_BASE.format(short_year=short_year)}/sessions.php"
 
-    def download(
+    def _download_uncached(
         self,
-        year: Optional[int] = None,
-        output_path: Optional[str] = None,
-        force_download: bool = False,
-        **kwargs: Any,
+        year: int,
+        output_path: Optional[str],
+        options: DownloadOptions,
     ) -> List[LightweightPaper]:
         """
         Download HAICON conference papers from ConfTool for a given year.
 
         Parameters
         ----------
-        year : int, optional
-            Conference year to download (default: 2026).
+        year : int
+            Conference year to download.
         output_path : str, optional
-            Path to save the downloaded JSON file.  If the file already
-            exists and ``force_download`` is ``False``, it is loaded directly
-            without making any HTTP requests.
-        force_download : bool
-            Force re-download even when a cached file exists.
-        **kwargs : Any
-            Additional parameters:
-
-            - ``timeout`` (int): Override the default HTTP timeout.
-            - ``verify_ssl`` (bool): Override the default SSL verification.
-            - ``request_delay`` (float): Override the delay between requests.
+            Cache path (unused here; the template persists the result).
+        options : DownloadOptions
+            Resolved download options.
 
         Returns
         -------
@@ -133,60 +126,53 @@ class HAICONDownloaderPlugin(HTTPDownloaderPlugin):
 
         Raises
         ------
-        ValueError
-            If the year is not supported.
         RuntimeError
             If the HTTP requests fail or parsing produces no papers.
         """
-        if year is None:
-            year = 2026
-
-        self.validate_year(year)
-
-        timeout = kwargs.get("timeout", self.timeout)
-        verify_ssl = kwargs.get("verify_ssl", self.verify_ssl)
-        request_delay = kwargs.get("request_delay", self._REQUEST_DELAY)
-
-        # Load from local file if it exists and force_download is False
-        if output_path and not force_download:
-            cached_papers = self._load_papers_json(output_path, "ConfTool")
-            if cached_papers is not None:
-                return cached_papers
+        timeout = options.timeout
+        verify_ssl = options.verify_ssl
+        request_delay = options.request_delay
 
         short_year = str(year)[-2:]
         base_url = self._CONFTOOL_BASE.format(short_year=short_year)
 
         logger.info("Downloading HAICON %d data from ConfTool...", year)
 
-        # Step 1: Get all session IDs from the overview page
         session_ids = self._fetch_session_ids(base_url, timeout, verify_ssl)
         logger.info("Found %d sessions to scrape", len(session_ids))
 
-        # Step 2: For each session, fetch the detail page and parse papers
-        papers_by_id: Dict[int, LightweightPaper] = {}
+        papers_by_key: Dict[Any, LightweightPaper] = {}
+        failed_sessions: List[int] = []
         for session_id in session_ids:
             if request_delay > 0:
                 time.sleep(request_delay)
-            session_papers = self._fetch_session_papers(base_url, session_id, year, timeout, verify_ssl)
+            session_papers = self._fetch_session_papers(
+                base_url,
+                session_id,
+                year,
+                timeout,
+                verify_ssl,
+                failed_sessions=failed_sessions,
+            )
             for paper in session_papers:
-                # De-duplicate by original_id (ConfTool paper ID)
-                if paper.original_id is not None and paper.original_id not in papers_by_id:
-                    papers_by_id[paper.original_id] = paper
-                elif paper.original_id is None:
-                    # Use title as key for papers without an ID
-                    title_key = -(hash(paper.title) % (10**9))
-                    if title_key not in papers_by_id:
-                        papers_by_id[title_key] = paper
+                if paper.original_id is not None:
+                    key: Any = paper.original_id
+                else:
+                    key = ("title", paper.title.casefold())
+                papers_by_key.setdefault(key, paper)
 
-        papers = list(papers_by_id.values())
+        if failed_sessions:
+            raise RuntimeError(
+                f"Failed to fetch {len(failed_sessions)} HAICON session(s) "
+                f"({', '.join(map(str, failed_sessions))}); refusing to cache partial data."
+            )
+
+        papers = list(papers_by_key.values())
         logger.info(
             "Successfully downloaded %d unique papers from HAICON %d",
             len(papers),
             year,
         )
-
-        # Save to file only if path provided and papers were found
-        self._save_papers_json(papers, output_path, "HAICON")
 
         return papers
 
@@ -221,7 +207,7 @@ class HAICONDownloaderPlugin(HTTPDownloaderPlugin):
     def _fetch_session_ids(
         self,
         base_url: str,
-        timeout: int,
+        timeout: float,
         verify_ssl: bool,
     ) -> List[int]:
         """
@@ -271,8 +257,9 @@ class HAICONDownloaderPlugin(HTTPDownloaderPlugin):
         base_url: str,
         session_id: int,
         year: int,
-        timeout: int,
+        timeout: float,
         verify_ssl: bool,
+        failed_sessions: Optional[List[int]] = None,
     ) -> List[LightweightPaper]:
         """
         Fetch and parse all papers from a single ConfTool session detail page.
@@ -313,6 +300,8 @@ class HAICONDownloaderPlugin(HTTPDownloaderPlugin):
                 session_id,
                 exc,
             )
+            if failed_sessions is not None:
+                failed_sessions.append(session_id)
             return []
 
         # Extract session name from the page header

@@ -105,6 +105,22 @@ describe('Tabs Module', () => {
             const stats = document.getElementById('stats');
             expect(stats.innerHTML).toContain('Failed to load stats');
         });
+
+        it('should show a friendly message for an HTML 503 response', async () => {
+            global.fetch.mockResolvedValueOnce({
+                ok: false,
+                status: 503,
+                json: async () => {
+                    throw new SyntaxError('Unexpected token <');
+                }
+            });
+
+            await loadStats();
+
+            const stats = document.getElementById('stats');
+            expect(stats.innerHTML).toContain('The server is temporarily unavailable');
+            expect(stats.innerHTML).not.toContain('Unexpected token');
+        });
     });
 
     describe('checkEmbeddingModelCompatibility', () => {

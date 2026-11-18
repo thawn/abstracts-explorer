@@ -58,6 +58,9 @@ Retrieval-Augmented Generation (RAG).
 4. Ask follow-up questions — the assistant remembers the conversation.
 5. Click **Reset** to start a fresh conversation.
 
+Chat histories are kept in server memory, are not persisted, and expire after
+24 hours of inactivity by default (`CHAT_HISTORY_TTL`).
+
 **Settings** (gear icon): choose how many abstracts to include as context
 (3–50) and filter by session/track.
 

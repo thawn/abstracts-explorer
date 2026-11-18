@@ -38,7 +38,7 @@ def _mock_db(papers):
     db = Mock()
     by_uid = {paper["uid"]: paper for paper in papers}
     db.get_papers_by_uids.side_effect = lambda uids: [by_uid[uid] for uid in uids if uid in by_uid]
-    db.search_papers.return_value = [paper for paper in papers if paper["uid"] not in {"p1", "p2"}]
+    db.keyword_search.return_value = [paper for paper in papers if paper["uid"] not in {"p1", "p2"}]
     db.resolve_paper_uids.return_value = [paper["uid"] for paper in papers]
     return db
 
@@ -153,7 +153,7 @@ class TestRecommendRelatedPapers:
             priorities={"p1": {"priority": 5}, "p2": {"priority": 1}},
             conferences=["ICLR"],
             years=[2026],
-            n_results=2,
+            limit=2,
         )
 
         assert result["seed_count"] == 2
@@ -168,18 +168,18 @@ class TestRecommendRelatedPapers:
         db = _mock_db(papers)
         em = self._mock_embeddings({"ids": [[]], "distances": [[]]})
 
-        recommend_related_papers(db, em, priorities={"p1": {"priority": 5}, "p2": {"priority": 1}}, n_results=5)
+        recommend_related_papers(db, em, priorities={"p1": {"priority": 5}, "p2": {"priority": 1}}, limit=5)
 
         assert em.collection.query.call_args.kwargs["ids"] == ["p1", "p2"]
 
     def test_falls_back_to_metadata_when_embeddings_missing(self):
         papers = [_paper("p1")]
         db = _mock_db(papers)
-        db.search_papers.return_value = [_paper("p3", title="Keyword Match")]
+        db.keyword_search.return_value = [_paper("p3", title="Keyword Match")]
         em = Mock()
         em.collection.get.return_value = {"ids": ["p1"], "embeddings": None}
 
-        result = recommend_related_papers(db, em, priorities={"p1": {"priority": 5}}, n_results=5)
+        result = recommend_related_papers(db, em, priorities={"p1": {"priority": 5}}, limit=5)
 
         assert result["papers"]
         assert result["papers"][0]["uid"] == "p3"

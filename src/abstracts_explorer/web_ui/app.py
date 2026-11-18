@@ -6,28 +6,46 @@ and exploring the abstracts database.
 """
 
 import os
+import secrets
 import signal
 import sys
 import logging
 import json
-import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from flask import Flask, render_template, request, jsonify, g, send_file, abort, session
-from flask_cors import CORS
+from flask import Flask, render_template, request, jsonify, send_file, abort
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from abstracts_explorer.database import DatabaseManager
-from abstracts_explorer.embeddings import EmbeddingsManager
-from abstracts_explorer.rag import RAGChat
-from abstracts_explorer.config import get_config
+from abstracts_explorer.database import normalize_model_name
+from abstracts_explorer.db.errors import DatabaseError
+from abstracts_explorer.clustering import (
+    DEFAULT_CLUSTERING_METHOD,
+    DEFAULT_CLUSTERING_PARAMS,
+    DEFAULT_N_COMPONENTS,
+    DEFAULT_REDUCTION_METHOD,
+)
+from abstracts_explorer.embeddings import QueryEmbedding
 from abstracts_explorer.export_utils import export_papers_to_zip
 from abstracts_explorer.paper_utils import extract_top_keywords
+from abstracts_explorer.web_ui import request_services as services
+from abstracts_explorer.web_ui.request_services import (
+    _CHAT_SESSION_CACHE_MAX,  # noqa: F401  (re-exported for tests)
+    _chat_sessions,  # noqa: F401  (re-exported for tests)
+    _get_session_id,  # noqa: F401  (re-exported for tests)
+    _reset_rag_chat_local,  # noqa: F401  (re-exported for tests)
+    get_llm_backend_info,  # noqa: F401  (re-exported for tests)
+)
 from abstracts_explorer.web_ui.api_utils import (
     ApiError,
     api_error_handler,
+    coerce_int_list,
+    coerce_limit,
+    coerce_number,
+    coerce_str_list,
+    coerce_text,
     get_conference_year_params,
+    get_json_object,
 )
+from abstracts_explorer.web_ui.rate_limit import enforce_client_rate_limit
 
 # Import version
 try:
@@ -43,13 +61,52 @@ logger = logging.getLogger(__name__)
 # Users can adjust this per-search via the web UI settings or --distance-threshold CLI flag.
 _SIMILAR_DISTANCE_THRESHOLD = 1.2
 
+_MAX_FILTER_ITEMS = 100
+_MAX_QUERY_LENGTH = 2000
+_MAX_CHAT_MESSAGE_LENGTH = 8000
+_MAX_PRIORITY_ENTRIES = 1000
+_MAX_SEARCH_TERM_LENGTH = 500
+_MAX_TRANSCRIPT_MESSAGES = 200
+_MAX_TRANSCRIPT_CHARS = 20000
+_MAX_CLUSTER_RESULTS = 500
+_MAX_DISTANCE = 10000.0
+_EXPORT_SORT_ORDERS = {"search-rating-poster", "rating-poster-search", "poster-search-rating"}
+
+
+def _client_id() -> str:
+    """Return a stable identifier for the current client."""
+    return request.remote_addr or "unknown"
+
+
 # Get the directory where this file is located
 PACKAGE_DIR = Path(__file__).parent
 
+
+def _load_secret_key() -> str:
+    """Return a stable Flask secret key from the environment or data directory."""
+    env_key = os.environ.get("FLASK_SECRET_KEY")
+    if env_key:
+        return env_key
+    key_path = Path(services.get_config().data_dir) / ".flask_secret"
+    try:
+        if key_path.exists():
+            existing = key_path.read_text(encoding="utf-8").strip()
+            if existing:
+                return existing
+        generated = secrets.token_hex(32)
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        key_path.write_text(generated, encoding="utf-8")
+        key_path.chmod(0o600)
+        return generated
+    except OSError:
+        logger.warning("Could not persist a Flask secret key; using an ephemeral key", exc_info=True)
+        return secrets.token_hex(32)
+
+
 # Initialize Flask app with correct template/static folders
 app = Flask(__name__, template_folder=str(PACKAGE_DIR / "templates"), static_folder=str(PACKAGE_DIR / "static"))
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.urandom(32).hex())
-CORS(app)
+app.secret_key = _load_secret_key()
+app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("MAX_CONTENT_LENGTH", 2 * 1024 * 1024))
 
 # Apply ProxyFix so Flask correctly interprets X-Forwarded-* headers set by a
 # reverse proxy (e.g. nginx).  The hop counts are read from environment variables
@@ -59,7 +116,7 @@ CORS(app)
 # in docker-compose.yml.  Set any value to 0 to disable that header entirely.
 # When the app is run directly (no proxy), no X-Forwarded-* headers are present
 # so ProxyFix is a no-op regardless of the configured values.
-_config = get_config()
+_config = services.get_config()
 app.wsgi_app = ProxyFix(  # type: ignore[assignment]
     app.wsgi_app,
     x_for=_config.proxy_x_for,
@@ -68,175 +125,39 @@ app.wsgi_app = ProxyFix(  # type: ignore[assignment]
     x_prefix=_config.proxy_x_prefix,
 )
 
-# Initialize components (lazy loading)
-embeddings_manager = None
-_rag_chat_cache: Dict[str, RAGChat] = {}
-_RAG_CHAT_CACHE_MAX = 1024
+app.teardown_appcontext(services.teardown_db)
 
 
-def get_database():
-    """
-    Get or create database connection (thread-local using Flask g).
-
-    Returns
-    -------
-    DatabaseManager
-        Database instance
-    """
-    if "db" not in g:
-        # Database configuration comes from config file
-        g.db = DatabaseManager()
-        g.db.create_tables()  # Ensure all tables exist (including new ones like clustering_cache)
-    return g.db
+def _allowed_cors_origins() -> list[str]:
+    """Return the configured CORS origins, read at request time."""
+    return [origin.strip() for origin in os.environ.get("CORS_ORIGINS", "").split(",") if origin.strip()]
 
 
-def get_embeddings_manager():
-    """
-    Get or create embeddings manager.
-
-    Returns
-    -------
-    EmbeddingsManager
-        Embeddings manager instance
-    """
-    global embeddings_manager
-    if embeddings_manager is None:
-        config = get_config()  # Get config lazily
-        embeddings_manager = EmbeddingsManager(
-            backend_url=config.llm_backend_url,
-            model_name=config.embedding_model,
-            collection_name=config.collection_name,
-        )
-    return embeddings_manager
+@app.before_request
+def _handle_api_preflight():
+    """Answer CORS preflight requests for API routes."""
+    if request.method == "OPTIONS" and request.path.startswith("/api/"):
+        return app.make_default_options_response()
+    return None
 
 
-def _get_session_id() -> str:
-    """
-    Get or create a unique session identifier.
-
-    Generates a UUID4 on first request and persists it in the Flask
-    session cookie so it survives page reloads within the same tab.
-    Closing the tab (session cookie expiry) generates a new ID on
-    the next request.
-    """
-    if "_session_id" not in session:
-        session["_session_id"] = uuid.uuid4().hex
-    return session["_session_id"]
-
-
-def get_rag_chat():
-    """
-    Get or create a RAG chat instance scoped to the current browser session.
-
-    Each unique browser session gets its own ``RAGChat`` instance so that
-    conversation history is isolated per browser tab. A new page reload
-    (new session cookie) starts with a fresh conversation.
-
-    Returns
-    -------
-    RAGChat
-        RAG chat instance for the current session.
-    """
-    database = get_database()  # Get database connection first (required)
-    session_id = _get_session_id()
-
-    if session_id not in _rag_chat_cache:
-        # Evict oldest entries if cache is full
-        if len(_rag_chat_cache) >= _RAG_CHAT_CACHE_MAX:
-            oldest_key = next(iter(_rag_chat_cache))
-            del _rag_chat_cache[oldest_key]
-
-        config = get_config()  # Get config lazily
-        em = get_embeddings_manager()
-        _rag_chat_cache[session_id] = RAGChat(
-            embeddings_manager=em,
-            database=database,  # Database is now required
-            backend_url=config.llm_backend_url,
-            model=config.chat_model,
-        )
-
-    return _rag_chat_cache[session_id]
-
-
-def _reset_rag_chat_local():
-    """
-    Reset the RAG chat cache.
-
-    When called inside a request context, only clears the entry for the
-    current session.  When called outside a request context (e.g., by
-    tests during setup/teardown), clears the entire cache.
-    """
-    try:
-        session_id = _get_session_id()
-        if session_id in _rag_chat_cache:
-            del _rag_chat_cache[session_id]
-    except (RuntimeError, KeyError):
-        # No active request context (e.g., called by tests outside a request)
-        _rag_chat_cache.clear()
-
-
-@app.teardown_appcontext
-def teardown_db(exception):
-    """Close database connection at end of request."""
-    db = g.pop("db", None)
-    if db is not None:
-        db.close()
-
-
-# Known LLM backend definitions: each entry maps a URL fragment to backend metadata.
-# Order matters – more specific patterns should come first.
-_LLM_BACKENDS: List[Dict[str, Any]] = [
-    {
-        "url_fragments": ["blablador.fz-juelich.de"],
-        "name": "BLABLADOR",
-        "homepage": "https://helmholtz-blablador.fz-juelich.de",
-        "logo": "blablador-logo.png",
-    },
-    {
-        "url_fragments": ["chat.fz-rossendorf.de"],
-        "name": "chat.fz-rossendorf.de",
-        "homepage": "https://chat.fz-rossendorf.de",
-        "logo": None,
-    },
-    {
-        "url_fragments": ["localhost:1234", "127.0.0.1:1234"],
-        "name": "LM Studio",
-        "homepage": "https://lmstudio.ai",
-        "logo": None,
-    },
-]
-
-
-def get_llm_backend_info(backend_url: str) -> Dict[str, Optional[str]]:
-    """
-    Detect the LLM backend from its URL and return display metadata.
-
-    Parameters
-    ----------
-    backend_url : str
-        The URL of the configured LLM backend (e.g. from ``config.llm_backend_url``).
-
-    Returns
-    -------
-    dict
-        A dictionary with the following keys:
-
-        ``name`` : str or None
-            Human-readable backend name, or ``None`` if unknown.
-        ``homepage`` : str or None
-            URL of the backend's homepage, or ``None`` if unknown.
-        ``logo`` : str or None
-            Static-file name of the backend logo (relative to the ``static/``
-            directory), or ``None`` if no logo is available.
-    """
-    for backend in _LLM_BACKENDS:
-        if any(fragment in backend_url for fragment in backend["url_fragments"]):
-            return {
-                "name": backend["name"],
-                "homepage": backend["homepage"],
-                "logo": backend["logo"],
-            }
-    return {"name": None, "homepage": None, "logo": None}
+@app.after_request
+def _apply_api_headers(response):
+    """Apply no-store and opt-in CORS headers to API responses."""
+    if not request.path.startswith("/api/"):
+        return response
+    response.headers["Cache-Control"] = "no-store"
+    origins = _allowed_cors_origins()
+    if origins:
+        origin = request.headers.get("Origin")
+        if "*" in origins:
+            response.headers["Access-Control-Allow-Origin"] = "*"
+        elif origin and origin in origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Vary"] = "Origin"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    return response
 
 
 @app.route("/")
@@ -249,7 +170,7 @@ def index():
     str
         Rendered HTML template
     """
-    llm_backend = get_llm_backend_info(_config.llm_backend_url)
+    llm_backend = services.get_llm_backend_info(_config.llm_backend_url)
     return render_template(
         "index.html",
         version=__version__,
@@ -266,8 +187,9 @@ def conference_index(conference_name):
     Render the main page with a specific conference pre-selected.
 
     Resolves the conference name case-insensitively against known
-    conferences from plugins and the database. When no match is found,
-    renders the page with an error listing the available conferences.
+    conferences from plugins and the database. Unknown paths and
+    conferences without downloaded data return 404 while still rendering
+    the helpful error banner.
 
     Paths starting with a dot (e.g. ``.well-known``) are excluded so
     that ACME challenges and other hidden-path conventions are not
@@ -280,35 +202,56 @@ def conference_index(conference_name):
 
     Returns
     -------
-    str
-        Rendered HTML template with conference context
+    tuple
+        Rendered HTML template and HTTP status code
     """
     # Don't intercept hidden paths (e.g. .well-known used by Let's Encrypt)
     if conference_name.startswith("."):
         abort(404)
 
-    llm_backend = get_llm_backend_info(_config.llm_backend_url)
+    llm_backend = services.get_llm_backend_info(_config.llm_backend_url)
     try:
-        database = get_database()
+        database = services.get_database()
         result = database.resolve_conference_for_url(conference_name)
-        return render_template(
+    except DatabaseError as exc:
+        logger.error("Database error in conference URL route: %s", exc, exc_info=True)
+        return (
+            render_template(
+                "index.html",
+                version=__version__,
+                imprint_link=_config.imprint_link,
+                url_conference=None,
+                url_conference_error={"message": "Conference data is temporarily unavailable."},
+                llm_backend=llm_backend,
+            ),
+            503,
+        )
+    except Exception as exc:
+        logger.error("Error in conference URL route: %s", exc, exc_info=True)
+        return (
+            render_template(
+                "index.html",
+                version=__version__,
+                imprint_link=_config.imprint_link,
+                url_conference=None,
+                url_conference_error={"message": "Unable to load conference information."},
+                llm_backend=llm_backend,
+            ),
+            500,
+        )
+
+    status = 200 if result.get("reason") == "found" else 404
+    return (
+        render_template(
             "index.html",
             version=__version__,
             imprint_link=_config.imprint_link,
             url_conference=result["conference"],
             url_conference_error=result["error"],
             llm_backend=llm_backend,
-        )
-    except Exception as e:
-        logger.error(f"Error in conference URL route: {e}", exc_info=True)
-        return render_template(
-            "index.html",
-            version=__version__,
-            imprint_link=_config.imprint_link,
-            url_conference=None,
-            url_conference_error=None,
-            llm_backend=llm_backend,
-        )
+        ),
+        status,
+    )
 
 
 @app.route("/health")
@@ -323,7 +266,7 @@ def health():
     """
     try:
         # Check if database is accessible
-        db = get_database()
+        db = services.get_database()
         db.get_paper_count()
         return jsonify({"status": "healthy", "service": "abstracts-explorer"}), 200
     except Exception as e:
@@ -350,7 +293,7 @@ def stats():
     """
     conference, year = get_conference_year_params(request)
 
-    database = get_database()
+    database = services.get_database()
     stats_data = database.get_stats(year=year, conference=conference)
 
     return jsonify(stats_data)
@@ -370,8 +313,8 @@ def check_embedding_model():
         - current_model: str - Current model from configuration
         - warning: str or None - Warning message if incompatible
     """
-    config = get_config()
-    database = get_database()
+    config = services.get_config()
+    database = services.get_database()
 
     # Get the stored embedding model from the database
     stored_model = database.get_embedding_model()
@@ -382,8 +325,8 @@ def check_embedding_model():
         # No model stored yet, considered compatible
         compatible = True
         warning = None
-    elif stored_model == current_model:
-        # Models match
+    elif normalize_model_name(stored_model) == normalize_model_name(current_model):
+        # Models match (ignoring alias- prefixes)
         compatible = True
         warning = None
     else:
@@ -393,7 +336,7 @@ def check_embedding_model():
             f"Embedding model mismatch detected! The embeddings were created with '{stored_model}' "
             f"but the current configuration uses '{current_model}'. Embeddings from different models "
             f"are incompatible. Please recreate the embeddings using: "
-            f"neurips-abstracts create-embeddings --force"
+            f"abstracts-explorer create-embeddings --force"
         )
 
     return jsonify(
@@ -423,7 +366,7 @@ def get_filters():
     """
     conference, year = get_conference_year_params(request)
 
-    database = get_database()
+    database = services.get_database()
     sessions = database.get_sessions(conference=conference, year=year)
     return jsonify({"sessions": sessions})
 
@@ -447,8 +390,8 @@ def get_available_filters_endpoint():
         - default_conference: conference to pre-select (guaranteed to have DB data, if any exists)
         - default_year: year to pre-select (guaranteed to have DB data for the default conference)
     """
-    config = get_config()
-    database = get_database()
+    config = services.get_config()
+    database = services.get_database()
 
     db_conference_years = database.get_conference_years_from_db()
 
@@ -494,68 +437,40 @@ def search():
     dict
         Search results with papers
     """
-    data = request.get_json()
-    query = data.get("query", "")
-    use_embeddings = data.get("use_embeddings", False)
-    limit = data.get("limit", 10)
-    sessions = data.get("sessions", [])
-    years = data.get("years", [])
-    conferences = data.get("conferences", [])
+    data = get_json_object()
+    query = coerce_text(data.get("query"), "query", _MAX_QUERY_LENGTH)
+    use_embeddings = bool(data.get("use_embeddings", False))
+    limit = coerce_limit(data.get("limit", 10))
+    sessions = coerce_str_list(data.get("sessions", []), "sessions", max_items=_MAX_FILTER_ITEMS)
+    years = coerce_int_list(data.get("years", []), "years", max_items=_MAX_FILTER_ITEMS)
+    conferences = coerce_str_list(data.get("conferences", []), "conferences", max_items=_MAX_FILTER_ITEMS)
+    distance_threshold = coerce_number(
+        data.get("distance_threshold"),
+        "distance_threshold",
+        default=_SIMILAR_DISTANCE_THRESHOLD,
+        minimum=0.0,
+        maximum=_MAX_DISTANCE,
+    )
 
     if not query:
         return jsonify({"error": "Query is required"}), 400
 
-    database = get_database()
-
     if use_embeddings:
-        # Semantic search using embeddings
-        em = get_embeddings_manager()
-        distance_threshold = float(data.get("distance_threshold", _SIMILAR_DISTANCE_THRESHOLD))
+        enforce_client_rate_limit(_client_id())
 
-        papers = database.search_papers_keyword(
-            query=query,
-            limit=limit,
-            sessions=sessions,
-            years=years,
-            conferences=conferences,
-            use_embeddings=True,
-            distance_threshold=distance_threshold,
-            embeddings_manager=em,
-        )
-
-        # Count total similar papers within distance threshold.
-        # Parse field filters to determine the semantic portion of the query;
-        # when the query consists only of field filters there is no meaningful
-        # embedding to compare against, so skip the count.
-        _, remaining_query = DatabaseManager.parse_field_filters(query)
-        if remaining_query:
-            try:
-                candidate_ids = database.resolve_paper_uids(
-                    conferences=conferences if conferences else None,
-                    years=[int(year) for year in years] if years else None,
-                    sessions=sessions if sessions else None,
-                )
-                total_similar = len(
-                    em.query_ids_within_distance(
-                        query=remaining_query,
-                        distance_threshold=distance_threshold,
-                        ids=candidate_ids,
-                    )["ids"]
-                )
-            except Exception:
-                total_similar = None
-        else:
-            total_similar = None
-    else:
-        # Keyword search in database
-        papers = database.search_papers_keyword(
-            query=query,
-            limit=limit,
-            sessions=sessions,
-            years=years,
-            conferences=conferences,
-        )
-        total_similar = None
+    database = services.get_database()
+    embeddings_manager = services.get_embeddings_manager() if use_embeddings else None
+    papers, total_similar = database.search(
+        query=query,
+        limit=limit,
+        sessions=sessions,
+        years=years,
+        conferences=conferences,
+        use_embeddings=use_embeddings,
+        distance_threshold=distance_threshold,
+        embeddings_manager=embeddings_manager,
+        include_total=use_embeddings,
+    )
 
     related_topics = extract_top_keywords(papers)
 
@@ -588,7 +503,7 @@ def get_paper(paper_uid):
     dict
         Paper details including authors
     """
-    database = get_database()
+    database = services.get_database()
     paper = database.get_paper_by_uid(paper_uid)
     if paper is None:
         return jsonify({"error": f"Paper with uid={paper_uid} not found"}), 404
@@ -611,13 +526,15 @@ def get_papers_batch():
     dict
         Dictionary with 'papers' key containing list of paper details
     """
-    data = request.json
+    data = get_json_object()
     paper_ids = data.get("paper_ids", [])
 
-    if not paper_ids:
+    if not isinstance(paper_ids, list) or not paper_ids:
         return jsonify({"error": "No paper IDs provided"}), 400
+    if len(paper_ids) > 1000:
+        raise ApiError("Too many paper IDs (maximum 1000)", 400)
 
-    database = get_database()
+    database = services.get_database()
     papers = []
 
     for paper_uid in paper_ids:
@@ -656,36 +573,40 @@ def chat():
     dict
         Chat response with papers used
     """
-    config = get_config()  # Get config lazily
-    data = request.get_json()
-    message = data.get("message", "")
-    n_papers = data.get("n_papers", config.max_context_papers)
-    reset = data.get("reset", False)
+    config = services.get_config()  # Get config lazily
+    data = get_json_object()
+    message = coerce_text(data.get("message"), "message", _MAX_CHAT_MESSAGE_LENGTH)
+    n_papers = coerce_limit(
+        data.get("n_papers", config.max_context_papers), default=config.max_context_papers, maximum=100
+    )
+    reset = bool(data.get("reset", False))
     paper_priorities = data.get("paper_priorities", {}) or {}
+    if not isinstance(paper_priorities, dict):
+        raise ApiError("paper_priorities must be an object", 400)
+    if len(paper_priorities) > _MAX_PRIORITY_ENTRIES:
+        raise ApiError(f"paper_priorities must contain at most {_MAX_PRIORITY_ENTRIES} entries", 400)
 
     # Get filters
-    years = data.get("years", [])
-    conferences = data.get("conferences", [])
+    years = coerce_int_list(data.get("years", []), "years", max_items=_MAX_FILTER_ITEMS)
+    conferences = coerce_str_list(data.get("conferences", []), "conferences", max_items=_MAX_FILTER_ITEMS)
 
     if not message:
         return jsonify({"error": "Message is required"}), 400
 
-    rag = get_rag_chat()
-
-    if reset:
-        rag.reset_conversation()
+    enforce_client_rate_limit(_client_id())
 
     # Get response with filters
-    database = get_database()
+    database = services.get_database()
     available_conferences = database.get_conferences()
-    response = rag.query(
-        message,
-        n_results=n_papers,
-        conferences=conferences if conferences else None,
-        years=[int(y) for y in years] if years else None,
-        available_conferences=available_conferences,
-        paper_priorities=paper_priorities,
-    )
+    with services.chat_session(reset=reset) as rag:
+        response = rag.query(
+            message,
+            limit=n_papers,
+            conferences=conferences if conferences else None,
+            years=years if years else None,
+            available_conferences=available_conferences,
+            paper_priorities=paper_priorities,
+        )
 
     return jsonify(
         {
@@ -706,9 +627,7 @@ def reset_chat():
     dict
         Success message
     """
-    session_id = _get_session_id()
-    if session_id in _rag_chat_cache:
-        _rag_chat_cache[session_id].reset_conversation()
+    services.reset_chat_history()
     return jsonify({"success": True, "message": "Conversation reset"})
 
 
@@ -735,20 +654,20 @@ def compute_clusters():
     dict
         Clustering results with points, statistics, and metadata
     """
-    data = request.get_json() or {}
+    data = get_json_object()
 
-    conferences = data.get("conferences") or None  # list[str] or None
-    years = data.get("years") or None  # list[int] or None
+    conferences = coerce_str_list(data.get("conferences"), "conferences", max_items=_MAX_FILTER_ITEMS) or None
+    years = coerce_int_list(data.get("years"), "years", max_items=_MAX_FILTER_ITEMS) or None
 
     # Get config and database
-    config = get_config()
-    database = get_database()
+    config = services.get_config()
+    database = services.get_database()
 
     # Get current embedding model
     current_model = config.embedding_model
 
     # Fixed clustering parameters (only true clustering params, not conference/year)
-    clustering_params = {"linkage": "ward", "distance_threshold": 150.0}
+    clustering_params = dict(DEFAULT_CLUSTERING_PARAMS)
 
     # Determine single conference/year for cache lookup
     cache_conference = conferences[0] if conferences and len(conferences) == 1 else None
@@ -757,13 +676,14 @@ def compute_clusters():
     # Look up pre-computed results from the cache
     cached = database.get_clustering_cache(
         embedding_model=current_model,
-        reduction_method="tsne",
-        n_components=2,
-        clustering_method="agglomerative",
+        reduction_method=DEFAULT_REDUCTION_METHOD,
+        n_components=DEFAULT_N_COMPONENTS,
+        clustering_method=DEFAULT_CLUSTERING_METHOD,
         n_clusters=None,
         clustering_params=clustering_params if clustering_params else None,
         conference=cache_conference,
         year=cache_year,
+        collection_name=config.collection_name,
     )
 
     if cached:
@@ -778,73 +698,6 @@ def compute_clusters():
         ),
         404,
     )
-
-
-@app.route("/api/clusters/cached")
-@api_error_handler
-def get_cached_clusters():
-    """
-    Get previously computed clusters from cache file.
-
-    Query Parameters
-    ----------------
-    file : str (optional)
-        Path to cached clustering results JSON file
-        Default: "clusters.json" in current directory
-
-    Returns
-    -------
-    dict
-        Clustering results from cache file
-    """
-    cache_file = request.args.get("file", "clusters.json")
-    cache_path = Path(cache_file)
-
-    if not cache_path.exists():
-        return (
-            jsonify(
-                {
-                    "error": f"Cached clusters file not found: {cache_file}",
-                    "hint": "Run 'abstracts-explorer cluster-embeddings --output clusters.json' first",
-                }
-            ),
-            404,
-        )
-
-    try:
-        with open(cache_path, "r", encoding="utf-8") as f:
-            results = json.load(f)
-    except json.JSONDecodeError as e:
-        raise ApiError(f"Invalid JSON in cache file: {e}", 500) from e
-
-    return jsonify(results)
-
-
-@app.route("/api/clusters/default-count")
-@api_error_handler
-def get_default_cluster_count():
-    """
-    Get the recommended default number of clusters based on embeddings count.
-
-    Returns
-    -------
-    dict
-        Dictionary with:
-        - n_clusters: Recommended number of clusters
-        - n_papers: Number of papers in embeddings collection
-    """
-    from abstracts_explorer.clustering import calculate_default_clusters
-
-    em = get_embeddings_manager()
-
-    # Get embeddings count
-    collection_stats = em.get_collection_stats()
-    n_papers = collection_stats["count"]
-
-    # Calculate default
-    n_clusters = calculate_default_clusters(n_papers)
-
-    return jsonify({"n_clusters": n_clusters, "n_papers": n_papers})
 
 
 @app.route("/api/clusters/search", methods=["POST"])
@@ -876,34 +729,48 @@ def search_custom_cluster():
             "count": int - Number of papers found
         }
     """
-    data = request.get_json()
+    data = get_json_object()
 
-    if not data or "query" not in data:
+    if not data.get("query"):
         return jsonify({"error": "Missing required field: query"}), 400
 
-    query = data["query"]
-    distance_threshold = data.get("distance", 1.1)
-    conferences = data.get("conferences")
-    years = data.get("years")
+    query = coerce_text(data["query"], "query", _MAX_QUERY_LENGTH)
+    distance_threshold = coerce_number(
+        data.get("distance"),
+        "distance",
+        default=1.1,
+        minimum=0.0,
+        maximum=_MAX_DISTANCE,
+    )
+    conferences = coerce_str_list(data.get("conferences"), "conferences", max_items=_MAX_FILTER_ITEMS) or None
+    years = coerce_int_list(data.get("years"), "years", max_items=_MAX_FILTER_ITEMS) or None
 
     # Get embeddings manager and database
-    em = get_embeddings_manager()
-    database = get_database()
+    enforce_client_rate_limit(_client_id())
+    em = services.get_embeddings_manager()
+    database = services.get_database()
 
-    # Call DatabaseManager orchestration method
-    results = database.find_papers_within_distance(
-        embeddings_manager=em,
-        query=query,
-        distance_threshold=distance_threshold,
+    query_embedding = QueryEmbedding(query, em)
+    matches = database.find_paper_ids_within_distance(
+        query_embedding,
+        distance_threshold,
         conferences=conferences,
         years=years,
     )
-
-    return jsonify(results)
+    papers = database.get_result_details(matches, slice(0, _MAX_CLUSTER_RESULTS))
+    return jsonify(
+        {
+            "query": query,
+            "query_embedding": query_embedding.embedding,
+            "distance": distance_threshold,
+            "papers": papers,
+            "count": len(papers),
+        }
+    )
 
 
 @app.route("/api/topic-evolution", methods=["POST"])
-@api_error_handler(error_message="Failed to compute topic evolution")
+@api_error_handler(error_message="Could not compute topic evolution. Please try again.")
 def topic_evolution():
     """
     Get topic evolution data for a given topic across years.
@@ -924,29 +791,40 @@ def topic_evolution():
     dict
         Topic evolution data with per-conference year_counts and year_relative
     """
-    data = request.get_json()
+    data = get_json_object()
 
-    if not data or "topic_keywords" not in data:
+    if not data.get("topic_keywords"):
         return jsonify({"error": "Missing required field: topic_keywords"}), 400
 
-    topic_keywords = data["topic_keywords"]
-    conferences = data.get("conferences")
-    distance_threshold = data.get("distance_threshold", 1.1)
+    topic_keywords = coerce_text(data["topic_keywords"], "topic_keywords", _MAX_QUERY_LENGTH)
+    conferences = coerce_str_list(data.get("conferences"), "conferences", max_items=_MAX_FILTER_ITEMS) or None
+    distance_threshold = coerce_number(
+        data.get("distance_threshold"),
+        "distance_threshold",
+        default=1.1,
+        minimum=0.0,
+        maximum=_MAX_DISTANCE,
+    )
 
+    from abstracts_explorer.mcp.errors import ToolError
     from abstracts_explorer.mcp_server import get_topic_evolution as mcp_get_topic_evolution
 
-    result_json = mcp_get_topic_evolution(
-        topic_keywords=topic_keywords,
-        conferences=conferences,
-        distance_threshold=distance_threshold,
-    )
+    enforce_client_rate_limit(_client_id())
+    try:
+        result_json = mcp_get_topic_evolution(
+            topic_keywords=topic_keywords,
+            conferences=conferences,
+            distance_threshold=distance_threshold,
+        )
+    except ToolError as exc:
+        return jsonify({"error": str(exc)})
 
     result = json.loads(result_json)
     return jsonify(result)
 
 
 @app.route("/api/papers-per-year")
-@api_error_handler(error_message="Failed to load papers per year data")
+@api_error_handler(error_message="Could not load paper counts. Please try again.")
 def papers_per_year():
     """
     Get paper counts per year for a conference.
@@ -962,7 +840,7 @@ def papers_per_year():
         Dictionary with year_counts mapping year to paper count
     """
     conference = request.args.get("conference")
-    database = get_database()
+    database = services.get_database()
 
     if conference:
         years = sorted(database.get_years(conference=conference))
@@ -975,22 +853,6 @@ def papers_per_year():
         year_counts[year] = stats["total_papers"]
 
     return jsonify({"year_counts": year_counts, "conference": conference})
-
-
-@app.route("/api/years")
-@api_error_handler
-def get_years():
-    """
-    Get available years in the database.
-
-    Returns
-    -------
-    dict
-        List of available years
-    """
-    database = get_database()
-    years = database.get_years()
-    return jsonify({"years": years})
 
 
 @app.route("/api/export/interesting-papers", methods=["POST"])
@@ -1014,17 +876,24 @@ def export_interesting_papers():
     file
         Zip file containing folder structure with README.md and search term markdown files
     """
-    data = request.json
+    data = get_json_object()
     paper_ids = data.get("paper_ids", [])
     priorities = data.get("priorities", {})
-    search_query = data.get("search_query", "")
-    sort_order = data.get("sort_order", "search-rating-poster")
+    if not isinstance(paper_ids, list):
+        raise ApiError("paper_ids must be a list", 400)
+    if len(paper_ids) > 1000:
+        raise ApiError("Too many paper IDs (maximum 1000)", 400)
+    sort_order = coerce_text(data.get("sort_order"), "sort_order", 50, default="search-rating-poster")
+    if sort_order not in _EXPORT_SORT_ORDERS:
+        raise ApiError("Invalid sort_order", 400)
 
     if not paper_ids:
         return jsonify({"error": "No paper IDs provided"}), 400
 
     if not isinstance(priorities, dict):
         return jsonify({"error": "Invalid priorities format. Expected a dict keyed by paper UID."}), 400
+    if len(priorities) > _MAX_PRIORITY_ENTRIES:
+        raise ApiError(f"priorities must contain at most {_MAX_PRIORITY_ENTRIES} entries", 400)
 
     for paper_uid, priority_data in priorities.items():
         if not isinstance(priority_data, dict):
@@ -1041,7 +910,7 @@ def export_interesting_papers():
             )
 
     # Fetch papers from database
-    database = get_database()
+    database = services.get_database()
     papers = []
     for paper_id in paper_ids:
         try:
@@ -1050,10 +919,21 @@ def export_interesting_papers():
                 logger.warning(f"Paper {paper_id} not found")
                 continue
             priority_data = priorities.get(str(paper_id), {})
-            paper["priority"] = priority_data.get("priority", 0)
-            paper["searchTerm"] = priority_data.get("searchTerm", "Unknown")
+            try:
+                priority_value = int(priority_data.get("priority", 0))
+            except (TypeError, ValueError) as exc:
+                raise ApiError(f"Invalid priority for paper '{paper_id}'", 400) from exc
+            paper["priority"] = max(0, min(priority_value, 5))
+            paper["searchTerm"] = coerce_text(
+                priority_data.get("searchTerm", "Unknown"),
+                "searchTerm",
+                _MAX_SEARCH_TERM_LENGTH,
+                default="Unknown",
+            )
 
             papers.append(paper)
+        except ApiError:
+            raise
         except Exception:
             logger.warning(f"Paper {paper_id} not found")
             continue
@@ -1062,7 +942,7 @@ def export_interesting_papers():
         return jsonify({"error": "No papers found"}), 404
 
     # Use export utility function to sort and generate ZIP
-    zip_buffer = export_papers_to_zip(papers, search_query, sort_order)
+    zip_buffer = export_papers_to_zip(papers, sort_order)
 
     return send_file(
         zip_buffer,
@@ -1088,13 +968,19 @@ def donate_data():
     dict
         Success message with count of donated papers
     """
-    data = request.json
+    data = get_json_object()
     paper_priorities = data.get("paperPriorities", {})
 
     if not paper_priorities:
         return jsonify({"error": "No data provided"}), 400
+    if not isinstance(paper_priorities, dict):
+        raise ApiError("paperPriorities must be an object", 400)
+    if len(paper_priorities) > _MAX_PRIORITY_ENTRIES:
+        raise ApiError(f"paperPriorities must contain at most {_MAX_PRIORITY_ENTRIES} entries", 400)
+    if any(not isinstance(value, dict) for value in paper_priorities.values()):
+        raise ApiError("Invalid data format. Expected dict with priority and searchTerm", 400)
 
-    database = get_database()
+    database = services.get_database()
 
     try:
         # Use DatabaseManager's donate_validation_data method
@@ -1130,14 +1016,26 @@ def donate_chat():
     dict
         Success message with donation ID.
     """
-    data = request.json
+    data = get_json_object()
     rating = data.get("rating")
     transcript = data.get("transcript")
 
     if not rating or not transcript:
         return jsonify({"error": "Both 'rating' and 'transcript' are required"}), 400
+    if not isinstance(transcript, list):
+        raise ApiError("transcript must be a list", 400)
+    if len(transcript) > _MAX_TRANSCRIPT_MESSAGES:
+        raise ApiError(f"transcript must contain at most {_MAX_TRANSCRIPT_MESSAGES} messages", 400)
+    total_chars = 0
+    for message in transcript:
+        if not isinstance(message, dict):
+            raise ApiError("transcript entries must be objects", 400)
+        text = message.get("text", "")
+        total_chars += len(str(text))
+    if total_chars > _MAX_TRANSCRIPT_CHARS:
+        raise ApiError(f"transcript must contain at most {_MAX_TRANSCRIPT_CHARS} characters", 400)
 
-    database = get_database()
+    database = services.get_database()
 
     try:
         donation_id = database.donate_chat_transcript(rating, transcript)
@@ -1159,13 +1057,19 @@ def not_found(e):
     return jsonify({"error": "Not found"}), 404
 
 
+@app.errorhandler(413)
+def payload_too_large(e):
+    """Handle requests larger than MAX_CONTENT_LENGTH."""
+    return jsonify({"error": "Request body too large"}), 413
+
+
 @app.errorhandler(500)
 def internal_error(e):
     """Handle 500 errors."""
     return jsonify({"error": "Internal server error"}), 500
 
 
-def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=6):
+def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=None):
     """
     Run the Flask web server.
 
@@ -1179,8 +1083,9 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=6):
         Enable debug mode (default: False)
     dev : bool
         Use Flask development server instead of production server (default: False)
-    threads : int
-        Number of worker threads for Waitress (default: 6). Must be >= 1.
+    threads : int, optional
+        Number of worker threads for Waitress. Defaults to ``WEB_UI_THREADS``
+        from the configuration (built-in default: 6). Must be >= 1.
 
     Raises
     ------
@@ -1189,10 +1094,20 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=6):
     FileNotFoundError
         If the database file does not exist.
     """
+    config = services.get_config()  # Get config lazily
+
+    if threads is None:
+        threads = config.web_ui_threads
+
     if threads < 1:
         raise ValueError(f"threads must be >= 1, got {threads}")
 
-    config = get_config()  # Get config lazily
+    if debug and host not in ("127.0.0.1", "localhost", "::1"):
+        print(
+            "⚠️  Debug mode is disabled for non-loopback hosts; use -v for INFO logging instead.",
+            file=sys.stderr,
+        )
+        debug = False
 
     # Check if database is accessible before starting server
     # For SQLite databases, check if the file exists
@@ -1203,18 +1118,18 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=6):
             print(f"\nThe database file does not exist: {db_path}", file=sys.stderr)
             print("\nTo create and populate the database, run one of these commands:", file=sys.stderr)
             print("  # Download NeurIPS papers:", file=sys.stderr)
-            print("  neurips-abstracts download --conference neurips --year 2025", file=sys.stderr)
+            print("  abstracts-explorer download --conference neurips --year 2025", file=sys.stderr)
             print("\n  # Or use a different conference/year:", file=sys.stderr)
-            print("  neurips-abstracts download --conference iclr --year 2025", file=sys.stderr)
+            print("  abstracts-explorer download --conference iclr --year 2025", file=sys.stderr)
             print("\n  # List available plugins:", file=sys.stderr)
-            print("  neurips-abstracts list-plugins", file=sys.stderr)
+            print("  abstracts-explorer download --list-plugins", file=sys.stderr)
             print("\nAfter downloading papers, you may also want to create embeddings:", file=sys.stderr)
-            print("  neurips-abstracts create-embeddings", file=sys.stderr)
+            print("  abstracts-explorer create-embeddings", file=sys.stderr)
             raise FileNotFoundError(f"Database not found: {db_path}")
     # For PostgreSQL, we can't check file existence - connection will be validated at runtime
 
     print("Starting Abstracts Explorer Web Interface...")
-    print(f"Database: {config.database_url}")
+    print(f"Database: {config.masked_database_url}")
 
     # Print embeddings configuration
     print(f"Embeddings: {config.embedding_db}")
@@ -1225,6 +1140,8 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=6):
     # Without this, PID 1 in a container ignores SIGTERM by default, forcing Docker
     # to wait the full stop-timeout before sending SIGKILL.
     signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
+
+    services.start_chat_history_cleanup()
 
     # Use Flask development server if explicitly requested
     if dev:
@@ -1269,7 +1186,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dev", action="store_true", help="Use Flask development server instead of production server"
     )
-    parser.add_argument("--threads", type=int, default=6, help="Number of Waitress worker threads")
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=None,
+        help="Number of Waitress worker threads (default: WEB_UI_THREADS or 6)",
+    )
 
     args = parser.parse_args()
 
