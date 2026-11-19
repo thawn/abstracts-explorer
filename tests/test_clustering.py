@@ -11,6 +11,12 @@ from abstracts_explorer.clustering import (
     ClusteringError,
     calculate_default_clusters,
 )
+from abstracts_explorer.clustering.label_validation import (
+    find_default_cluster_labels,
+    find_default_hierarchy_labels,
+    is_default_label,
+)
+from abstracts_explorer.clustering.pipeline import compute_clusters_with_cache
 from abstracts_explorer.clustering.tfidf import compute_tfidf_keywords as _compute_tfidf_keywords
 
 
@@ -462,6 +468,7 @@ class TestClusterLabeling:
 
     def test_call_llm_for_label_returns_fallback_on_error(self, mock_embeddings_manager, mocker, mock_database):
         """_call_llm_for_label returns the fallback when the LLM call fails."""
+        mocker.patch("abstracts_explorer.clustering.labeling.time.sleep")
         mock_openai_client = mocker.MagicMock()
         mock_openai_client.chat.completions.create.side_effect = RuntimeError("API down")
         mock_embeddings_manager.openai_client = mock_openai_client
@@ -470,6 +477,79 @@ class TestClusterLabeling:
         result = cm._call_llm_for_label("user prompt", "fallback label")
 
         assert result == "fallback label"
+
+    def test_llm_chat_label_retries_transient_failure(self, mock_embeddings_manager, mocker, mock_database):
+        """Transient failures are retried before returning a label."""
+        sleep = mocker.patch("abstracts_explorer.clustering.labeling.time.sleep")
+        mock_response = mocker.MagicMock()
+        mock_response.choices = [mocker.MagicMock()]
+        mock_response.choices[0].message.content = "Recovered Label"
+
+        mock_openai_client = mocker.MagicMock()
+        mock_openai_client.chat.completions.create.side_effect = [
+            RuntimeError("temporary outage"),
+            mock_response,
+        ]
+        mock_embeddings_manager.openai_client = mock_openai_client
+
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
+        result = cm._llm_chat_label("system", "user")
+
+        assert result == "Recovered Label"
+        assert mock_openai_client.chat.completions.create.call_count == 2
+        sleep.assert_called_once()
+
+    def test_llm_chat_label_retries_empty_content(self, mock_embeddings_manager, mocker, mock_database):
+        """Empty model output is retried like a transient failure."""
+        mocker.patch("abstracts_explorer.clustering.labeling.time.sleep")
+        empty_response = mocker.MagicMock()
+        empty_response.choices = [mocker.MagicMock()]
+        empty_response.choices[0].message.content = ""
+
+        good_response = mocker.MagicMock()
+        good_response.choices = [mocker.MagicMock()]
+        good_response.choices[0].message.content = "Good Label"
+
+        mock_openai_client = mocker.MagicMock()
+        mock_openai_client.chat.completions.create.side_effect = [empty_response, good_response]
+        mock_embeddings_manager.openai_client = mock_openai_client
+
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
+        result = cm._llm_chat_label("system", "user")
+
+        assert result == "Good Label"
+        assert mock_openai_client.chat.completions.create.call_count == 2
+
+    def test_llm_chat_label_does_not_retry_non_retryable_error(self, mock_embeddings_manager, mocker, mock_database):
+        """Non-retryable HTTP errors fail immediately."""
+        sleep = mocker.patch("abstracts_explorer.clustering.labeling.time.sleep")
+        error = RuntimeError("bad request")
+        error.status_code = 400  # type: ignore[attr-defined]
+
+        mock_openai_client = mocker.MagicMock()
+        mock_openai_client.chat.completions.create.side_effect = error
+        mock_embeddings_manager.openai_client = mock_openai_client
+
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
+        with pytest.raises(RuntimeError, match="bad request"):
+            cm._llm_chat_label("system", "user")
+
+        assert mock_openai_client.chat.completions.create.call_count == 1
+        sleep.assert_not_called()
+
+    def test_llm_chat_label_reports_unavailable_client_without_retry(
+        self, mock_embeddings_manager, mocker, mock_database
+    ):
+        """A missing OpenAI client is not retried."""
+        sleep = mocker.patch("abstracts_explorer.clustering.labeling.time.sleep")
+        if hasattr(mock_embeddings_manager, "openai_client"):
+            del mock_embeddings_manager.openai_client
+
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
+        with pytest.raises(AttributeError, match="OpenAI client not available"):
+            cm._llm_chat_label("system", "user")
+
+        sleep.assert_not_called()
 
     def test_generate_llm_label_from_keywords_uses_shared_helper(
         self, mock_embeddings_manager, mocker, mock_database
@@ -521,6 +601,7 @@ class TestClusterLabeling:
         """A reasoning model truncated at the token budget returns
         ``content=None`` (finish_reason='length'); each label must then fall
         back to keyword concatenation instead of crashing the whole run."""
+        mocker.patch("abstracts_explorer.clustering.labeling.time.sleep")
         mock_response = mocker.MagicMock()
         mock_response.choices = [mocker.MagicMock()]
         mock_response.choices[0].message.content = None  # reasoning ate the budget
@@ -894,3 +975,141 @@ class TestClusteringCache:
         assert cached_any["statistics"]["n_clusters"] == 2
 
         db.close()
+
+
+class TestLabelValidation:
+    """Tests for fallback/default label detection."""
+
+    def test_is_default_label(self):
+        """Default names are detected while real labels are not."""
+        assert is_default_label("Cluster 0")
+        assert is_default_label("Sample 12")
+        assert is_default_label("Node 42")
+        assert not is_default_label("Deep Learning")
+        assert not is_default_label("Cluster")
+
+    def test_find_default_cluster_labels(self):
+        """Default names and keyword fallbacks are flagged."""
+        labels = {"0": "Cluster 0", "1": "Deep Learning", "2": "neural, networks, training"}
+        keywords = {"2": ["neural", "networks", "training", "optimization"]}
+
+        assert find_default_cluster_labels(labels, keywords) == [0, 2]
+
+    def test_find_default_cluster_labels_without_keywords(self):
+        """Keyword fallback detection requires keywords."""
+        assert find_default_cluster_labels({"0": "neural, networks, training"}) == []
+
+    def test_find_default_hierarchy_labels(self):
+        """Literal defaults and level-4+ fallbacks are flagged."""
+        labels = {
+            0: "Alpha",
+            1: "Beta",
+            10: "Alpha & Beta",
+            11: "Cluster 11",
+            12: "Alpha & Beta",
+        }
+        hierarchy = {
+            "tree": {
+                "nodes": {
+                    0: {"level": 0, "children": []},
+                    1: {"level": 0, "children": []},
+                    10: {"level": 1, "children": [0, 1]},
+                    11: {"level": 4, "children": [0, 1]},
+                    12: {"level": 4, "children": [0, 1]},
+                }
+            }
+        }
+
+        assert find_default_hierarchy_labels(labels, hierarchy) == [11, 12]
+
+    def test_find_default_hierarchy_labels_without_hierarchy(self):
+        """Default names are still detected without hierarchy data."""
+        assert find_default_hierarchy_labels({"0": "Sample 0", "1": "Real"}) == [0]
+
+
+class TestComputeClustersRepair:
+    """Tests for CLI-only label repair in the cached pipeline."""
+
+    @pytest.fixture
+    def cached_default_results(self):
+        """Cached results containing fallback labels."""
+        return {
+            "points": [],
+            "statistics": {"total_papers": 10, "n_clusters": 1, "n_noise": 0, "cluster_sizes": {}},
+            "cluster_labels": {"0": "Cluster 0"},
+            "cluster_keywords": {"0": ["neural", "networks"]},
+        }
+
+    def test_cached_defaults_are_returned_without_repair(
+        self, mocker, cached_default_results, mock_embeddings_manager
+    ):
+        """Repair disabled returns stale cache unchanged."""
+        database = mocker.MagicMock()
+        database.get_clustering_cache.return_value = cached_default_results
+        cm_class = mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager")
+        run_pipeline = mocker.patch("abstracts_explorer.clustering.pipeline._run_pipeline")
+
+        result = compute_clusters_with_cache(mock_embeddings_manager, database, "model")
+
+        assert result is cached_default_results
+        cm_class.assert_not_called()
+        run_pipeline.assert_not_called()
+
+    def test_cached_defaults_trigger_regeneration_when_repairing(
+        self, mocker, cached_default_results, mock_embeddings_manager
+    ):
+        """Repair enabled bypasses cache and recomputes labels."""
+        fresh_results = {
+            "points": [],
+            "statistics": {"total_papers": 10, "n_clusters": 1, "n_noise": 0, "cluster_sizes": {}},
+            "cluster_labels": {"0": "Deep Learning"},
+        }
+        database = mocker.MagicMock()
+        database.get_clustering_cache.return_value = cached_default_results
+        cm_class = mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager")
+        mocker.patch("abstracts_explorer.clustering.pipeline._run_pipeline")
+        cm = cm_class.return_value
+        cm.cluster_hierarchy = None
+        cm.paper_ids = []
+        cm.get_clustering_results.return_value = fresh_results
+
+        result = compute_clusters_with_cache(
+            mock_embeddings_manager,
+            database,
+            "model",
+            repair_default_labels=True,
+        )
+
+        assert result is fresh_results
+        cm_class.assert_called_once()
+        database.save_clustering_cache.assert_called_once()
+
+    def test_cached_hierarchy_defaults_are_regenerated(self, mocker, mock_embeddings_manager):
+        """Fallback hierarchical labels are ignored and replaced."""
+        hierarchy = {"tree": {"nodes": {10: {"level": 4, "children": []}}}, "n_samples": 1}
+        fresh_results = {
+            "points": [],
+            "statistics": {"total_papers": 1, "n_clusters": 1, "n_noise": 0, "cluster_sizes": {}},
+        }
+        database = mocker.MagicMock()
+        database.get_clustering_cache.return_value = None
+        database.get_hierarchical_label_cache.return_value = {10: "Cluster 10"}
+        cm_class = mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager")
+        mocker.patch("abstracts_explorer.clustering.pipeline._run_pipeline")
+        cm = cm_class.return_value
+        cm.cluster_hierarchy = hierarchy
+        cm.paper_ids = []
+        cm.get_clustering_results.return_value = fresh_results
+        cm.generate_hierarchical_labels.return_value = {10: "Deep Learning"}
+
+        compute_clusters_with_cache(
+            mock_embeddings_manager,
+            database,
+            "model",
+            repair_default_labels=True,
+        )
+
+        cm.generate_hierarchical_labels.assert_called_once()
+        save_kwargs = database.save_hierarchical_label_cache.call_args.kwargs
+        assert save_kwargs["replace_scope"] is True
+        assert hierarchy["tree"]["nodes"][10]["label"] == "Deep Learning"

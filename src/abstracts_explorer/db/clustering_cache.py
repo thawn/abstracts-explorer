@@ -467,12 +467,71 @@ class ClusteringCacheMixin(SessionMixin):
         except Exception as e:
             raise self._db_error("Failed to get hierarchical label cache", e)
 
+    def delete_hierarchical_label_cache(
+        self,
+        embedding_model: str,
+        linkage: str = "ward",
+        scope: Optional[str] = None,
+    ) -> int:
+        """
+        Delete cached hierarchical labels.
+
+        Parameters
+        ----------
+        embedding_model : str
+            Name of the embedding model.
+        linkage : str, optional
+            Agglomerative linkage method (default: ``"ward"``).
+        scope : str, optional
+            Dataset fingerprint.  When provided, only entries saved for the
+            same scope are deleted.  When ``None``, all entries for the
+            embedding model and linkage are deleted.
+
+        Returns
+        -------
+        int
+            Number of deleted cache entries.
+
+        Raises
+        ------
+        DatabaseError
+            If deletion fails.
+        """
+        try:
+            stmt = select(HierarchicalLabelCache).where(
+                and_(
+                    HierarchicalLabelCache.embedding_model == embedding_model,
+                    HierarchicalLabelCache.linkage == linkage,
+                )
+            )
+            entries = list(self.session.execute(stmt).scalars())
+            deleted = 0
+            for entry in entries:
+                if scope is not None:
+                    raw = json.loads(str(entry.labels_json))
+                    if not isinstance(raw, dict) or raw.get("_scope") != scope:
+                        continue
+                self.session.delete(entry)
+                deleted += 1
+
+            if deleted:
+                self.session.commit()
+                logger.info(
+                    f"Deleted {deleted} hierarchical label cache entries: "
+                    f"model={embedding_model}, linkage={linkage}, scope={scope}"
+                )
+            return deleted
+
+        except Exception as e:
+            raise self._db_error("Failed to delete hierarchical label cache", e)
+
     def save_hierarchical_label_cache(
         self,
         embedding_model: str,
         labels: Dict[int, str],
         linkage: str = "ward",
         scope: Optional[str] = None,
+        replace_scope: bool = False,
     ) -> None:
         """
         Save hierarchical cluster labels to cache.
@@ -488,6 +547,10 @@ class ClusteringCacheMixin(SessionMixin):
         scope : str, optional
             Dataset fingerprint stored with the labels so entries are not
             reused across different datasets.
+        replace_scope : bool, optional
+            Replace existing entries for the same ``scope`` instead of
+            appending a duplicate row, by default ``False``.  Requires a
+            non-``None`` scope.
 
         Raises
         ------
@@ -495,6 +558,13 @@ class ClusteringCacheMixin(SessionMixin):
             If save fails.
         """
         try:
+            if replace_scope and scope is not None:
+                self.delete_hierarchical_label_cache(
+                    embedding_model=embedding_model,
+                    linkage=linkage,
+                    scope=scope,
+                )
+
             encoded_labels = {str(k): v for k, v in labels.items()}
             if scope is None:
                 labels_json = json.dumps(encoded_labels)

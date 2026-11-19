@@ -270,6 +270,13 @@ the web UI serves them instantly.
 - With `--conference` and `--year`: generates for that specific
   conference/year only.
 
+Re-running `pre-generate` is safe and idempotent: if cached cluster or
+hierarchy labels are fallback values from an earlier LLM failure (for example
+`Cluster 3` or keyword-only labels), they are regenerated automatically.
+Healthy cached labels are reused without additional LLM calls. This repair
+only runs in the CLI pre-generation path; the web UI and MCP server continue
+to use the cache as-is.
+
 ```text
 usage: abstracts-explorer clustering pre-generate [-h] [--collection COLLECTION]
                                                   [--conference CONFERENCE] [--year YEAR]

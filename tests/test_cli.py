@@ -2826,6 +2826,7 @@ class TestCLI:
             assert kw["linkage"] == "ward"
             assert kw["distance_threshold"] == 150.0
             assert kw["n_clusters"] is None
+            assert kw["repair_default_labels"] is True
         mock_em.close.assert_called_once()
 
     def test_pre_generate_clustering_no_conferences_in_db(self, tmp_path, capsys, monkeypatch):

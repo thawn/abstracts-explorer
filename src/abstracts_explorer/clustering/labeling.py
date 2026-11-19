@@ -3,16 +3,51 @@ Cluster labeling using TF-IDF keywords and LLM-generated labels.
 """
 
 import logging
+import time
 from typing import Any, Dict, List
 
 import numpy as np
 
 from abstracts_explorer.clustering.errors import ClusteringError
+from abstracts_explorer.clustering.label_validation import join_child_labels
 from abstracts_explorer.clustering.tfidf import compute_tfidf_keywords, fit_tfidf, keywords_from_matrix
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.llm_utils import chat_completion_text
 
 logger = logging.getLogger(__name__)
+
+_RETRYABLE_LLM_STATUS_CODES = frozenset({408, 409, 429, 500, 502, 503, 504})
+
+
+def _is_retryable_llm_error(error: Exception) -> bool:
+    """
+    Return whether a cluster-label LLM error should be retried.
+
+    Parameters
+    ----------
+    error : Exception
+        Exception raised by the LLM client.
+
+    Returns
+    -------
+    bool
+        ``True`` for transient network errors and retryable HTTP statuses.
+    """
+    if isinstance(error, AttributeError):
+        return False
+
+    status_code = getattr(error, "status_code", None)
+    if status_code is None:
+        response = getattr(error, "response", None)
+        status_code = getattr(response, "status_code", None)
+
+    if status_code is None:
+        return True
+
+    try:
+        return int(status_code) in _RETRYABLE_LLM_STATUS_CODES
+    except (TypeError, ValueError):
+        return True
 
 
 class LabelingMixin:
@@ -146,8 +181,8 @@ class LabelingMixin:
         safety net: with ``reasoning_effort="low"`` only ~10-20 tokens are
         needed, but the Qwen fallback path still needs the full budget
         (default 200) or ``message.content`` comes back ``None`` with
-        ``finish_reason="length"``.  Callers are expected to wrap this in a
-        try/except and provide a fallback label.
+        ``finish_reason="length"``.  Transient failures are retried with
+        exponential backoff before callers fall back to a static label.
 
         Parameters
         ----------
@@ -172,7 +207,7 @@ class LabelingMixin:
         AttributeError
             If the OpenAI client is not available on the embeddings manager.
         ValueError
-            If the model returns no text content.
+            If the model returns no text content after all attempts.
         """
         if not hasattr(self.embeddings_manager, "openai_client"):
             raise AttributeError("OpenAI client not available in embeddings manager")
@@ -180,25 +215,48 @@ class LabelingMixin:
         from abstracts_explorer.config import get_config
 
         config = get_config()
+        max_attempts = max(1, config.llm_max_attempts)
+        retry_base_delay = config.llm_retry_base_delay
+        retry_max_delay = config.llm_retry_max_delay
 
-        content = chat_completion_text(
-            client=self.embeddings_manager.openai_client,
-            model=config.cluster_label_model,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            temperature=0.3,
-            max_tokens=max_tokens,
-            timeout=config.llm_request_timeout,
-            # Suppress the hidden reasoning block on GPT-OSS-120B so the
-            # ~5-token label fits comfortably.  Qwen3.8 ignores this param
-            # (its reasoning is controlled by enable_thinking, which the
-            # deployment does not honor) and falls back on max_tokens.
-            reasoning_effort="low",
-        )
+        last_error: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                content = chat_completion_text(
+                    client=self.embeddings_manager.openai_client,
+                    model=config.cluster_label_model,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=0.3,
+                    max_tokens=max_tokens,
+                    timeout=config.llm_request_timeout,
+                    # Suppress the hidden reasoning block on GPT-OSS-120B so the
+                    # ~5-token label fits comfortably.  Qwen3.8 ignores this param
+                    # (its reasoning is controlled by enable_thinking, which the
+                    # deployment does not honor) and falls back on max_tokens.
+                    reasoning_effort="low",
+                )
 
-        if not content:
-            raise ValueError("LLM returned empty content")
-        return content.strip().strip("\"'")
+                if not content:
+                    raise ValueError("LLM returned empty content")
+                return content.strip().strip("\"'")
+            except Exception as error:
+                last_error = error
+                if attempt >= max_attempts or not _is_retryable_llm_error(error):
+                    raise
+
+                delay = min(retry_base_delay * (2 ** (attempt - 1)), retry_max_delay)
+                logger.warning(
+                    "Cluster-label LLM call failed (attempt %d/%d): %s; retrying in %.1fs",
+                    attempt,
+                    max_attempts,
+                    error,
+                    delay,
+                )
+                time.sleep(delay)
+
+        assert last_error is not None
+        raise last_error
 
     def _call_llm_for_label(
         self,
@@ -295,12 +353,7 @@ Only respond with the label, nothing else. Do not add formatting."""
             Generated parent label
         """
         # Split each label by "&", flatten, deduplicate, and rejoin
-        labels = []
-        for label in child_labels[:3]:
-            labels += label.split(" & ")
-        # Deduplicate while preserving order
-        unique_labels = list(dict.fromkeys(labels))
-        label = " & ".join(unique_labels[:3])
+        label = join_child_labels(child_labels)
         logger.debug(f"Generated fallback parent label: {label}")
         return label
 

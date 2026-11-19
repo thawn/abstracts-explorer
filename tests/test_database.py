@@ -1595,6 +1595,68 @@ class TestClusteringCache:
         )
         assert cached is None
 
+    def test_hierarchical_label_cache_replace_scope(self, connected_db):
+        """Replacing a scope updates labels without adding duplicate rows."""
+        connected_db.save_hierarchical_label_cache(
+            embedding_model="test-model",
+            labels={0: "Old Label"},
+            linkage="ward",
+            scope="dataset-a",
+        )
+        connected_db.save_hierarchical_label_cache(
+            embedding_model="test-model",
+            labels={0: "New Label"},
+            linkage="ward",
+            scope="dataset-a",
+            replace_scope=True,
+        )
+
+        cached = connected_db.get_hierarchical_label_cache(
+            embedding_model="test-model",
+            linkage="ward",
+            scope="dataset-a",
+        )
+        assert cached == {0: "New Label"}
+
+        rows = raw_query(connected_db, "SELECT COUNT(*) AS count FROM hierarchical_label_cache")
+        assert rows[0]["count"] == 1
+
+    def test_delete_hierarchical_label_cache_by_scope(self, connected_db):
+        """Deleting a scope leaves other scopes untouched."""
+        connected_db.save_hierarchical_label_cache(
+            embedding_model="test-model",
+            labels={0: "Scope A"},
+            linkage="ward",
+            scope="dataset-a",
+        )
+        connected_db.save_hierarchical_label_cache(
+            embedding_model="test-model",
+            labels={0: "Scope B"},
+            linkage="ward",
+            scope="dataset-b",
+        )
+
+        deleted = connected_db.delete_hierarchical_label_cache(
+            embedding_model="test-model",
+            linkage="ward",
+            scope="dataset-a",
+        )
+
+        assert deleted == 1
+        assert (
+            connected_db.get_hierarchical_label_cache(
+                embedding_model="test-model",
+                linkage="ward",
+                scope="dataset-a",
+            )
+            is None
+        )
+        assert connected_db.get_hierarchical_label_cache(
+            embedding_model="test-model",
+            linkage="ward",
+            scope="dataset-b",
+        ) == {0: "Scope B"}
+
 
 class TestValidationData:
     """Tests for validation data donation functionality."""

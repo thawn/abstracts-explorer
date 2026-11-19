@@ -13,11 +13,48 @@ from abstracts_explorer.clustering.constants import (
     DEFAULT_REDUCTION_METHOD,
 )
 from abstracts_explorer.clustering.errors import ClusteringError
+from abstracts_explorer.clustering.label_validation import (
+    find_default_cluster_labels,
+    find_default_hierarchy_labels,
+)
 from abstracts_explorer.clustering.manager import ClusteringManager
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
 
 logger = logging.getLogger(__name__)
+
+
+def _results_have_default_labels(results: Dict[str, Any]) -> bool:
+    """
+    Return whether cached clustering results contain fallback labels.
+
+    Parameters
+    ----------
+    results : dict
+        Cached clustering results.
+
+    Returns
+    -------
+    bool
+        ``True`` when flat cluster labels or hierarchy node labels contain
+        fallback/default values.
+    """
+    cluster_labels = results.get("cluster_labels") or {}
+    cluster_keywords = results.get("cluster_keywords") or {}
+    if find_default_cluster_labels(cluster_labels, cluster_keywords):
+        return True
+
+    hierarchy = results.get("cluster_hierarchy")
+    if not hierarchy:
+        return False
+
+    nodes = (hierarchy.get("tree") or {}).get("nodes") or {}
+    node_labels = {
+        node_id: node.get("label")
+        for node_id, node in nodes.items()
+        if isinstance(node, dict) and node.get("label") is not None
+    }
+    return bool(find_default_hierarchy_labels(node_labels, hierarchy))
 
 
 def _run_pipeline(
@@ -30,6 +67,7 @@ def _run_pipeline(
     conferences: Optional[List[str]] = None,
     years: Optional[List[int]] = None,
     clustering_kwargs: Optional[Dict[str, Any]] = None,
+    use_llm_labels: bool = True,
 ) -> None:
     """
     Run the shared clustering pipeline on *cm* in place.
@@ -56,6 +94,9 @@ def _run_pipeline(
         Filter by years.
     clustering_kwargs : dict, optional
         Extra Agglomerative parameters (e.g. ``distance_threshold``).
+    use_llm_labels : bool, optional
+        Whether flat cluster labels should be generated with the LLM, by
+        default ``True``.
     """
     kwargs = dict(clustering_kwargs or {})
 
@@ -71,7 +112,7 @@ def _run_pipeline(
     logger.info("Generating cluster labels...")
     try:
         cm.extract_cluster_keywords(n_keywords=10)
-        cm.generate_cluster_labels(use_llm=True, max_keywords=5)
+        cm.generate_cluster_labels(use_llm=use_llm_labels, max_keywords=5)
     except Exception as e:
         logger.warning(f"Failed to generate cluster labels: {e}")
 
@@ -160,7 +201,9 @@ def compute_clusters_with_cache(
     force: bool = False,
     conferences: Optional[List[str]] = None,
     years: Optional[List[int]] = None,
-    **clustering_kwargs,
+    repair_default_labels: bool = False,
+    use_llm_labels: bool = True,
+    **clustering_kwargs: Any,
 ) -> Dict[str, Any]:
     """
     Compute clusters with caching support.
@@ -191,6 +234,13 @@ def compute_clusters_with_cache(
         Filter to only cluster papers from these conferences.
     years : list of int, optional
         Filter to only cluster papers from these years.
+    repair_default_labels : bool, optional
+        Regenerate cached labels that are fallback/default values, by
+        default ``False``.  The CLI pre-generation commands enable this so
+        re-running them repairs labels produced during earlier LLM failures.
+    use_llm_labels : bool, optional
+        Whether cluster labels should be generated with the LLM, by default
+        ``True``.
     **clustering_kwargs
         Additional clustering parameters (e.g., distance_threshold, linkage)
 
@@ -234,8 +284,11 @@ def compute_clusters_with_cache(
             collection_name=cache_collection,
         )
         if exact_cached:
-            logger.info("Using exact cached clustering results (including reduction)")
-            return exact_cached
+            if repair_default_labels and _results_have_default_labels(exact_cached):
+                logger.info("Cached cluster labels contain fallback values; regenerating labels")
+            else:
+                logger.info("Using exact cached clustering results (including reduction)")
+                return exact_cached
 
     logger.info("Computing new clustering results...")
     cm = ClusteringManager(embeddings_manager, database)
@@ -248,11 +301,12 @@ def compute_clusters_with_cache(
         conferences=conferences,
         years=years,
         clustering_kwargs=clustering_kwargs,
+        use_llm_labels=use_llm_labels,
     )
 
     if cm.cluster_hierarchy is not None:
         linkage_method = clustering_kwargs.get("linkage", "ward")
-        use_llm = clustering_kwargs.get("use_llm_labels", True)
+        use_llm = use_llm_labels
         fingerprint = hashlib.sha256("\n".join(str(uid) for uid in (cm.paper_ids or [])).encode("utf-8")).hexdigest()[
             :16
         ]
@@ -271,6 +325,11 @@ def compute_clusters_with_cache(
             linkage=linkage_method,
             scope=label_scope,
         )
+        if cached_hier_labels and repair_default_labels:
+            default_nodes = find_default_hierarchy_labels(cached_hier_labels, cm.cluster_hierarchy)
+            if default_nodes:
+                logger.info(f"Cached hierarchical labels contain {len(default_nodes)} fallback values; regenerating")
+                cached_hier_labels = None
 
         if cached_hier_labels:
             logger.info(f"Using cached hierarchical labels ({len(cached_hier_labels)} nodes)")
@@ -279,6 +338,12 @@ def compute_clusters_with_cache(
             logger.info("Generating hierarchical labels for agglomerative clustering...")
             try:
                 hierarchical_labels = cm.generate_hierarchical_labels(use_llm=use_llm, max_keywords=5)
+                if repair_default_labels:
+                    default_nodes = find_default_hierarchy_labels(hierarchical_labels, cm.cluster_hierarchy)
+                    if default_nodes:
+                        logger.warning(
+                            f"Hierarchical label generation still produced {len(default_nodes)} fallback values"
+                        )
                 if not limit:
                     try:
                         database.save_hierarchical_label_cache(
@@ -286,6 +351,7 @@ def compute_clusters_with_cache(
                             labels=hierarchical_labels,
                             linkage=linkage_method,
                             scope=label_scope,
+                            replace_scope=True,
                         )
                     except Exception as e:
                         logger.warning(f"Failed to save hierarchical label cache: {e}")

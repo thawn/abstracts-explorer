@@ -266,6 +266,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
                             force=args.force,
                             conferences=c_conferences,
                             years=c_years,
+                            repair_default_labels=True,
                             **DEFAULT_CLUSTERING_PARAMS,
                         )
 
