@@ -13,6 +13,7 @@ from sqlalchemy import select, delete, update, func, and_
 # Import SQLAlchemy models
 from abstracts_explorer.db_models import (
     ClusteringCache,
+    FlatLabelCache,
     HierarchicalLabelCache,
 )
 
@@ -584,3 +585,212 @@ class ClusteringCacheMixin(SessionMixin):
 
         except Exception as e:
             raise self._db_error("Failed to save hierarchical label cache", e)
+
+    def upsert_hierarchical_label_cache(
+        self,
+        embedding_model: str,
+        labels: Dict[int, str],
+        linkage: str = "ward",
+        scope: Optional[str] = None,
+    ) -> None:
+        """
+        Merge hierarchical labels into the scoped cache entry.
+
+        Parameters
+        ----------
+        embedding_model : str
+            Name of the embedding model.
+        labels : dict
+            Mapping of ``{node_id: label}`` to merge.
+        linkage : str, optional
+            Agglomerative linkage method (default: ``"ward"``).
+        scope : str, optional
+            Dataset fingerprint.
+
+        Raises
+        ------
+        DatabaseError
+            If the update fails.
+        """
+        try:
+            stmt = (
+                select(HierarchicalLabelCache)
+                .where(
+                    and_(
+                        HierarchicalLabelCache.embedding_model == embedding_model,
+                        HierarchicalLabelCache.linkage == linkage,
+                    )
+                )
+                .order_by(HierarchicalLabelCache.created_at.desc())
+            )
+            entry = None
+            merged: Dict[str, str] = {}
+            for candidate in self.session.execute(stmt).scalars():
+                raw = json.loads(str(candidate.labels_json))
+                if isinstance(raw, dict) and "_labels" in raw:
+                    if raw.get("_scope") != scope:
+                        continue
+                    merged = dict(raw["_labels"])
+                    entry = candidate
+                    break
+                if scope is None:
+                    merged = dict(raw)
+                    entry = candidate
+                    break
+
+            merged.update({str(k): v for k, v in labels.items()})
+            if entry is None:
+                encoded = (
+                    json.dumps({"_scope": scope, "_labels": merged}) if scope is not None else json.dumps(merged)
+                )
+                entry = HierarchicalLabelCache(
+                    embedding_model=embedding_model,
+                    linkage=linkage,
+                    labels_json=encoded,
+                )
+                self.session.add(entry)
+            else:
+                entry.labels_json = (
+                    json.dumps({"_scope": scope, "_labels": merged}) if scope is not None else json.dumps(merged)
+                )
+            self.session.commit()
+
+        except Exception as e:
+            raise self._db_error("Failed to upsert hierarchical label cache", e)
+
+    def get_flat_label_cache(
+        self,
+        embedding_model: str,
+        scope: str,
+    ) -> Optional[Dict[int, str]]:
+        """
+        Get cached flat cluster labels for a scope.
+
+        Parameters
+        ----------
+        embedding_model : str
+            Name of the embedding model.
+        scope : str
+            Cache scope.
+
+        Returns
+        -------
+        dict or None
+            Mapping of cluster ID to label, or ``None`` when absent.
+
+        Raises
+        ------
+        DatabaseError
+            If the query fails.
+        """
+        try:
+            stmt = (
+                select(FlatLabelCache)
+                .where(
+                    and_(
+                        FlatLabelCache.embedding_model == embedding_model,
+                        FlatLabelCache.scope == scope,
+                    )
+                )
+                .order_by(FlatLabelCache.created_at.desc())
+                .limit(1)
+            )
+            entry = self.session.execute(stmt).scalars().first()
+            if entry is None:
+                return None
+            raw = json.loads(str(entry.labels_json))
+            return {int(k): v for k, v in raw.items()}
+
+        except Exception as e:
+            raise self._db_error("Failed to get flat label cache", e)
+
+    def upsert_flat_label_cache(
+        self,
+        embedding_model: str,
+        labels: Dict[int, str],
+        scope: str,
+    ) -> None:
+        """
+        Merge flat cluster labels into the scoped cache entry.
+
+        Parameters
+        ----------
+        embedding_model : str
+            Name of the embedding model.
+        labels : dict
+            Mapping of cluster ID to label.
+        scope : str
+            Cache scope.
+
+        Raises
+        ------
+        DatabaseError
+            If the update fails.
+        """
+        try:
+            stmt = (
+                select(FlatLabelCache)
+                .where(
+                    and_(
+                        FlatLabelCache.embedding_model == embedding_model,
+                        FlatLabelCache.scope == scope,
+                    )
+                )
+                .order_by(FlatLabelCache.created_at.desc())
+                .limit(1)
+            )
+            entry = self.session.execute(stmt).scalars().first()
+            merged: Dict[str, str] = {}
+            if entry is not None:
+                merged = dict(json.loads(str(entry.labels_json)))
+
+            merged.update({str(k): v for k, v in labels.items()})
+            if entry is None:
+                entry = FlatLabelCache(
+                    embedding_model=embedding_model,
+                    scope=scope,
+                    labels_json=json.dumps(merged),
+                )
+                self.session.add(entry)
+            else:
+                entry.labels_json = json.dumps(merged)
+            self.session.commit()
+
+        except Exception as e:
+            raise self._db_error("Failed to upsert flat label cache", e)
+
+    def clear_flat_label_cache(
+        self,
+        embedding_model: str,
+        scope: Optional[str] = None,
+    ) -> int:
+        """
+        Delete flat cluster label cache entries.
+
+        Parameters
+        ----------
+        embedding_model : str
+            Name of the embedding model.
+        scope : str, optional
+            When provided, delete only this scope.
+
+        Returns
+        -------
+        int
+            Number of deleted entries.
+
+        Raises
+        ------
+        DatabaseError
+            If deletion fails.
+        """
+        try:
+            conditions = [FlatLabelCache.embedding_model == embedding_model]
+            if scope is not None:
+                conditions.append(FlatLabelCache.scope == scope)
+            result = self.session.execute(delete(FlatLabelCache).where(and_(*conditions)))
+            self.session.commit()
+            return int(getattr(result, "rowcount", 0) or 0)
+
+        except Exception as e:
+            raise self._db_error("Failed to clear flat label cache", e)

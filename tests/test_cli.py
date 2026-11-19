@@ -2844,7 +2844,7 @@ class TestCLI:
             assert kw["linkage"] == "ward"
             assert kw["distance_threshold"] == 150.0
             assert kw["n_clusters"] is None
-            assert kw["repair_default_labels"] is True
+            assert kw["force_recreate_labels"] is False
             assert kw["show_progress"] is True
         mock_em.close.assert_called_once()
 
@@ -2926,6 +2926,45 @@ class TestCLI:
         assert exit_code == 0
         call_kwargs = mock_compute.call_args[1]
         assert call_kwargs["force"] is True
+
+    def test_pre_generate_clustering_force_recreate_labels(self, tmp_path, capsys, monkeypatch):
+        """Test --force-recreate-labels is forwarded and does not imply --force."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+        set_test_db(tmp_path / "test.db")
+
+        mock_results = {
+            "points": [],
+            "statistics": {"total_papers": 5, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        with (
+            patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+        ):
+            mock_em_class.return_value = Mock()
+            mock_compute.return_value = mock_results
+            mock_db_instance = Mock()
+            mock_db_instance.get_conferences.return_value = ["NeurIPS"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2024]
+            mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
+            mock_db_instance.__exit__ = Mock(return_value=False)
+            mock_db_class.return_value = mock_db_instance
+
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "clustering", "pre-generate", "--force-recreate-labels"],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        kwargs = mock_compute.call_args[1]
+        assert kwargs["force_recreate_labels"] is True
+        assert kwargs["force"] is False
 
     def test_pre_generate_clustering_requests_per_minute(self, tmp_path, capsys, monkeypatch):
         """Test pre-generate-clustering with --requests-per-minute flag."""

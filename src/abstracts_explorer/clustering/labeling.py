@@ -11,7 +11,6 @@ import numpy as np
 from tqdm import tqdm
 
 from abstracts_explorer.clustering.errors import ClusteringError
-from abstracts_explorer.clustering.label_validation import join_child_labels
 from abstracts_explorer.clustering.tfidf import compute_tfidf_keywords, fit_tfidf, keywords_from_matrix
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.llm_utils import chat_completion_text
@@ -19,6 +18,7 @@ from abstracts_explorer.llm_utils import chat_completion_text
 logger = logging.getLogger(__name__)
 
 _RETRYABLE_LLM_STATUS_CODES = frozenset({408, 409, 429, 500, 502, 503, 504})
+_TFIDF_LLM_LEVEL = 6
 
 
 @contextmanager
@@ -97,157 +97,233 @@ class LabelingMixin:
         use_llm: bool = True,
         max_keywords: int = 5,
         show_progress: bool = False,
+        existing_labels: Optional[Dict[int, str]] = None,
+        on_label: Optional[Any] = None,
     ) -> Dict[int, str]:
         """
         Generate labels for all levels of the hierarchy.
 
-        Uses a tiered approach when use_llm is True:
-        - Levels 1-3: simple fallback (concatenation) for fast processing
-        - Level 4: full keyword extraction + LLM label generation
-        - Level 5+: LLM-based parent label generation from child labels
+        Levels 1-5 use TF-IDF keywords derived from the previous hierarchy
+        level and sampled paper titles. Levels 6 and deeper use an LLM with
+        those keywords and sample titles.
 
         Parameters
         ----------
         use_llm : bool, optional
-            Whether to use LLM for label generation, by default True
+            Whether to use the LLM for levels 6 and deeper, by default True.
+            When False, those levels use TF-IDF labels like levels 1-5.
         max_keywords : int, optional
-            Maximum number of keywords to use in label generation, by default 5
+            Maximum number of keywords used for label generation, by default 5.
         show_progress : bool, optional
-            Show a progress bar for the LLM-labeled hierarchy nodes, by
-            default False
+            Show progress bars for hierarchy labeling, by default False.
+        existing_labels : dict, optional
+            Labels already generated in a previous run. Present labels are
+            skipped.
+        on_label : callable, optional
+            Called as ``on_label(node_id, label)`` for each newly generated
+            label.
 
         Returns
         -------
         Dict[int, str]
-            Dictionary mapping node IDs to labels
+            Dictionary mapping node IDs to labels.
 
         Raises
         ------
         ClusteringError
-            If hierarchy not available
+            If hierarchy or flat cluster labels are unavailable.
         """
         if self.cluster_hierarchy is None or "tree" not in self.cluster_hierarchy:
             raise ClusteringError("Cluster hierarchy not available. Use agglomerative clustering.")
-
-        # First generate labels for leaf clusters if not already done
-        if self.cluster_label_names is None:
-            self.generate_cluster_labels(
-                use_llm=use_llm,
-                max_keywords=max_keywords,
-                show_progress=show_progress,
-            )
+        if self.cluster_labels is None:
+            raise ClusteringError("No clustering performed. Call cluster() first.")
+        if not self.cluster_label_names:
+            raise ClusteringError("Flat cluster labels are missing; hierarchy labeling was skipped.")
 
         tree = self.cluster_hierarchy["tree"]
-        hierarchical_labels = {}
+        nodes: Dict[int, Dict[str, Any]] = {int(k): v for k, v in tree["nodes"].items()}
+        hierarchical_labels: Dict[int, str] = {
+            int(k): v for k, v in (existing_labels or {}).items() if isinstance(v, str) and v.strip()
+        }
 
-        # Start with leaf labels (map sample indices to cluster labels)
-        n_samples = self.cluster_hierarchy["n_samples"]
-        for i in range(n_samples):
-            if self.cluster_labels is not None:
-                cluster_id = int(self.cluster_labels[i])
-                if self.cluster_label_names and cluster_id in self.cluster_label_names:
-                    hierarchical_labels[i] = self.cluster_label_names[cluster_id]
-                else:
-                    hierarchical_labels[i] = f"Sample {i}"
+        cluster_ids = {int(label) for label in np.unique(self.cluster_labels) if label >= 0}
+        missing_flat = sorted(cluster_ids - set(self.cluster_label_names))
+        if missing_flat:
+            raise ClusteringError(
+                f"Flat cluster labels are incomplete (missing {len(missing_flat)} clusters); "
+                "hierarchy labeling was skipped."
+            )
 
-        # Create mapping from paper IDs to indices for LLM label generation
-        paper_id_to_idx = {}
-        if self.paper_ids:
-            paper_id_to_idx = {pid: idx for idx, pid in enumerate(self.paper_ids)}
+        def save_label(node_id: int, label: str) -> None:
+            hierarchical_labels[node_id] = label
+            if on_label is not None:
+                on_label(node_id, label)
 
-        # Generate labels for internal nodes bottom-up with tiered approach
-        progress_total = 0
-        if show_progress and use_llm:
-            progress_total = sum(1 for node in tree["nodes"].values() if int(node["level"]) >= 4)
+        paper_id_to_idx = {pid: idx for idx, pid in enumerate(self.paper_ids or [])}
+        id_to_cluster = {
+            pid: int(self.cluster_labels[idx])
+            for pid, idx in paper_id_to_idx.items()
+            if idx < len(self.cluster_labels)
+        }
 
+        for node_id, node in nodes.items():
+            if int(node.get("level", 0)) != 0 or hierarchical_labels.get(node_id):
+                continue
+            samples = node.get("samples") or []
+            cluster_id = id_to_cluster.get(samples[0]) if samples else None
+            label = self.cluster_label_names.get(cluster_id) if cluster_id is not None else None
+            if not label:
+                raise ClusteringError(f"Missing flat cluster label for leaf node {node_id}.")
+            save_label(node_id, label)
+
+        def missing_at_level(level: int) -> List[int]:
+            return [
+                node_id
+                for node_id, node in nodes.items()
+                if int(node.get("level", 0)) == level and not hierarchical_labels.get(node_id)
+            ]
+
+        tfidf_levels = range(1, min(5, int(tree["max_level"])) + 1)
+        tfidf_total = sum(len(missing_at_level(level)) for level in tfidf_levels)
         with _progress_bar(
-            progress_total,
-            "Labeling hierarchy",
+            tfidf_total,
+            "Labeling hierarchy (TF-IDF)",
             "node",
-            show_progress and use_llm,
+            show_progress,
         ) as progress:
-            for level in range(1, tree["max_level"] + 1):
-                for node_id, node_info in tree["nodes"].items():
-                    if node_info["level"] == level:
-                        child_labels = [
-                            hierarchical_labels.get(child, f"Node {child}") for child in node_info["children"]
-                        ]
+            for level in tfidf_levels:
+                generated = self._label_level_with_tfidf(
+                    nodes,
+                    level,
+                    hierarchical_labels,
+                    save_label,
+                    max_keywords,
+                )
+                if progress is not None and generated:
+                    progress.update(generated)
 
-                        if use_llm:
-                            # Tiered approach based on level
-                            if level <= 3:
-                                # Levels 0-3: Use simple fallback (fast)
-                                hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
-                                logger.debug(f"Level {level} node {node_id}: Using fallback")
-                            elif level == 4:
-                                # Level 4: Use full cluster label generation with keywords
-                                try:
-                                    if self.embeddings_manager and self.metadatas:
-                                        keywords = self._extract_keywords_for_samples(
-                                            node_info["samples"], max_keywords
-                                        )
-                                        if keywords:
-                                            label = self._generate_llm_label_from_keywords(keywords)
-                                            hierarchical_labels[node_id] = label
-                                            logger.debug(
-                                                f"Level {level} node {node_id}: "
-                                                f"Generated LLM label from keywords {keywords}"
-                                            )
-                                        else:
-                                            hierarchical_labels[node_id] = self._generate_parent_label_fallback(
-                                                child_labels
-                                            )
-                                    else:
-                                        hierarchical_labels[node_id] = self._generate_parent_label_fallback(
-                                            child_labels
-                                        )
-                                except Exception as e:
-                                    logger.warning(f"Keyword-based label generation failed for node {node_id}: {e}")
-                                    hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
-                            else:
-                                # Levels 5+: Use LLM-based parent label generation
-                                if self.embeddings_manager:
-                                    try:
-                                        # Convert paper IDs to indices for metadata lookup
-                                        sample_indices = [
-                                            paper_id_to_idx[pid]
-                                            for pid in node_info["samples"]
-                                            if pid in paper_id_to_idx
-                                        ]
-                                        label = self._generate_parent_label_llm(child_labels, sample_indices)
-                                        hierarchical_labels[node_id] = label
-                                        logger.debug(f"Level {level} node {node_id}: Generated LLM parent label")
-                                    except Exception as e:
-                                        logger.warning(f"LLM label generation failed for node {node_id}: {e}")
-                                        hierarchical_labels[node_id] = self._generate_parent_label_fallback(
-                                            child_labels
-                                        )
-                                else:
-                                    hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
-                        else:
-                            # LLM disabled: always use fallback
-                            hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
-
-                        if progress is not None and level >= 4:
-                            progress.update(1)
+        deep_levels = range(_TFIDF_LLM_LEVEL, int(tree["max_level"]) + 1)
+        deep_total = sum(len(missing_at_level(level)) for level in deep_levels)
+        deep_desc = "Labeling hierarchy (LLM)" if use_llm else "Labeling hierarchy (deep)"
+        with _progress_bar(deep_total, deep_desc, "node", show_progress) as progress:
+            for level in deep_levels:
+                if use_llm:
+                    generated = self._label_level_with_llm(
+                        nodes,
+                        level,
+                        hierarchical_labels,
+                        save_label,
+                        paper_id_to_idx,
+                        max_keywords,
+                    )
+                else:
+                    generated = self._label_level_with_tfidf(
+                        nodes,
+                        level,
+                        hierarchical_labels,
+                        save_label,
+                        max_keywords,
+                    )
+                if progress is not None and generated:
+                    progress.update(generated)
 
         return hierarchical_labels
 
+    def _node_document(self, node: Dict[str, Any], child_labels: List[str], sample_indices: List[int]) -> str:
+        """Build the TF-IDF input document for a hierarchy node."""
+        labels = list(dict.fromkeys(label for label in child_labels if label))
+        titles = self._sample_titles(sample_indices)
+        return " ".join(labels + titles)
+
+    def _level_tfidf_keywords(
+        self,
+        nodes: Dict[int, Dict[str, Any]],
+        level: int,
+        labels: Dict[int, str],
+        max_keywords: int,
+    ) -> Dict[int, List[str]]:
+        """Compute TF-IDF keywords for missing nodes at one hierarchy level."""
+        paper_id_to_idx = {pid: idx for idx, pid in enumerate(self.paper_ids or [])}
+        node_ids: List[int] = []
+        documents: List[str] = []
+        child_labels_by_node: Dict[int, List[str]] = {}
+
+        for node_id, node in nodes.items():
+            if int(node.get("level", 0)) != level or labels.get(node_id):
+                continue
+            child_labels = [labels.get(int(child), "") for child in node.get("children", [])]
+            child_labels_by_node[node_id] = child_labels
+            sample_indices = [paper_id_to_idx[pid] for pid in (node.get("samples") or []) if pid in paper_id_to_idx]
+            node_ids.append(node_id)
+            documents.append(self._node_document(node, child_labels, sample_indices))
+
+        if not node_ids:
+            return {}
+
+        keywords_by_node: Dict[int, List[str]] = {}
+        valid_positions = [i for i, doc in enumerate(documents) if doc.strip()]
+        if not valid_positions:
+            return {node_id: [] for node_id in node_ids}
+
+        valid_documents = [documents[i] for i in valid_positions]
+        try:
+            matrix, feature_names = fit_tfidf(valid_documents, min_df=1)
+        except Exception as e:
+            logger.warning("Failed to compute hierarchy TF-IDF for level %s: %s", level, e)
+            return {node_id: [] for node_id in node_ids}
+
+        for position, doc_index in enumerate(valid_positions):
+            keywords = keywords_from_matrix(matrix, feature_names, [position], max_keywords)
+            keywords_by_node[node_ids[doc_index]] = keywords
+
+        for node_id in node_ids:
+            keywords_by_node.setdefault(node_id, [])
+        return keywords_by_node
+
+    def _label_level_with_tfidf(
+        self,
+        nodes: Dict[int, Dict[str, Any]],
+        level: int,
+        labels: Dict[int, str],
+        save_label: Any,
+        max_keywords: int,
+    ) -> int:
+        """Label missing nodes at one level using TF-IDF keywords."""
+        keywords_by_node = self._level_tfidf_keywords(nodes, level, labels, max_keywords)
+        generated = 0
+        for node_id, keywords in keywords_by_node.items():
+            child_labels = [labels.get(int(child), "") for child in nodes[node_id].get("children", [])]
+            label = ", ".join(keywords[:3]) if keywords else self._generate_parent_label_fallback(child_labels)
+            save_label(node_id, label)
+            generated += 1
+        return generated
+
+    def _label_level_with_llm(
+        self,
+        nodes: Dict[int, Dict[str, Any]],
+        level: int,
+        labels: Dict[int, str],
+        save_label: Any,
+        paper_id_to_idx: Dict[str, int],
+        max_keywords: int,
+    ) -> int:
+        """Label missing nodes at one level using the LLM."""
+        keywords_by_node = self._level_tfidf_keywords(nodes, level, labels, max_keywords)
+        generated = 0
+        for node_id, keywords in keywords_by_node.items():
+            node = nodes[node_id]
+            sample_indices = [paper_id_to_idx[pid] for pid in (node.get("samples") or []) if pid in paper_id_to_idx]
+            try:
+                label = self._generate_parent_label_llm(keywords, sample_indices)
+            except Exception as e:
+                raise ClusteringError(f"Failed to generate hierarchy label for node {node_id}: {e}") from e
+            save_label(node_id, label)
+            generated += 1
+        return generated
+
     def _llm_chat_label(self, system_prompt: str, user_prompt: str, max_tokens: int = 200) -> str:
         """
-        Shared code path for one-shot LLM cluster-label generation.
-
-        Uses ``config.cluster_label_model`` (default ``alias-fast``) for the
-        call.  The back-end chat models are *reasoning* models that emit a
-        hidden reasoning block before the short 3-5 word label.  We pass
-        ``reasoning_effort="low"`` to suppress that block where the back-end
-        supports it (GPT-OSS-120B does; Qwen3.8 ignores the param and always
-        reasons ~140-150 tokens).  ``max_tokens`` therefore stays at 200 as a
-        safety net: with ``reasoning_effort="low"`` only ~10-20 tokens are
-        needed, but the Qwen fallback path still needs the full budget
-        (default 200) or ``message.content`` comes back ``None`` with
-        ``finish_reason="length"``.  Transient failures are retried with
-        exponential backoff before callers fall back to a static label.
+        Make one retried LLM call for cluster-label generation.
 
         Parameters
         ----------
@@ -256,21 +332,17 @@ class LabelingMixin:
         user_prompt : str
             User message for the LLM.
         max_tokens : int
-            Maximum tokens to generate (default 200).  With
-            ``reasoning_effort="low"`` only a handful of tokens are used;
-            the budget exists to absorb reasons from models where the param
-            is a no-op.
+            Maximum tokens to generate (default 200).
 
         Returns
         -------
         str
-            The model's response, stripped of surrounding whitespace and
-            any enclosing single/double quotes.
+            The model's response, stripped of surrounding whitespace and quotes.
 
         Raises
         ------
         AttributeError
-            If the OpenAI client is not available on the embeddings manager.
+            If the OpenAI client is not available.
         ValueError
             If the model returns no text content after all attempts.
         """
@@ -295,10 +367,6 @@ class LabelingMixin:
                     temperature=0.3,
                     max_tokens=max_tokens,
                     timeout=config.llm_request_timeout,
-                    # Suppress the hidden reasoning block on GPT-OSS-120B so the
-                    # ~5-token label fits comfortably.  Qwen3.8 ignores this param
-                    # (its reasoning is controlled by enable_thinking, which the
-                    # deployment does not honor) and falls back on max_tokens.
                     reasoning_effort="low",
                 )
 
@@ -326,99 +394,102 @@ class LabelingMixin:
     def _call_llm_for_label(
         self,
         prompt: str,
-        fallback: str,
         system_prompt: str = "You are a research paper categorization expert.",
     ) -> str:
         """
-        Generate a label with the LLM, falling back to a static label on failure.
+        Generate a label with the LLM, propagating failures.
 
         Parameters
         ----------
         prompt : str
             User message containing the labeling instructions.
-        fallback : str
-            Label to return if the LLM call fails or returns no content.
         system_prompt : str, optional
-            System message for the LLM, by default
-            ``"You are a research paper categorization expert."``
+            System message for the LLM.
 
         Returns
         -------
         str
-            LLM-generated label, or ``fallback`` when generation fails.
+            LLM-generated label.
         """
-        try:
-            return self._llm_chat_label(system_prompt, prompt)
-        except Exception as e:
-            logger.warning(f"LLM API call failed: {e}")
-            return fallback
+        return self._llm_chat_label(system_prompt, prompt)
 
-    def _generate_parent_label_llm(self, child_labels: List[str], sample_indices: List[int]) -> str:
+    def _sample_titles(self, sample_indices: List[int], max_titles: int = 5) -> List[str]:
+        """Return up to ``max_titles`` deterministic sample titles."""
+        if not self.metadatas or not sample_indices:
+            return []
+
+        count = min(max_titles, len(sample_indices))
+        if len(sample_indices) <= count:
+            selected = sample_indices
+        else:
+            step = len(sample_indices) / count
+            selected = [sample_indices[int(i * step)] for i in range(count)]
+
+        titles: List[str] = []
+        for idx in selected:
+            title = self.metadatas[idx].get("title", "")
+            if title:
+                titles.append(title)
+        return titles
+
+    def _generate_parent_label_llm(self, keywords: List[str], sample_indices: List[int]) -> str:
         """
-        Generate a parent cluster label by summarizing child labels using LLM.
+        Generate a parent cluster label from keywords and example papers.
 
         Parameters
         ----------
-        child_labels : List[str]
-            Labels of child clusters
+        keywords : List[str]
+            Keywords derived from the previous hierarchy level and examples.
         sample_indices : List[int]
-            Indices of samples in this parent cluster
+            Indices of samples in this parent cluster.
 
         Returns
         -------
         str
-            Generated parent label
+            Generated parent label.
         """
-        # Get sample titles from the parent cluster
-        sample_titles = []
-        if self.metadatas and len(sample_indices) > 0:
-            sample_size = min(5, len(sample_indices))
-            sampled_indices = np.random.choice(sample_indices, size=sample_size, replace=False)
-            for idx in sampled_indices:
-                title = self.metadatas[idx].get("title", "")
-                if title:
-                    sample_titles.append(title)
-
+        sample_titles = self._sample_titles(sample_indices)
         sample_titles_str = "\n".join(f"- {title}" for title in sample_titles) if sample_titles else "N/A"
-        child_labels_str = "\n".join(f"- {label}" for label in set(child_labels))
+        keywords_str = ", ".join(keywords[:5]) if keywords else "N/A"
 
-        prompt = f"""Given a parent cluster that contains the following sub-clusters:
+        prompt = f"""Given a parent cluster with the following keywords derived from its sub-clusters:
 
-{child_labels_str}
+{keywords_str}
 
 Sample paper titles from this parent cluster:
 {sample_titles_str}
 
 Generate a concise, descriptive label (3-5 words) that captures the overarching theme of this parent cluster.
-The label should generalize the themes of the child clusters.
 Only respond with the label, nothing else. Do not add formatting."""
         logger.debug(f"Generating LLM parent label with prompt: {prompt}")
 
         return self._call_llm_for_label(
             prompt,
-            self._generate_parent_label_fallback(child_labels),
             system_prompt=(
                 "You are a research paper categorization expert. "
-                "Generate concise labels that generalize child cluster themes."
+                "Generate concise labels that generalize the parent cluster theme."
             ),
         )
 
     def _generate_parent_label_fallback(self, child_labels: List[str]) -> str:
         """
-        Generate a parent label by combining child labels (fallback method).
+        Generate a parent label by combining child labels.
 
         Parameters
         ----------
         child_labels : List[str]
-            Labels of child clusters
+            Labels of child clusters.
 
         Returns
         -------
         str
-            Generated parent label
+            Generated parent label.
         """
-        # Split each label by "&", flatten, deduplicate, and rejoin
-        label = join_child_labels(child_labels)
+        labels: List[str] = []
+        for label in child_labels[:3]:
+            labels += label.split(" & ")
+        unique_labels = list(dict.fromkeys(labels))
+        label = " & ".join(unique_labels[:3])
         logger.debug(f"Generated fallback parent label: {label}")
         return label
 
@@ -429,19 +500,18 @@ Only respond with the label, nothing else. Do not add formatting."""
         Parameters
         ----------
         sample_paper_ids : List[str]
-            List of paper IDs
+            List of paper IDs.
         max_keywords : int, optional
-            Maximum number of keywords to extract
+            Maximum number of keywords to extract.
 
         Returns
         -------
         List[str]
-            List of extracted keywords
+            List of extracted keywords.
         """
         if not self.metadatas or not self.paper_ids:
             return []
 
-        # Find indices for the given paper IDs
         paper_id_to_idx = {pid: idx for idx, pid in enumerate(self.paper_ids)}
         sample_indices = [paper_id_to_idx[paper_id] for paper_id in sample_paper_ids if paper_id in paper_id_to_idx]
 
@@ -459,12 +529,12 @@ Only respond with the label, nothing else. Do not add formatting."""
         Parameters
         ----------
         keywords : List[str]
-            List of keywords
+            List of keywords.
 
         Returns
         -------
         str
-            Generated label
+            Generated label.
         """
         keywords_str = ", ".join(keywords[:5])
         prompt = f"""Given these keywords from academic papers: {keywords_str}
@@ -472,11 +542,7 @@ Only respond with the label, nothing else. Do not add formatting."""
 Generate a concise, descriptive label (3-5 words) that captures the main theme.
 Only respond with the label, nothing else. Do not add formatting."""
 
-        return self._call_llm_for_label(
-            prompt,
-            ", ".join(keywords[:3]),
-            system_prompt="You are a research paper categorization expert.",
-        )
+        return self._call_llm_for_label(prompt)
 
     def extract_cluster_keywords(
         self,
@@ -489,27 +555,19 @@ Only respond with the label, nothing else. Do not add formatting."""
         Parameters
         ----------
         n_keywords : int, optional
-            Number of top keywords to extract per cluster, by default 10
+            Number of top keywords to extract per cluster, by default 10.
         min_df : int, optional
-            Minimum document frequency for a term to be considered, by default 2
+            Minimum document frequency for a term to be considered, by default 2.
 
         Returns
         -------
         Dict[int, List[str]]
-            Dictionary mapping cluster labels to lists of keywords
+            Dictionary mapping cluster labels to lists of keywords.
 
         Raises
         ------
         ClusteringError
-            If clustering has not been performed or metadata is missing
-
-        Examples
-        --------
-        >>> cm = ClusteringManager(em)
-        >>> cm.load_embeddings()
-        >>> cm.cluster(n_clusters=5)
-        >>> keywords = cm.extract_cluster_keywords(n_keywords=10)
-        >>> print(f"Cluster 0 keywords: {keywords[0]}")
+            If clustering has not been performed or metadata is missing.
         """
         if self.cluster_labels is None:
             raise ClusteringError("No clustering performed. Call cluster() first.")
@@ -517,7 +575,6 @@ Only respond with the label, nothing else. Do not add formatting."""
             raise ClusteringError("No metadata available.")
 
         try:
-            # Get unique cluster labels (excluding noise)
             unique_labels = np.unique(self.cluster_labels)
             cluster_ids = [int(label) for label in unique_labels if label >= 0]
 
@@ -549,134 +606,127 @@ Only respond with the label, nothing else. Do not add formatting."""
         use_llm: bool = True,
         max_keywords: int = 5,
         show_progress: bool = False,
+        existing_labels: Optional[Dict[int, str]] = None,
+        on_label: Optional[Any] = None,
     ) -> Dict[int, str]:
         """
-        Generate descriptive labels for clusters.
+        Generate descriptive labels for flat clusters.
 
-        This method can either use an LLM to generate meaningful labels based on
-        cluster keywords and representative papers, or simply concatenate keywords.
+        LLM failures are non-fatal: the affected label is left missing so a
+        later run can retry it. Labels already present in ``existing_labels``
+        are skipped.
 
         Parameters
         ----------
         use_llm : bool, optional
-            Whether to use LLM for label generation, by default True
+            Whether to use an LLM for label generation, by default True.
         max_keywords : int, optional
-            Maximum number of keywords to use in label generation, by default 5
+            Maximum number of keywords to use, by default 5.
         show_progress : bool, optional
-            Show a progress bar while labeling clusters, by default False
+            Show a progress bar while labeling clusters, by default False.
+        existing_labels : dict, optional
+            Labels generated in a previous run.
+        on_label : callable, optional
+            Called as ``on_label(cluster_id, label)`` for each new label.
 
         Returns
         -------
         Dict[int, str]
-            Dictionary mapping cluster labels to descriptive names
+            Dictionary mapping cluster IDs to labels. Failed clusters are
+            absent.
 
         Raises
         ------
         ClusteringError
-            If clustering or keyword extraction has not been performed
-
-        Examples
-        --------
-        >>> cm = ClusteringManager(em)
-        >>> cm.load_embeddings()
-        >>> cm.cluster(n_clusters=5)
-        >>> cm.extract_cluster_keywords()
-        >>> labels = cm.generate_cluster_labels(use_llm=True)
-        >>> print(f"Cluster 0 label: {labels[0]}")
+            If clustering or keyword extraction is unavailable.
         """
         if self.cluster_labels is None:
             raise ClusteringError("No clustering performed. Call cluster() first.")
 
-        # Extract keywords if not already done
         if self.cluster_keywords is None:
             logger.info("Extracting cluster keywords first...")
             self.extract_cluster_keywords()
 
-        try:
-            self.cluster_label_names = {}
-            unique_labels = np.unique(self.cluster_labels)
-            cluster_ids = [int(label) for label in unique_labels if label >= 0]
+        unique_labels = np.unique(self.cluster_labels)
+        cluster_ids = [int(label) for label in unique_labels if label >= 0]
+        self.cluster_label_names = {
+            int(k): v for k, v in (existing_labels or {}).items() if isinstance(v, str) and v.strip()
+        }
 
-            with _progress_bar(
-                len(cluster_ids),
-                "Labeling clusters",
-                "cluster",
-                show_progress,
-            ) as progress:
-                for cluster_id in cluster_ids:
-                    keywords = (self.cluster_keywords or {}).get(cluster_id, [])[:max_keywords]
+        missing = [cluster_id for cluster_id in cluster_ids if not self.cluster_label_names.get(cluster_id)]
+        failed: List[int] = []
+        with _progress_bar(len(missing), "Labeling clusters", "cluster", show_progress) as progress:
+            for cluster_id in missing:
+                keywords = (self.cluster_keywords or {}).get(cluster_id, [])[:max_keywords]
 
-                    if not keywords:
-                        self.cluster_label_names[cluster_id] = f"Cluster {cluster_id}"
-                    elif use_llm and self.embeddings_manager:
-                        try:
-                            # Generate label using LLM
-                            label = self._generate_llm_label(cluster_id, keywords)
-                            self.cluster_label_names[cluster_id] = label
-                        except Exception as e:
-                            logger.warning(f"LLM label generation failed for cluster {cluster_id}: {e}")
-                            # Fallback to keyword-based label
-                            self.cluster_label_names[cluster_id] = ", ".join(keywords[:3])
+                if use_llm and self.embeddings_manager:
+                    try:
+                        label = self._generate_llm_label(cluster_id, keywords)
+                    except Exception as e:
+                        logger.warning(f"LLM label generation failed for cluster {cluster_id}: {e}")
+                        failed.append(cluster_id)
                     else:
-                        # Use keyword-based label
-                        self.cluster_label_names[cluster_id] = ", ".join(keywords[:3])
+                        self.cluster_label_names[cluster_id] = label
+                        if on_label is not None:
+                            on_label(cluster_id, label)
+                elif keywords:
+                    label = ", ".join(keywords[:3])
+                    self.cluster_label_names[cluster_id] = label
+                    if on_label is not None:
+                        on_label(cluster_id, label)
+                else:
+                    logger.warning(f"No keywords available for cluster {cluster_id}; label left missing")
+                    failed.append(cluster_id)
 
-                    if progress is not None:
-                        progress.update(1)
+                if progress is not None:
+                    progress.update(1)
 
-            logger.info(f"Generated labels for {len(self.cluster_label_names)} clusters")
-            return self.cluster_label_names
+        if failed:
+            logger.warning(
+                "Flat labeling incomplete: %d of %d clusters failed (%s)",
+                len(failed),
+                len(cluster_ids),
+                ", ".join(str(cluster_id) for cluster_id in failed[:10]),
+            )
 
-        except Exception as e:
-            raise ClusteringError(f"Failed to generate cluster labels: {str(e)}") from e
+        logger.info(f"Generated labels for {len(self.cluster_label_names)} clusters")
+        return self.cluster_label_names
 
     def _generate_llm_label(self, cluster_id: int, keywords: List[str]) -> str:
         """
-        Generate a cluster label using LLM.
+        Generate a cluster label using the LLM.
 
         Parameters
         ----------
         cluster_id : int
-            Cluster identifier
+            Cluster identifier.
         keywords : List[str]
-            List of keywords for the cluster
+            Keywords for the cluster; may be empty, in which case example
+            paper titles are used.
 
         Returns
         -------
         str
-            Generated label
+            Generated label.
         """
-        # Get a few representative paper titles from the cluster
         assert self.cluster_labels is not None
         cluster_indices = np.where(self.cluster_labels == cluster_id)[0]
-        sample_size = min(5, len(cluster_indices))
+        sample_titles = self._sample_titles(cluster_indices.tolist())
+        sample_titles_str = "\n".join(f"- {title}" for title in sample_titles) if sample_titles else "N/A"
+        keywords_str = ", ".join(keywords) if keywords else "N/A"
 
-        # Use replacement if there are fewer papers than sample size
-        replace = len(cluster_indices) < sample_size
-        sample_indices = np.random.choice(cluster_indices, size=sample_size, replace=replace)
-
-        sample_titles = []
-        if self.metadatas:
-            for idx in sample_indices:
-                title = self.metadatas[idx].get("title", "")
-                if title:
-                    sample_titles.append(title)
-
-        # Construct prompt for LLM
-        sample_titles_str = "\n".join(f"- {title}" for title in sample_titles)
         prompt = f"""Given a cluster of research papers with the following characteristics:
 
-Top keywords: {', '.join(keywords)}
+Top keywords: {keywords_str}
 
 Sample paper titles:
 {sample_titles_str}
 
-        Generate a concise, descriptive label (3-5 words) that captures the main theme of this cluster.
+Generate a concise, descriptive label (3-5 words) that captures the main theme of this cluster.
 Only respond with the label, nothing else. Do not add formatting."""
 
         return self._call_llm_for_label(
             prompt,
-            ", ".join(keywords[:3]),
             system_prompt=(
                 "You are a research paper categorization expert. "
                 "Generate concise, descriptive labels for clusters of papers."

@@ -272,21 +272,21 @@ the web UI serves them instantly.
 - With `--conference` and `--year`: generates for that specific
   conference/year only.
 
-Re-running `pre-generate` is safe and idempotent: if cached cluster or
-hierarchy labels are fallback values from an earlier LLM failure (for example
-`Cluster 3` or keyword-only labels), they are regenerated automatically.
-Healthy cached labels are reused without additional LLM calls. This repair
-only runs in the CLI pre-generation path; the web UI and MCP server continue
-to use the cache as-is.
+Re-running `pre-generate` resumes missing labels. Existing non-empty labels
+are skipped and no stale-label checks are performed. If flat cluster labels
+remain missing after the flat phase, hierarchy labeling is skipped and the
+command exits non-zero; rerun to retry the missing flat labels. Hierarchy
+LLM failures at levels 6+ abort labeling, but already generated labels are
+persisted for the next run.
 
-For each conference/year combination, labeling shows `Labeling clusters` and
-`Labeling hierarchy` progress bars. `pre-process` inherits the same progress
-output.
+Flat labels use `Labeling clusters`. Hierarchy labeling shows
+`Labeling hierarchy (TF-IDF)` for levels 1-5 and `Labeling hierarchy (LLM)`
+for levels 6+. `pre-process` inherits the same behavior.
 
 ```text
 usage: abstracts-explorer clustering pre-generate [-h] [--collection COLLECTION]
                                                   [--conference CONFERENCE] [--year YEAR]
-                                                  [--force]
+                                                  [--force] [--force-recreate-labels]
                                                   [--requests-per-minute REQUESTS_PER_MINUTE]
 ```
 
@@ -294,7 +294,8 @@ usage: abstracts-explorer clustering pre-generate [-h] [--collection COLLECTION]
 | ------ | ----------- |
 | `--collection COLLECTION` | Name of the ChromaDB collection (default: `papers`) |
 | `--conference CONFERENCE` / `--year YEAR` | Scope the pre-generation. |
-| `--force` | Force recompute even if cache already exists |
+| `--force` | Force clustering recomputation |
+| `--force-recreate-labels` | Regenerate flat and hierarchy labels while reusing cached clustering |
 | `--requests-per-minute REQUESTS_PER_MINUTE` | Max API requests per minute (default: 60) |
 
 **Examples:**
@@ -377,7 +378,8 @@ worker.
 
 ```text
 usage: abstracts-explorer pre-process [-h] [--conference CONFERENCE] [--year YEAR]
-                                      [--force] [--no-overlap-post-process]
+                                      [--force] [--force-recreate-labels]
+                                      [--no-overlap-post-process]
                                       [--collection COLLECTION] [--backend-url BACKEND_URL]
                                       [--model MODEL] [--requests-per-minute REQUESTS_PER_MINUTE]
                                       [--ignore-embedding-model-mismatch]
@@ -387,6 +389,7 @@ usage: abstracts-explorer pre-process [-h] [--conference CONFERENCE] [--year YEA
 | ------ | ----------- |
 | `--conference CONFERENCE` / `--year YEAR` | Filters forwarded to all steps. |
 | `--force` | Force re-download and reset embeddings/clustering |
+| `--force-recreate-labels` | Regenerate cluster labels while reusing cached clustering |
 | `--no-overlap-post-process` | Run embeddings and clustering in a single worker |
 | `--collection COLLECTION` | Name for the ChromaDB collection (default: `papers`) |
 | `--backend-url BACKEND_URL` | URL for OpenAI-compatible API |
@@ -405,6 +408,9 @@ abstracts-explorer pre-process --conference neurips
 
 # Re-process, overwriting existing data
 abstracts-explorer pre-process --conference neurips --force
+
+# Regenerate cluster labels without re-clustering
+abstracts-explorer pre-process --force-recreate-labels
 
 # Recreate embeddings after switching embedding models
 abstracts-explorer pre-process --ignore-embedding-model-mismatch --model my-new-model

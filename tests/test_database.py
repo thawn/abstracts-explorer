@@ -1657,6 +1657,45 @@ class TestClusteringCache:
             scope="dataset-b",
         ) == {0: "Scope B"}
 
+    def test_upsert_hierarchical_label_cache_merges_labels(self, connected_db):
+        """Upserting hierarchy labels merges into one scoped row."""
+        connected_db.upsert_hierarchical_label_cache(
+            embedding_model="test-model",
+            labels={0: "A"},
+            linkage="ward",
+            scope="scope-a",
+        )
+        connected_db.upsert_hierarchical_label_cache(
+            embedding_model="test-model",
+            labels={1: "B"},
+            linkage="ward",
+            scope="scope-a",
+        )
+
+        cached = connected_db.get_hierarchical_label_cache(
+            embedding_model="test-model",
+            linkage="ward",
+            scope="scope-a",
+        )
+        assert cached == {0: "A", 1: "B"}
+        rows = raw_query(connected_db, "SELECT COUNT(*) AS count FROM hierarchical_label_cache")
+        assert rows[0]["count"] == 1
+
+    def test_flat_label_cache_upsert_and_clear(self, connected_db):
+        """Flat labels can be upserted per scope and cleared selectively."""
+        connected_db.upsert_flat_label_cache("test-model", {0: "Label A"}, "scope-a")
+        connected_db.upsert_flat_label_cache("test-model", {1: "Label B"}, "scope-a")
+        connected_db.upsert_flat_label_cache("test-model", {0: "Other"}, "scope-b")
+
+        assert connected_db.get_flat_label_cache("test-model", "scope-a") == {0: "Label A", 1: "Label B"}
+        assert connected_db.get_flat_label_cache("test-model", "scope-b") == {0: "Other"}
+
+        deleted = connected_db.clear_flat_label_cache("test-model", "scope-a")
+
+        assert deleted == 1
+        assert connected_db.get_flat_label_cache("test-model", "scope-a") is None
+        assert connected_db.get_flat_label_cache("test-model", "scope-b") == {0: "Other"}
+
 
 class TestValidationData:
     """Tests for validation data donation functionality."""

@@ -487,6 +487,9 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
 
       # Force recompute
       abstracts-explorer clustering pre-generate --force
+
+      # Regenerate labels without re-clustering
+      abstracts-explorer clustering pre-generate --force-recreate-labels
         """,
     )
     pre_gen_parser.add_argument(
@@ -501,6 +504,12 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         action="store_true",
         default=False,
         help="Force recompute even if cache already exists",
+    )
+    pre_gen_parser.add_argument(
+        "--force-recreate-labels",
+        action="store_true",
+        default=False,
+        help="Regenerate all flat and hierarchy labels while reusing cached clustering",
     )
     pre_gen_parser.add_argument(
         "--requests-per-minute",
@@ -1162,6 +1171,9 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
       # Recreate embeddings after switching embedding models, without prompting
       abstracts-explorer pre-process --ignore-embedding-model-mismatch --model my-new-model
 
+      # Regenerate labels without re-clustering
+      abstracts-explorer pre-process --force-recreate-labels
+
       # Do not overlap embeddings and clustering
       abstracts-explorer pre-process --no-overlap-post-process
         """,
@@ -1171,6 +1183,11 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         "--force",
         action="store_true",
         help="Force re-download and reset embeddings/clustering even if they already exist",
+    )
+    pre_process_parser.add_argument(
+        "--force-recreate-labels",
+        action="store_true",
+        help="Regenerate all cluster labels while reusing cached clustering",
     )
     pre_process_parser.add_argument(
         "--no-overlap-post-process",

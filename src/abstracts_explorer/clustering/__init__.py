@@ -18,13 +18,18 @@ from abstracts_explorer.clustering.constants import (
 )
 from abstracts_explorer.clustering.errors import ClusteringError
 from abstracts_explorer.clustering.manager import ClusteringManager
-from abstracts_explorer.clustering.pipeline import compute_clusters_with_cache, perform_clustering
+from abstracts_explorer.clustering.pipeline import (
+    compute_clusters_with_cache,
+    perform_clustering,
+    results_have_complete_flat_labels,
+)
 
 __all__ = [
     "ClusteringManager",
     "ClusteringError",
     "perform_clustering",
     "compute_clusters_with_cache",
+    "results_have_complete_flat_labels",
     "calculate_default_clusters",
     "DEFAULT_CLUSTERING_METHOD",
     "DEFAULT_REDUCTION_METHOD",

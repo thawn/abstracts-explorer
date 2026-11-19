@@ -253,6 +253,42 @@ class HierarchicalLabelCache(Base):
         return f"<HierarchicalLabelCache(id={self.id}, model='{self.embedding_model}', linkage='{self.linkage}')>"
 
 
+class FlatLabelCache(Base):
+    """
+    Flat cluster label cache model.
+
+    Stores labels for flat clusters so interrupted labeling runs can resume.
+    The cache is keyed by embedding model and a scope string that includes the
+    dataset fingerprint and clustering parameters.
+
+    Attributes
+    ----------
+    id : int
+        Auto-incrementing primary key.
+    embedding_model : str
+        Name of the embedding model used.
+    scope : str
+        Cache scope including collection, conference, year, linkage,
+        dataset fingerprint, and clustering parameters.
+    labels_json : str
+        JSON string mapping cluster IDs to labels.
+    created_at : datetime
+        Timestamp when the cache entry was created.
+    """
+
+    __tablename__ = "flat_label_cache"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    embedding_model = Column(String, nullable=False, index=True)
+    scope = Column(String, nullable=False, index=True)
+    labels_json = Column(Text, nullable=False)
+    created_at = timestamp_column()
+
+    def __repr__(self) -> str:
+        """String representation of FlatLabelCache."""
+        return f"<FlatLabelCache(id={self.id}, model='{self.embedding_model}', scope='{self.scope}')>"
+
+
 class ValidationData(Base):
     """
     Validation data model.

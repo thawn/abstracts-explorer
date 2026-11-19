@@ -11,11 +11,6 @@ from abstracts_explorer.clustering import (
     ClusteringError,
     calculate_default_clusters,
 )
-from abstracts_explorer.clustering.label_validation import (
-    find_default_cluster_labels,
-    find_default_hierarchy_labels,
-    is_default_label,
-)
 from abstracts_explorer.clustering.pipeline import compute_clusters_with_cache
 from abstracts_explorer.clustering.tfidf import compute_tfidf_keywords as _compute_tfidf_keywords
 
@@ -462,21 +457,20 @@ class TestClusterLabeling:
         mock_embeddings_manager.openai_client = mock_openai_client
 
         cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        result = cm._call_llm_for_label("user prompt", "fallback label")
+        result = cm._call_llm_for_label("user prompt")
 
         assert result == "Generated Label"
 
-    def test_call_llm_for_label_returns_fallback_on_error(self, mock_embeddings_manager, mocker, mock_database):
-        """_call_llm_for_label returns the fallback when the LLM call fails."""
+    def test_call_llm_for_label_raises_on_error(self, mock_embeddings_manager, mocker, mock_database):
+        """_call_llm_for_label propagates LLM failures."""
         mocker.patch("abstracts_explorer.clustering.labeling.time.sleep")
         mock_openai_client = mocker.MagicMock()
         mock_openai_client.chat.completions.create.side_effect = RuntimeError("API down")
         mock_embeddings_manager.openai_client = mock_openai_client
 
         cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        result = cm._call_llm_for_label("user prompt", "fallback label")
-
-        assert result == "fallback label"
+        with pytest.raises(RuntimeError, match="API down"):
+            cm._call_llm_for_label("user prompt")
 
     def test_llm_chat_label_retries_transient_failure(self, mock_embeddings_manager, mocker, mock_database):
         """Transient failures are retried before returning a label."""
@@ -561,22 +555,21 @@ class TestClusterLabeling:
         result = cm._generate_llm_label_from_keywords(["machine", "learning", "neural"])
 
         assert result == "Keyword Label"
-        call_args = helper.call_args.args
-        assert "machine, learning, neural" in call_args[0]
-        assert call_args[1] == "machine, learning, neural"
+        assert "machine, learning, neural" in helper.call_args.args[0]
 
-    def test_generate_parent_label_llm_uses_shared_helper(self, mock_embeddings_manager, mocker, mock_database):
-        """_generate_parent_label_llm delegates to _call_llm_for_label."""
+    def test_generate_parent_label_llm_uses_keywords_and_examples(
+        self, mock_embeddings_manager, mocker, mock_database
+    ):
+        """_generate_parent_label_llm prompts with keywords and example papers."""
         cm = ClusteringManager(mock_embeddings_manager, mock_database)
         helper = mocker.patch.object(cm, "_call_llm_for_label", return_value="Parent Label")
-        child_labels = ["Machine Learning", "Deep Learning"]
 
-        result = cm._generate_parent_label_llm(child_labels, [])
+        result = cm._generate_parent_label_llm(["Machine Learning", "Deep Learning"], [])
 
         assert result == "Parent Label"
-        call_args = helper.call_args.args
-        assert call_args[0]
-        assert call_args[1] == cm._generate_parent_label_fallback(child_labels)
+        prompt = helper.call_args.args[0]
+        assert "Machine Learning, Deep Learning" in prompt
+        assert "Sample paper titles" in prompt
 
     def test_generate_llm_label_uses_shared_helper(
         self, mock_embeddings_manager, mock_collection_with_data, mocker, mock_database
@@ -591,20 +584,16 @@ class TestClusterLabeling:
         result = cm._generate_llm_label(0, ["machine", "learning"])
 
         assert result == "Cluster Label"
-        call_args = helper.call_args.args
-        assert "machine, learning" in call_args[0]
-        assert call_args[1] == "machine, learning"
+        assert "machine, learning" in helper.call_args.args[0]
 
-    def test_generate_cluster_labels_llm_truncated_content_falls_back(
+    def test_generate_cluster_labels_llm_failure_is_non_fatal(
         self, mock_embeddings_manager, mock_collection_with_data, mocker, mock_database
     ):
-        """A reasoning model truncated at the token budget returns
-        ``content=None`` (finish_reason='length'); each label must then fall
-        back to keyword concatenation instead of crashing the whole run."""
+        """Flat LLM failures leave labels missing and do not abort other clusters."""
         mocker.patch("abstracts_explorer.clustering.labeling.time.sleep")
         mock_response = mocker.MagicMock()
         mock_response.choices = [mocker.MagicMock()]
-        mock_response.choices[0].message.content = None  # reasoning ate the budget
+        mock_response.choices[0].message.content = None
 
         mock_openai_client = mocker.MagicMock()
         mock_openai_client.chat.completions.create.return_value = mock_response
@@ -617,12 +606,8 @@ class TestClusterLabeling:
 
         labels = cm.generate_cluster_labels(use_llm=True)
 
-        assert isinstance(labels, dict)
-        assert len(labels) > 0
-        # No label should be empty or None: the fallback kicked in everywhere
-        for cluster_id, label in labels.items():
-            assert isinstance(label, str)
-            assert len(label) > 0
+        assert labels == {}
+        assert mock_openai_client.chat.completions.create.call_count == 9
 
     def test_clustering_results_with_labels(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
         """Test that clustering results include labels when available."""
@@ -743,6 +728,8 @@ class TestHierarchicalClustering:
         cm.load_embeddings()
 
         cm.cluster(n_clusters=3)
+        cm.extract_cluster_keywords()
+        cm.generate_cluster_labels(use_llm=False)
 
         # Generate labels without LLM
         labels = cm.generate_hierarchical_labels(use_llm=False)
@@ -779,6 +766,8 @@ class TestHierarchicalClustering:
 
         # Use agglomerative clustering
         cm.cluster(n_clusters=3)
+        cm.extract_cluster_keywords()
+        cm.generate_cluster_labels(use_llm=False)
 
         # Generate hierarchical labels
         hierarchical_labels = cm.generate_hierarchical_labels(use_llm=False)
@@ -977,147 +966,6 @@ class TestClusteringCache:
         db.close()
 
 
-class TestLabelValidation:
-    """Tests for fallback/default label detection."""
-
-    def test_is_default_label(self):
-        """Default names are detected while real labels are not."""
-        assert is_default_label("Cluster 0")
-        assert is_default_label("Sample 12")
-        assert is_default_label("Node 42")
-        assert not is_default_label("Deep Learning")
-        assert not is_default_label("Cluster")
-
-    def test_find_default_cluster_labels(self):
-        """Default names and keyword fallbacks are flagged."""
-        labels = {"0": "Cluster 0", "1": "Deep Learning", "2": "neural, networks, training"}
-        keywords = {"2": ["neural", "networks", "training", "optimization"]}
-
-        assert find_default_cluster_labels(labels, keywords) == [0, 2]
-
-    def test_find_default_cluster_labels_without_keywords(self):
-        """Keyword fallback detection requires keywords."""
-        assert find_default_cluster_labels({"0": "neural, networks, training"}) == []
-
-    def test_find_default_hierarchy_labels(self):
-        """Literal defaults and level-4+ fallbacks are flagged."""
-        labels = {
-            0: "Alpha",
-            1: "Beta",
-            10: "Alpha & Beta",
-            11: "Cluster 11",
-            12: "Alpha & Beta",
-        }
-        hierarchy = {
-            "tree": {
-                "nodes": {
-                    0: {"level": 0, "children": []},
-                    1: {"level": 0, "children": []},
-                    10: {"level": 1, "children": [0, 1]},
-                    11: {"level": 4, "children": [0, 1]},
-                    12: {"level": 4, "children": [0, 1]},
-                }
-            }
-        }
-
-        assert find_default_hierarchy_labels(labels, hierarchy) == [11, 12]
-
-    def test_find_default_hierarchy_labels_without_hierarchy(self):
-        """Default names are still detected without hierarchy data."""
-        assert find_default_hierarchy_labels({"0": "Sample 0", "1": "Real"}) == [0]
-
-
-class TestComputeClustersRepair:
-    """Tests for CLI-only label repair in the cached pipeline."""
-
-    @pytest.fixture
-    def cached_default_results(self):
-        """Cached results containing fallback labels."""
-        return {
-            "points": [],
-            "statistics": {"total_papers": 10, "n_clusters": 1, "n_noise": 0, "cluster_sizes": {}},
-            "cluster_labels": {"0": "Cluster 0"},
-            "cluster_keywords": {"0": ["neural", "networks"]},
-        }
-
-    def test_cached_defaults_are_returned_without_repair(
-        self, mocker, cached_default_results, mock_embeddings_manager
-    ):
-        """Repair disabled returns stale cache unchanged."""
-        database = mocker.MagicMock()
-        database.get_clustering_cache.return_value = cached_default_results
-        cm_class = mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager")
-        run_pipeline = mocker.patch("abstracts_explorer.clustering.pipeline._run_pipeline")
-
-        result = compute_clusters_with_cache(mock_embeddings_manager, database, "model")
-
-        assert result is cached_default_results
-        cm_class.assert_not_called()
-        run_pipeline.assert_not_called()
-
-    def test_cached_defaults_trigger_regeneration_when_repairing(
-        self, mocker, cached_default_results, mock_embeddings_manager
-    ):
-        """Repair enabled bypasses cache and recomputes labels."""
-        fresh_results = {
-            "points": [],
-            "statistics": {"total_papers": 10, "n_clusters": 1, "n_noise": 0, "cluster_sizes": {}},
-            "cluster_labels": {"0": "Deep Learning"},
-        }
-        database = mocker.MagicMock()
-        database.get_clustering_cache.return_value = cached_default_results
-        cm_class = mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager")
-        mocker.patch("abstracts_explorer.clustering.pipeline._run_pipeline")
-        cm = cm_class.return_value
-        cm.cluster_hierarchy = None
-        cm.paper_ids = []
-        cm.get_clustering_results.return_value = fresh_results
-
-        result = compute_clusters_with_cache(
-            mock_embeddings_manager,
-            database,
-            "model",
-            repair_default_labels=True,
-        )
-
-        assert result is fresh_results
-        cm_class.assert_called_once()
-        database.save_clustering_cache.assert_called_once()
-
-    def test_cached_hierarchy_defaults_are_regenerated(self, mocker, mock_embeddings_manager):
-        """Fallback hierarchical labels are ignored and replaced."""
-        hierarchy = {"tree": {"nodes": {10: {"level": 4, "children": []}}}, "n_samples": 1}
-        fresh_results = {
-            "points": [],
-            "statistics": {"total_papers": 1, "n_clusters": 1, "n_noise": 0, "cluster_sizes": {}},
-        }
-        database = mocker.MagicMock()
-        database.get_clustering_cache.return_value = None
-        database.get_hierarchical_label_cache.return_value = {10: "Cluster 10"}
-        cm_class = mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager")
-        run_pipeline = mocker.patch("abstracts_explorer.clustering.pipeline._run_pipeline")
-        cm = cm_class.return_value
-        cm.cluster_hierarchy = hierarchy
-        cm.paper_ids = []
-        cm.get_clustering_results.return_value = fresh_results
-        cm.generate_hierarchical_labels.return_value = {10: "Deep Learning"}
-
-        compute_clusters_with_cache(
-            mock_embeddings_manager,
-            database,
-            "model",
-            repair_default_labels=True,
-            show_progress=True,
-        )
-
-        assert run_pipeline.call_args.kwargs["show_progress"] is True
-        cm.generate_hierarchical_labels.assert_called_once()
-        assert cm.generate_hierarchical_labels.call_args.kwargs["show_progress"] is True
-        save_kwargs = database.save_hierarchical_label_cache.call_args.kwargs
-        assert save_kwargs["replace_scope"] is True
-        assert hierarchy["tree"]["nodes"][10]["label"] == "Deep Learning"
-
-
 class TestLabelingProgress:
     """Tests for cluster-labeling progress bars."""
 
@@ -1159,26 +1007,262 @@ class TestLabelingProgress:
     def test_generate_hierarchical_labels_shows_progress(
         self, mock_embeddings_manager, mock_collection_with_data, mocker, mock_database
     ):
-        """Hierarchy labeling creates a progress bar for level-4+ nodes."""
+        """Hierarchy labeling creates separate TF-IDF and LLM progress bars."""
         mock_tqdm = mocker.patch("abstracts_explorer.clustering.labeling.tqdm")
         progress = mock_tqdm.return_value.__enter__.return_value
         mock_embeddings_manager.collection = mock_collection_with_data
 
         cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
-        cm.cluster(n_clusters=3)
-        cm.cluster_label_names = {
-            int(label): f"Label {int(label)}" for label in np.unique(cm.cluster_labels) if label >= 0
+        cm.cluster_labels = np.zeros(len(cm.paper_ids), dtype=int)
+        cm.cluster_label_names = {0: "Label 0"}
+        paper_ids = cm.paper_ids[:2]
+        cm.cluster_hierarchy = {
+            "n_samples": 2,
+            "tree": {
+                "max_level": 6,
+                "root": 3,
+                "nodes": {
+                    0: {"node_id": 0, "is_leaf": True, "children": [], "samples": [paper_ids[0]], "level": 0},
+                    1: {"node_id": 1, "is_leaf": True, "children": [], "samples": [paper_ids[1]], "level": 0},
+                    2: {
+                        "node_id": 2,
+                        "is_leaf": False,
+                        "children": [0, 1],
+                        "samples": paper_ids,
+                        "level": 1,
+                    },
+                    3: {
+                        "node_id": 3,
+                        "is_leaf": False,
+                        "children": [2],
+                        "samples": paper_ids,
+                        "level": 6,
+                    },
+                },
+            },
         }
-        mocker.patch.object(cm, "_extract_keywords_for_samples", return_value=["keyword"])
-        mocker.patch.object(cm, "_generate_llm_label_from_keywords", return_value="Keyword Label")
         mocker.patch.object(cm, "_generate_parent_label_llm", return_value="Parent Label")
 
         cm.generate_hierarchical_labels(use_llm=True, show_progress=True)
 
-        expected_total = sum(1 for node in cm.cluster_hierarchy["tree"]["nodes"].values() if int(node["level"]) >= 4)
-        call_kwargs = mock_tqdm.call_args.kwargs
-        assert call_kwargs["total"] == expected_total
-        assert call_kwargs["desc"] == "Labeling hierarchy"
-        assert call_kwargs["unit"] == "node"
-        assert progress.update.call_count == expected_total
+        assert mock_tqdm.call_count == 2
+        first_kwargs = mock_tqdm.call_args_list[0].kwargs
+        second_kwargs = mock_tqdm.call_args_list[1].kwargs
+        assert first_kwargs["total"] == 1
+        assert first_kwargs["desc"] == "Labeling hierarchy (TF-IDF)"
+        assert first_kwargs["unit"] == "node"
+        assert second_kwargs["total"] == 1
+        assert second_kwargs["desc"] == "Labeling hierarchy (LLM)"
+        assert second_kwargs["unit"] == "node"
+        assert progress.update.call_count == 2
+
+
+class TestPipelineLabelResume:
+    """Tests for resumable label generation and force-recreate-labels."""
+
+    def _cached_results(self):
+        """Return cached results with complete flat labels and no hierarchy labels."""
+        return {
+            "points": [
+                {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0},
+                {"id": "p2", "x": 1.0, "y": 1.0, "cluster": 0},
+            ],
+            "statistics": {"total_papers": 2, "n_clusters": 1, "n_noise": 0, "cluster_sizes": {}},
+            "cluster_labels": {"0": "Complete Label"},
+            "cluster_hierarchy": {
+                "n_samples": 2,
+                "tree": {
+                    "nodes": {
+                        0: {"node_id": 0, "level": 0, "children": [], "samples": ["p1"]},
+                        1: {"node_id": 1, "level": 0, "children": [], "samples": ["p2"]},
+                        2: {"node_id": 2, "level": 1, "children": [0, 1], "samples": ["p1", "p2"]},
+                    },
+                    "max_level": 1,
+                    "root": 2,
+                },
+            },
+        }
+
+    def test_complete_cached_labels_return_without_relabeling(self, mocker, mock_embeddings_manager):
+        """Healthy cached labels are returned without loading embeddings."""
+        cached = self._cached_results()
+        cached["cluster_hierarchy"]["tree"]["nodes"][0]["label"] = "Complete Label"
+        cached["cluster_hierarchy"]["tree"]["nodes"][1]["label"] = "Complete Label"
+        cached["cluster_hierarchy"]["tree"]["nodes"][2]["label"] = "Cluster Theme"
+        database = mocker.MagicMock()
+        database.get_clustering_cache.return_value = cached
+        database.get_flat_label_cache.return_value = None
+        database.get_hierarchical_label_cache.return_value = None
+        restore = mocker.patch("abstracts_explorer.clustering.pipeline._restore_cached_clustering")
+        generate = mocker.patch("abstracts_explorer.clustering.pipeline._generate_labels_for_manager")
+
+        result = compute_clusters_with_cache(mock_embeddings_manager, database, "model")
+
+        assert result is cached
+        restore.assert_not_called()
+        generate.assert_not_called()
+
+    def test_force_recreate_labels_clears_caches_and_reuses_clustering(self, mocker, mock_embeddings_manager):
+        """Force flag clears label caches without recomputing clustering."""
+        cached = self._cached_results()
+        database = mocker.MagicMock()
+        database.get_clustering_cache.return_value = cached
+        cm = mocker.MagicMock()
+        restore = mocker.patch(
+            "abstracts_explorer.clustering.pipeline._restore_cached_clustering",
+            return_value=cm,
+        )
+        generate = mocker.patch(
+            "abstracts_explorer.clustering.pipeline._generate_labels_for_manager",
+            return_value=cached,
+        )
+
+        compute_clusters_with_cache(
+            mock_embeddings_manager,
+            database,
+            "model",
+            force_recreate_labels=True,
+        )
+
+        database.clear_flat_label_cache.assert_called_once()
+        database.delete_hierarchical_label_cache.assert_called_once()
+        restore.assert_called_once()
+        generate.assert_called_once()
+
+
+class TestHierarchyLabelTiers:
+    """Tests for TF-IDF levels 1-5 and LLM levels 6+."""
+
+    def _manager_with_synthetic_hierarchy(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
+        cm.load_embeddings()
+        cm.cluster_labels = np.zeros(len(cm.paper_ids), dtype=int)
+        cm.cluster_label_names = {0: "Label 0"}
+        paper_ids = cm.paper_ids[:2]
+        cm.cluster_hierarchy = {
+            "n_samples": 2,
+            "tree": {
+                "max_level": 6,
+                "root": 3,
+                "nodes": {
+                    0: {"node_id": 0, "is_leaf": True, "children": [], "samples": [paper_ids[0]], "level": 0},
+                    1: {"node_id": 1, "is_leaf": True, "children": [], "samples": [paper_ids[1]], "level": 0},
+                    2: {"node_id": 2, "is_leaf": False, "children": [0, 1], "samples": paper_ids, "level": 1},
+                    3: {"node_id": 3, "is_leaf": False, "children": [2], "samples": paper_ids, "level": 6},
+                },
+            },
+        }
+        return cm
+
+    def test_levels_one_to_five_do_not_use_llm(
+        self, mock_embeddings_manager, mock_collection_with_data, mocker, mock_database
+    ):
+        """TF-IDF levels never call the LLM."""
+        cm = self._manager_with_synthetic_hierarchy(mock_embeddings_manager, mock_collection_with_data, mock_database)
+        cm.cluster_hierarchy["tree"]["max_level"] = 5
+        cm.cluster_hierarchy["tree"]["nodes"].pop(3)
+        llm = mocker.patch.object(cm, "_generate_parent_label_llm", return_value="LLM")
+
+        labels = cm.generate_hierarchical_labels(use_llm=True)
+
+        llm.assert_not_called()
+        assert 2 in labels
+
+    def test_level_six_uses_llm_keywords_and_examples(
+        self, mock_embeddings_manager, mock_collection_with_data, mocker, mock_database
+    ):
+        """Level 6+ calls the LLM with keywords and sample titles."""
+        cm = self._manager_with_synthetic_hierarchy(mock_embeddings_manager, mock_collection_with_data, mock_database)
+        llm = mocker.patch.object(cm, "_generate_parent_label_llm", return_value="LLM Label")
+
+        labels = cm.generate_hierarchical_labels(use_llm=True)
+
+        llm.assert_called_once()
+        keywords, sample_indices = llm.call_args.args
+        assert keywords
+        assert sample_indices
+        assert labels[3] == "LLM Label"
+
+    def test_level_six_llm_failure_aborts(
+        self, mock_embeddings_manager, mock_collection_with_data, mocker, mock_database
+    ):
+        """Level 6+ LLM failures raise instead of falling back."""
+        cm = self._manager_with_synthetic_hierarchy(mock_embeddings_manager, mock_collection_with_data, mock_database)
+        mocker.patch.object(cm, "_generate_parent_label_llm", side_effect=RuntimeError("LLM down"))
+
+        with pytest.raises(ClusteringError, match="node 3"):
+            cm.generate_hierarchical_labels(use_llm=True)
+
+
+class TestLabelResume:
+    """Tests for presence-only label resume behavior."""
+
+    def test_flat_label_resume_skips_existing_labels(
+        self, mock_embeddings_manager, mock_collection_with_data, mocker, mock_database
+    ):
+        """Existing flat labels are preserved and only missing clusters are labeled."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
+        cm.load_embeddings()
+        cm.cluster(n_clusters=3)
+        cm.extract_cluster_keywords()
+        cluster_ids = sorted(int(label) for label in np.unique(cm.cluster_labels) if label >= 0)
+        existing = {cluster_ids[0]: "Existing Label"}
+        on_label = mocker.Mock()
+
+        labels = cm.generate_cluster_labels(
+            use_llm=False,
+            existing_labels=existing,
+            on_label=on_label,
+        )
+
+        assert labels[cluster_ids[0]] == "Existing Label"
+        assert on_label.call_count == len(cluster_ids) - 1
+
+    def test_flat_label_without_keywords_uses_titles(
+        self, mock_embeddings_manager, mock_collection_with_data, mocker, mock_database
+    ):
+        """A keyword-less cluster still prompts the LLM with example titles."""
+        mock_embeddings_manager.collection = mock_collection_with_data
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
+        cm.load_embeddings()
+        cm.cluster(n_clusters=3)
+        cm.cluster_keywords = {int(label): [] for label in np.unique(cm.cluster_labels) if label >= 0}
+        helper = mocker.patch.object(cm, "_call_llm_for_label", return_value="Title Label")
+
+        labels = cm.generate_cluster_labels(use_llm=True)
+
+        assert labels
+        prompt = helper.call_args.args[0]
+        assert "Top keywords: N/A" in prompt
+        assert "Sample paper titles:" in prompt
+
+    def test_hierarchy_resume_skips_existing_labels(
+        self, mock_embeddings_manager, mock_collection_with_data, mocker, mock_database
+    ):
+        """Existing hierarchy labels are returned without regeneration."""
+        from tests.test_clustering import TestHierarchyLabelTiers
+
+        cm = TestHierarchyLabelTiers()._manager_with_synthetic_hierarchy(
+            mock_embeddings_manager, mock_collection_with_data, mock_database
+        )
+        existing = {
+            0: "Label 0",
+            1: "Label 0",
+            2: "Level One",
+            3: "Level Six",
+        }
+        on_label = mocker.Mock()
+        llm = mocker.patch.object(cm, "_generate_parent_label_llm", return_value="LLM")
+
+        labels = cm.generate_hierarchical_labels(
+            use_llm=True,
+            existing_labels=existing,
+            on_label=on_label,
+        )
+
+        assert labels == existing
+        llm.assert_not_called()
+        on_label.assert_not_called()

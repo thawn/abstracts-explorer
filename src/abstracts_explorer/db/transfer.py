@@ -21,6 +21,7 @@ from abstracts_explorer.db_models import (
     Paper,
     EmbeddingsMetadata,
     ClusteringCache,
+    FlatLabelCache,
     HierarchicalLabelCache,
 )
 
@@ -114,6 +115,10 @@ class TransferMixin(SessionMixin):
                 for entry in self.session.execute(select(HierarchicalLabelCache)).scalars():
                     entry_dict = _row_to_dict(HierarchicalLabelCache, entry)
                     export_session.add(HierarchicalLabelCache(**entry_dict))
+
+                for flat_entry in self.session.execute(select(FlatLabelCache)).scalars():
+                    flat_entry_dict = _row_to_dict(FlatLabelCache, flat_entry)
+                    export_session.add(FlatLabelCache(**flat_entry_dict))
 
                 for meta_entry in self.session.execute(select(EmbeddingsMetadata)).scalars():
                     entry_dict = _row_to_dict(EmbeddingsMetadata, meta_entry)
@@ -218,13 +223,23 @@ class TransferMixin(SessionMixin):
                     List[str],
                     source_session.execute(select(HierarchicalLabelCache.embedding_model).distinct()).scalars().all(),
                 )
+                imported_models_result.extend(
+                    cast(
+                        List[str],
+                        source_session.execute(select(FlatLabelCache.embedding_model).distinct()).scalars().all(),
+                    )
+                )
+                imported_models = sorted(set(imported_models_result))
 
                 self.session.execute(delete(Paper).where(and_(Paper.conference == conference, Paper.year == year)))
-                if imported_models_result:
+                if imported_models:
                     self.session.execute(
                         delete(HierarchicalLabelCache).where(
-                            HierarchicalLabelCache.embedding_model.in_(imported_models_result)
+                            HierarchicalLabelCache.embedding_model.in_(imported_models)
                         )
+                    )
+                    self.session.execute(
+                        delete(FlatLabelCache).where(FlatLabelCache.embedding_model.in_(imported_models))
                     )
 
                 for paper in source_session.execute(
@@ -237,6 +252,10 @@ class TransferMixin(SessionMixin):
                 for entry in source_session.execute(select(HierarchicalLabelCache)).scalars():
                     entry_dict = _row_to_dict(HierarchicalLabelCache, entry)
                     self.session.add(HierarchicalLabelCache(**entry_dict))
+
+                for flat_entry in source_session.execute(select(FlatLabelCache)).scalars():
+                    flat_entry_dict = _row_to_dict(FlatLabelCache, flat_entry)
+                    self.session.add(FlatLabelCache(**flat_entry_dict))
 
                 if imported_meta and existing_model is None:
                     meta_dict = {c.name: getattr(imported_meta, c.name) for c in EmbeddingsMetadata.__table__.columns}

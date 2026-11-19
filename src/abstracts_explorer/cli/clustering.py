@@ -15,6 +15,7 @@ from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.clustering import (
     perform_clustering,
     compute_clusters_with_cache,
+    results_have_complete_flat_labels,
     DEFAULT_CLUSTERING_PARAMS,
     DEFAULT_N_COMPONENTS,
     ClusteringError,
@@ -265,12 +266,21 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
                             n_clusters=None,
                             limit=None,
                             force=args.force,
+                            force_recreate_labels=getattr(args, "force_recreate_labels", False),
                             conferences=c_conferences,
                             years=c_years,
-                            repair_default_labels=True,
                             show_progress=True,
                             **DEFAULT_CLUSTERING_PARAMS,
                         )
+
+                    if not results_have_complete_flat_labels(results):
+                        print(
+                            f"   ⚠️  {label}: flat cluster labels are incomplete; "
+                            "hierarchy labeling was skipped. Re-run to resume.",
+                            file=sys.stderr,
+                        )
+                        fail_count += 1
+                        continue
 
                     stats = results.get("statistics", {})
                     n_papers = stats.get("total_papers", "N/A")
