@@ -41,6 +41,7 @@ interface Window {
     editPaperSearchTerm?: (...args: any[]) => any;
     switchInterestingSession?: (...args: any[]) => any;
     changeInterestingPapersSortOrder?: (...args: any[]) => any;
+    switchInterestingConferenceFromMenu?: (...args: any[]) => any;
     donateInterestingPapersData?: (...args: any[]) => any;
     updateControlsVisibility?: (...args: any[]) => any;
     loadPriorities?: (...args: any[]) => any;

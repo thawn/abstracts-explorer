@@ -22,7 +22,16 @@ import {
     paperPriorities
 } from './state.js';
 import { formatPaperCard } from './paper-card.js';
+import { updateYearsForConference } from './filters.js';
 import type { Paper, PaperPriority } from './types.js';
+
+interface InterestingConferenceCombo {
+    conference: string;
+    year: number;
+    count: number;
+}
+
+const COMBO_VALUE_SEPARATOR = '|';
 
 let donationPromptShownThisSession = false;
 
@@ -74,6 +83,129 @@ export function updateControlsVisibility(): void {
 }
 
 /**
+ * Hide the other-conference switcher and clear its options.
+ */
+function hideInterestingConferenceMenu(): void {
+    const menu = document.getElementById('interesting-conference-menu');
+    if (menu) {
+        menu.classList.add('hidden');
+    }
+
+    const select = document.getElementById('interesting-conference-select') as HTMLSelectElement | null;
+    if (select) {
+        select.innerHTML = '<option value="">Select conference/year…</option>';
+    }
+}
+
+/**
+ * Collect conference/year combinations represented among the given papers.
+ */
+function collectInterestingConferenceCombos(papers: Paper[]): InterestingConferenceCombo[] {
+    const combos = new Map<string, InterestingConferenceCombo>();
+
+    papers.forEach(paper => {
+        const conference = (paper.conference || '').trim();
+        const year = Number(paper.year);
+        if (!conference || !Number.isFinite(year) || year <= 0) {
+            return;
+        }
+
+        const key = `${conference}${COMBO_VALUE_SEPARATOR}${year}`;
+        const existing = combos.get(key);
+        if (existing) {
+            existing.count += 1;
+        } else {
+            combos.set(key, { conference, year, count: 1 });
+        }
+    });
+
+    return Array.from(combos.values()).sort((a, b) => {
+        const conferenceCompare = a.conference.localeCompare(b.conference);
+        if (conferenceCompare !== 0) return conferenceCompare;
+        return b.year - a.year;
+    });
+}
+
+/**
+ * Render the menu of other conference/year combinations that have rated papers.
+ */
+export function renderInterestingConferenceMenu(papers: Paper[]): void {
+    const menu = document.getElementById('interesting-conference-menu');
+    const select = document.getElementById('interesting-conference-select') as HTMLSelectElement | null;
+    if (!menu || !select) return;
+
+    const selectedYears = getSelectedYears();
+    const selectedConference = getSelectedConference();
+    const selectedYear = selectedYears.length > 0 ? selectedYears[0] : null;
+
+    const otherCombos = collectInterestingConferenceCombos(papers).filter(combo => {
+        return !(combo.conference === selectedConference && combo.year === selectedYear);
+    });
+
+    if (otherCombos.length === 0) {
+        hideInterestingConferenceMenu();
+        return;
+    }
+
+    select.innerHTML = '<option value="">Select conference/year…</option>';
+    otherCombos.forEach(combo => {
+        const option = document.createElement('option');
+        option.value = `${encodeURIComponent(combo.conference)}${COMBO_VALUE_SEPARATOR}${combo.year}`;
+        option.textContent = `${combo.conference} ${combo.year} (${combo.count})`;
+        select.appendChild(option);
+    });
+
+    menu.classList.remove('hidden');
+}
+
+/**
+ * Switch the header selectors to the given conference/year and refresh the view.
+ */
+export function switchInterestingConference(conference: string, year: number): void {
+    const conferenceSelect = document.getElementById('conference-selector') as HTMLSelectElement | null;
+    const yearSelect = document.getElementById('year-selector') as HTMLSelectElement | null;
+    if (!conferenceSelect || !yearSelect) return;
+
+    conferenceSelect.value = conference;
+    updateYearsForConference();
+
+    const yearValue = String(year);
+    const hasYearOption = Array.from(yearSelect.options).some(option => option.value === yearValue);
+    if (!hasYearOption) {
+        const option = document.createElement('option');
+        option.value = yearValue;
+        option.textContent = yearValue;
+        yearSelect.appendChild(option);
+    }
+    yearSelect.value = yearValue;
+
+    const menuSelect = document.getElementById('interesting-conference-select') as HTMLSelectElement | null;
+    if (menuSelect) {
+        menuSelect.value = '';
+    }
+
+    if (window.handleConferenceChange) {
+        window.handleConferenceChange();
+    }
+}
+
+/**
+ * Handle a selection from the other-conference switcher.
+ */
+export function switchInterestingConferenceFromMenu(value: string): void {
+    if (!value) return;
+
+    const separatorIndex = value.lastIndexOf(COMBO_VALUE_SEPARATOR);
+    if (separatorIndex < 0) return;
+
+    const conference = decodeURIComponent(value.slice(0, separatorIndex));
+    const year = Number(value.slice(separatorIndex + 1));
+    if (!conference || !Number.isFinite(year)) return;
+
+    switchInterestingConference(conference, year);
+}
+
+/**
  * Load and display interesting papers.
  */
 export async function loadInterestingPapers(): Promise<void> {
@@ -83,6 +215,7 @@ export async function loadInterestingPapers(): Promise<void> {
     updateControlsVisibility();
 
     if (Object.keys(getAllPaperPriorities()).length === 0) {
+        hideInterestingConferenceMenu();
         listDiv.innerHTML = renderEmptyState(
             'No papers rated yet',
             'Rate papers using the stars to add them here',
@@ -143,6 +276,8 @@ export async function loadInterestingPapers(): Promise<void> {
 export function displayInterestingPapers(papers: Paper[]): void {
     const listDiv = document.getElementById('interesting-papers-list') as HTMLElement;
     const tabsNav = document.getElementById('interesting-session-tabs-nav') as HTMLElement;
+
+    renderInterestingConferenceMenu(papers);
 
     const selectedYears = getSelectedYears();
     const selectedConference = getSelectedConference();
