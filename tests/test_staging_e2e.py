@@ -53,6 +53,12 @@ _CSS_CHAT_PLOT_CONTAINER = "div[id^='chat-plot-']"
 _DEFAULT_CONFERENCE = "NeurIPS"
 _DEFAULT_YEAR = "2025"
 
+# Search requests on staging take ~16s, so allow headroom above that.
+_SEARCH_TIMEOUT = 30
+
+# Plotly is lazy-loaded, so allow extra time for the chunk to arrive/render.
+_CHART_TIMEOUT = 30
+
 # ---------------------------------------------------------------------------
 # Conference / year selection helper
 # ---------------------------------------------------------------------------
@@ -214,7 +220,7 @@ def _has_complete_response(page: Page) -> bool:
     return assistant_msgs.last.locator(".spinner").count() == 0
 
 
-def _check_chart_rendered(page: Page, timeout: int = 15) -> tuple:
+def _check_chart_rendered(page: Page, timeout: int = _CHART_TIMEOUT) -> tuple:
     """
     Check whether a Plotly chart has been rendered inside the chat.
 
@@ -395,11 +401,11 @@ def _seed_interesting_papers(
     _submit_search_query(page, query)
 
     stars = page.locator("#search-results .paper-star")
-    expect(stars.first).to_be_attached(timeout=15000)
+    expect(stars.first).to_be_attached(timeout=_SEARCH_TIMEOUT * 1000)
 
     for index in range(count):
         star = stars.nth(index * 5 + 4)
-        expect(star).to_be_attached(timeout=15000)
+        expect(star).to_be_attached(timeout=_SEARCH_TIMEOUT * 1000)
         star.click()
 
     page.wait_for_function(
@@ -543,7 +549,7 @@ class TestCoreSearch:
         _submit_search_query(staging_page, "learning")
 
         results = staging_page.locator("#search-results .bg-white.rounded-lg")
-        expect(results.first).to_be_attached(timeout=15000)
+        expect(results.first).to_be_attached(timeout=_SEARCH_TIMEOUT * 1000)
 
         assert results.count() > 0, "Search should return at least one result"
 
@@ -604,7 +610,7 @@ class TestAuthorSearch:
     """Verify author-name searches with different query formats."""
 
     _RESULT_CARD_CSS = "#search-results .bg-white.rounded-lg"
-    _WAIT_TIMEOUT = 30
+    _WAIT_TIMEOUT = _SEARCH_TIMEOUT
 
     def test_author_name_only(self, staging_url, staging_page):
         """
@@ -715,7 +721,7 @@ class TestPaperDisplay:
         _submit_search_query(staging_page, "learning")
 
         cards = staging_page.locator("#search-results .paper-card")
-        expect(cards.first).to_be_attached(timeout=15000)
+        expect(cards.first).to_be_attached(timeout=_SEARCH_TIMEOUT * 1000)
 
         assert cards.count() > 0, "Should have at least one paper card"
 
@@ -747,7 +753,9 @@ class TestPaperDisplay:
 
         _submit_search_query(staging_page, "large language models")
 
-        expect(staging_page.locator("#search-results .bg-white.rounded-lg").first).to_be_attached(timeout=15000)
+        expect(staging_page.locator("#search-results .bg-white.rounded-lg").first).to_be_attached(
+            timeout=_SEARCH_TIMEOUT * 1000
+        )
 
         # Paper cards use native <details>/<summary> for collapsible abstracts
         # when the abstract is longer than ~300 characters.
