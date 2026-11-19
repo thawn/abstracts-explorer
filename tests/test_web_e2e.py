@@ -8,6 +8,7 @@ testing user interactions and workflows as they would happen in a real browser.
 import pytest
 import time
 
+import sqlite3
 import numpy as np
 import threading
 import sys
@@ -114,6 +115,16 @@ def test_database(tmp_path_factory):
                 "keywords": ["nmt", "translation", "attention"],
                 "year": 2025,
                 "conference": "NeurIPS",
+            },
+            {
+                "title": "Contrastive Vision Pretraining at Scale",
+                "authors": ["Test Author", "Another Author"],
+                "abstract": "We study contrastive pretraining for large-scale vision models.",
+                "session": "Poster Session C",
+                "poster_position": "P3",
+                "keywords": ["vision", "contrastive learning", "pretraining"],
+                "year": 2024,
+                "conference": "ICLR",
             },
         ]
 
@@ -360,8 +371,8 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     os.environ["PAPER_DB"] = str(test_database)
     os.environ["EMBEDDING_DB"] = str(embeddings_path)
     os.environ["COLLECTION_NAME"] = collection_name
-    # Test database only has "NeurIPS" papers; override so the auto-selected
-    # conference matches the test data and search/filter requests return results.
+    # Test database has NeurIPS 2025 and ICLR 2024 papers; override so the
+    # auto-selected conference matches the primary test data.
     os.environ["DEFAULT_CONFERENCE"] = "NeurIPS"
 
     def mock_get_config():
@@ -1411,6 +1422,95 @@ class TestDataDonationE2E:
 
         except Exception as e:
             pytest.skip(f"Could not test export flow: {e}")
+
+
+@pytest.mark.e2e
+@pytest.mark.slow
+class TestInterestingPapersConferenceSwitcher:
+    """End-to-end tests for switching conferences in the Interesting Papers tab."""
+
+    def test_switch_to_other_conference_with_interesting_papers(self, web_server, test_database, page: Page):
+        """
+        Test switching to another conference/year combo that has interesting papers.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        test_database : Path
+            Path to the E2E test database
+        page : playwright.sync_api.Page
+            Playwright page
+        """
+        base_url, _ = web_server
+
+        with sqlite3.connect(test_database) as conn:
+            neurips_row = conn.execute(
+                "SELECT uid, title FROM papers WHERE conference = ? AND year = ? ORDER BY uid LIMIT 1",
+                ("NeurIPS", 2025),
+            ).fetchone()
+            iclr_row = conn.execute(
+                "SELECT uid, title FROM papers WHERE conference = ? AND year = ? ORDER BY uid LIMIT 1",
+                ("ICLR", 2024),
+            ).fetchone()
+
+        assert neurips_row is not None, "Expected a NeurIPS 2025 paper in the test database"
+        assert iclr_row is not None, "Expected a ICLR 2024 paper in the test database"
+        neurips_uid, neurips_title = neurips_row
+        iclr_uid, iclr_title = iclr_row
+
+        page.goto(base_url)
+
+        priorities = {
+            neurips_uid: {"priority": 5, "searchTerm": "transformers"},
+            iclr_uid: {"priority": 4, "searchTerm": "vision"},
+        }
+        page.evaluate(
+            """(priorities) => {
+                localStorage.setItem('paperPriorities', JSON.stringify(priorities));
+                window.loadPriorities();
+            }""",
+            priorities,
+        )
+
+        page.wait_for_function(
+            "() => [...document.querySelectorAll('#conference-selector option')].some(o => o.value === 'NeurIPS')"
+        )
+        page.locator("#conference-selector").select_option(value="NeurIPS")
+        page.evaluate("handleConferenceChange()")
+        page.wait_for_function(
+            "() => [...document.querySelectorAll('#year-selector option')].some(o => o.value === '2025')"
+        )
+        page.locator("#year-selector").select_option(value="2025")
+        page.evaluate("handleYearChange()")
+
+        page.locator("#tab-interesting").click()
+        expect(page.locator("#interesting-tab")).to_be_visible()
+
+        menu = page.locator("#interesting-conference-menu")
+        expect(menu).to_be_visible(timeout=10000)
+        select = page.locator("#interesting-conference-select")
+        page.wait_for_function("""() => [...document.querySelectorAll('#interesting-conference-select option')]
+                .some(o => o.textContent.includes('ICLR 2024 (1)'))""")
+
+        papers_list = page.locator("#interesting-papers-list")
+        expect(papers_list).to_contain_text(neurips_title)
+        expect(papers_list).not_to_contain_text(iclr_title)
+
+        option = select.locator("option", has_text="ICLR 2024 (1)").first
+        option_value = option.get_attribute("value")
+        assert option_value, "Menu option should have an encoded value"
+        select.select_option(value=option_value)
+
+        expect(page.locator("#conference-selector")).to_have_value("ICLR")
+        expect(page.locator("#year-selector")).to_have_value("2024")
+        expect(menu).to_be_visible(timeout=10000)
+        page.wait_for_function("""() => [...document.querySelectorAll('#interesting-conference-select option')]
+                .some(o => o.textContent.includes('NeurIPS 2025 (1)'))""")
+        expect(select).to_have_value("")
+        expect(papers_list).to_contain_text(iclr_title)
+        expect(papers_list).not_to_contain_text(neurips_title)
+        expect(page.locator("#interesting-count")).to_have_text("1")
 
 
 @pytest.mark.e2e
