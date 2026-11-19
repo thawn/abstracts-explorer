@@ -30,6 +30,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 # Constants for E2E tests
 MOCK_EMBEDDING_DIMENSION = 4096  # Standard dimension for test embeddings
 
+# The compiled web UI bundle is required for browser interactions.
+_WEB_UI_BUNDLE = Path(__file__).parent.parent / "src/abstracts_explorer/web_ui/static/dist/app.js"
+
 
 @pytest.fixture(scope="module")
 def test_database(tmp_path_factory):
@@ -323,6 +326,9 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     tuple
         Tuple of (base_url, port)
     """
+
+    if not _WEB_UI_BUNDLE.exists():
+        pytest.fail("The web UI bundle is missing. Run `npm ci && npm run build:js` " "before running the e2e tests.")
 
     # Import the module first, then access it from sys.modules
     import sys

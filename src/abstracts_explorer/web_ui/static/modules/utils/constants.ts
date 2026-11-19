@@ -8,7 +8,7 @@ export const API_BASE = '';
  * Combined 48 colors from Dark24 and Light24 palettes
  * Reference: https://plotly.com/python/discrete-color/#color-sequences-in-plotly-express
  */
-export const PLOTLY_COLORS = [
+export const PLOTLY_COLORS: string[] = [
     // Dark24 palette (24 colors)
     '#2E91E5', '#E15F99', '#1CA71C', '#FB0D0D', '#DA16FF', '#222A2A',
     '#B68100', '#750D86', '#EB663B', '#511CFB', '#00A08B', '#FB00D1',

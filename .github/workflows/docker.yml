@@ -16,6 +16,9 @@ on:
       - 'uv.lock'
       - 'package.json'
       - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'scripts/**'
+      - 'hatch_build.py'
       - 'tailwind.config.js'
       - '.github/workflows/docker.yml'
   pull_request:
@@ -31,6 +34,9 @@ on:
       - 'uv.lock'
       - 'package.json'
       - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'scripts/**'
+      - 'hatch_build.py'
       - 'tailwind.config.js'
       - '.github/workflows/docker.yml'
   workflow_dispatch:

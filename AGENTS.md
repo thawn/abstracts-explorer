@@ -25,7 +25,8 @@ tests; fix all failures first.
 - `uv run black src/ tests/` (formatter; hook uses `black --check`)
 - `uv run ruff check src/ tests/ --fix` (linter/autofix)
 - `uv run mypy src/ --ignore-missing-imports` (type check)
-- Then run tests: `uv run pytest` / `npm test`
+- Then run tests: `uv run pytest` / `npm run typecheck && npm test`
+- Build the web UI bundle with `npm run build:js` (esbuild -> `static/dist/`).
 
 Hooks are installed by `npm install` (or `npm run setup:hooks`); do not bypass
 them with `--no-verify` unless explicitly asked.
@@ -45,12 +46,14 @@ them with `--no-verify` unless explicitly asked.
   - `interesting_papers/`: loading, summary, recommendations.
   - `export/`: markdown/ZIP export (`export_utils.py` is a facade).
   - `utils/`: shared time/json/url/conference/paper-presentation helpers.
-  - Top-level: `config.py`, `db_models.py`, `paper_utils.py`, `registry.py`, `rate_limiter.py`, `metadata_cache.py`, `llm_utils.py`, `web_ui/` (Flask + `request_services.py` + modular ES6).
+  - Top-level: `config.py`, `db_models.py`, `paper_utils.py`, `registry.py`, `rate_limiter.py`, `metadata_cache.py`, `llm_utils.py`, `web_ui/` (Flask + `request_services.py` + TypeScript modules bundled with esbuild).
 - `tools/profiling.py`: dev-only SQL profiler (not shipped in the wheel).
 - `scripts/archive/`: applied one-off migrations kept for reference.
 - `tests/`: pytest suite.
 - `docs/`: Sphinx (Markdown).
-- `src/abstracts_explorer/web_ui/tests/`: Jest tests.
+- `src/abstracts_explorer/web_ui/static/`: TypeScript sources (`.ts`) bundled to `static/dist/` by esbuild.
+- `src/abstracts_explorer/web_ui/types/`: ambient declarations (`globals.d.ts`).
+- `src/abstracts_explorer/web_ui/tests/`: Jest tests (run against `.ts` sources).
 
 ## Testing
 
@@ -58,12 +61,14 @@ them with `--no-verify` unless explicitly asked.
 - Separate files allowed by test type: `test_integration.py`, `test_web_integration.py`, `test_web_e2e.py`.
 - Reuse shared fixtures/helpers in `tests/conftest.py` and `tests/helpers.py` rather than duplicating setup.
 - Python: pytest + pytest-mock. Coverage target >90%.
-- JavaScript: Jest + jsdom. Coverage target >80%.
+- Frontend: Jest + jsdom via `@swc/jest` for TypeScript sources. Coverage target >80%.
 - Mock external services (APIs, LLM backends, DBs). Tests must skip gracefully when optional services are unavailable.
 - Commands:
   - `uv run pytest`
   - `uv run pytest --cov=src/abstracts_explorer`
   - `uv run pytest tests/test_database.py::test_add_paper`
+  - `npm run typecheck` (tsc --noEmit)
+  - `npm run build:js` (esbuild bundle)
   - `npm test` / `npm run test:coverage`
 
 ## Configuration
@@ -78,7 +83,7 @@ them with `--no-verify` unless explicitly asked.
 - DB: SQLAlchemy 2.0+, SQLite default / PostgreSQL supported. Models: `Paper`, `EmbeddingsMetadata`, `ClusteringCache`.
 - Clustering: the pipeline is fixed to Agglomerative (ward linkage, distance threshold 150) + t-SNE; the other algorithms (K-Means, DBSCAN, Spectral, Fuzzy C-Means) and PCA were removed. Shared pipeline constants live in `clustering.py` (`DEFAULT_CLUSTERING_*`). LLM auto-labeling + DB-backed cache.
 - MCP: `MCPServer` from the `mcp` package; RAG chat auto-invokes MCP tools.
-- Web UI: Flask 3.0+, 20+ API routes in `web_ui/app.py` (frontend calls from `web_ui/static/modules/`), 15 ES6 modules, Waitress in production.
+- Web UI: Flask 3.0+, 20+ API routes in `web_ui/app.py` (frontend calls from `web_ui/static/modules/`), TypeScript modules bundled by esbuild (basic Plotly build lazy-loaded on first chart), Waitress in production.
 
 ## Suggest commit message
 

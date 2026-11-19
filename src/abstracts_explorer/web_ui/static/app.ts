@@ -1,17 +1,14 @@
 /**
  * Main Application Entry Point
- * 
+ *
  * This module initializes the application, imports all feature modules,
  * and attaches functions to the window object for HTML event handlers.
  */
 
-// Import utility functions
 import { configureMarkedWithKatex } from './modules/utils/markdown-utils.js';
 
-// Import state management
 import { loadPriorities } from './modules/state.js';
 
-// Import feature modules
 import { searchPapers, openAdvancedSearch, closeAdvancedSearch, applyAdvancedSearch } from './modules/search.js';
 import { sendChatMessage, resetChat, openPapersModal, closePapersModal, handleChatFeedback, initMcpToolsHint } from './modules/chat.js';
 import {
@@ -58,34 +55,27 @@ import {
 } from './modules/paper-card.js';
 
 /**
- * Initialize the application
+ * Initialize the application.
  */
-function initializeApp() {
-    // Configure markdown renderer with KaTeX
+function initializeApp(): void {
     configureMarkedWithKatex();
-
-    // Load application state
     loadPriorities();
 
-    // Load initial data
     loadStats();
     loadFilterOptions();
     checkEmbeddingModelCompatibility();
 
-    // Update interesting papers count
     updateInterestingPapersCount();
 
-    // Show MCP tools hint in chat area
     initMcpToolsHint();
 
-    // Setup modal event listeners
     setupModalEventListeners();
 }
 
 /**
- * Toggle mobile navigation menu
+ * Toggle mobile navigation menu.
  */
-function toggleMobileMenu() {
+function toggleMobileMenu(): void {
     const controls = document.getElementById('header-controls');
     const btn = document.getElementById('mobile-menu-btn');
     if (!controls) return;
@@ -117,14 +107,13 @@ function toggleMobileMenu() {
 }
 
 /**
- * Setup modal event listeners
+ * Setup modal event listeners.
  */
-function setupModalEventListeners() {
-    // Close modal when clicking outside of it
+function setupModalEventListeners(): void {
     const settingsModal = document.getElementById('settings-modal');
     if (settingsModal) {
         settingsModal.addEventListener('click', function (event) {
-            if (event.target === this) {
+            if (event.target === settingsModal) {
                 closeSettings();
             }
         });
@@ -133,13 +122,12 @@ function setupModalEventListeners() {
     const advancedSearchModal = document.getElementById('advanced-search-modal');
     if (advancedSearchModal) {
         advancedSearchModal.addEventListener('click', function (event) {
-            if (event.target === this) {
+            if (event.target === advancedSearchModal) {
                 closeAdvancedSearch();
             }
         });
     }
 
-    // Close modal on Escape key
     document.addEventListener('keydown', function (event) {
         if (event.key === 'Escape') {
             const modal = document.getElementById('settings-modal');
@@ -153,7 +141,6 @@ function setupModalEventListeners() {
         }
     });
 
-    // Allow Enter key to submit advanced search
     const advancedSearchFields = ['adv-topic', 'adv-authors', 'adv-title', 'adv-keywords', 'adv-abstract', 'adv-award'];
     advancedSearchFields.forEach(id => {
         const input = document.getElementById(id);
@@ -166,34 +153,29 @@ function setupModalEventListeners() {
         }
     });
 
-    // Persist distance threshold to localStorage on every value change (including while typing)
-    const dtInput = document.getElementById('distance-threshold-input');
+    const dtInput = document.getElementById('distance-threshold-input') as HTMLInputElement | null;
     if (dtInput) {
         dtInput.addEventListener('input', function () {
-            localStorage.setItem('searchDistanceThreshold', this.value);
+            localStorage.setItem('searchDistanceThreshold', dtInput.value);
         });
     }
 }
 
 /**
- * Attach functions to window object for HTML event handlers
- * This is necessary because HTML onclick attributes need global functions
+ * Attach functions to window object for HTML event handlers.
  */
-function attachToWindow() {
-    // Search module
+function attachToWindow(): void {
     window.searchPapers = searchPapers;
     window.openAdvancedSearch = openAdvancedSearch;
     window.closeAdvancedSearch = closeAdvancedSearch;
     window.applyAdvancedSearch = applyAdvancedSearch;
 
-    // Chat module
     window.sendChatMessage = sendChatMessage;
     window.resetChat = resetChat;
     window.openPapersModal = openPapersModal;
     window.closePapersModal = closePapersModal;
     window.handleChatFeedback = handleChatFeedback;
 
-    // Interesting papers module
     window.loadInterestingPapers = loadInterestingPapers;
     window.saveInterestingPapersAsMarkdown = saveInterestingPapersAsMarkdown;
     window.saveInterestingPapersAsJSON = saveInterestingPapersAsJSON;
@@ -205,15 +187,13 @@ function attachToWindow() {
     window.changeInterestingPapersSortOrder = changeInterestingPapersSortOrder;
     window.donateInterestingPapersData = donateInterestingPapersData;
     window.updateControlsVisibility = updateControlsVisibility;
-    window.loadPriorities = loadPriorities;  // Expose for testing
+    window.loadPriorities = loadPriorities;
 
-    // Clustering module
     window.loadClusters = loadClusters;
     window.exportClusters = exportClusters;
     window.resetClusters = resetClusters;
     window.loadPapersPerYear = loadPapersPerYear;
 
-    // Filters module
     window.selectAllFilter = selectAllFilter;
     window.deselectAllFilter = deselectAllFilter;
     window.openSearchSettings = openSearchSettings;
@@ -224,21 +204,17 @@ function attachToWindow() {
     window.dismissConferenceError = dismissConferenceError;
     window.dismissDefaultFilterError = dismissDefaultFilterError;
 
-    // Tabs module
     window.switchTab = switchTab;
     window.loadStats = loadStats;
     window.dismissEmbeddingWarning = dismissEmbeddingWarning;
 
-    // Paper card module
     window.showPaperDetails = showPaperDetails;
     window.setPaperPriority = setPaperPriority;
     window.updateInterestingPapersCount = updateInterestingPapersCount;
 
-    // Mobile menu
     window.toggleMobileMenu = toggleMobileMenu;
 }
 
-// Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', function () {
     attachToWindow();
     initializeApp();

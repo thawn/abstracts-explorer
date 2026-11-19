@@ -74,7 +74,7 @@ src/abstracts_explorer/
 ├── plugin.py            # Plugin system
 ├── cli.py               # argparse CLI
 ├── plugins/             # Conference downloaders
-└── web_ui/              # Flask app, ES6 modules, templates, Jest tests
+└── web_ui/              # Flask app, TypeScript modules, templates, Jest tests
 
 tests/                   # pytest suite (one file per source module)
 docs/                    # Sphinx Markdown docs
@@ -87,7 +87,7 @@ See `docs/plugins.md` for adding one.
 ## Testing
 
 - Python: pytest + pytest-mock; target **>90%** coverage.
-- JavaScript: Jest + jsdom; target **>80%** coverage.
+- Frontend: Jest + jsdom via `@swc/jest` for TypeScript sources; target **>80%** coverage.
 - One test file per source module (`database.py` → `tests/test_database.py`).
   Test-type exceptions: `test_integration.py`, `test_web_integration.py`,
   `test_web_e2e.py`, `test_staging_e2e.py`, `test_stress.py`.
@@ -109,6 +109,8 @@ uv run pytest --cov=src/abstracts_explorer
 uv run pytest tests/test_database.py::test_add_paper
 
 npm install        # also installs vendor assets and git hooks
+npm run typecheck  # tsc --noEmit
+npm run build:js   # esbuild bundle -> static/dist/
 npm test
 npm run test:coverage
 ```
@@ -174,8 +176,9 @@ them from `static/modules/`.
 - **MCP**: `MCPServer` from the `mcp` package. Tools include topic relevance,
   conference topics, topic evolution, paper search, cluster visualization,
   paper details, interesting-paper summaries, and recommendations.
-- **Web UI**: Flask 3.0+, 20+ API routes, 15 modular ES6 modules (8 top-level +
-  `utils/`), Plotly/Marked/KaTeX/DOMPurify vendor assets, Waitress in production.
+- **Web UI**: Flask 3.0+, 20+ API routes, TypeScript modules bundled with
+  esbuild (`static/dist/`), Plotly (basic build, lazy-loaded)/Marked/KaTeX/DOMPurify
+  imported from npm, Waitress in production.
 - **Registry/evaluation**: OCI artifacts via `oras`; automatic RAG evaluation.
 
 ## Common Tasks

@@ -14,20 +14,8 @@
     <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome.min.css') }}">
 
-    <!-- KaTeX for LaTeX rendering -->
+    <!-- KaTeX for LaTeX rendering (CSS only; JS is bundled) -->
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/katex.min.css') }}">
-    <script src="{{ url_for('static', filename='vendor/katex.min.js') }}"></script>
-
-    <!-- Marked.js for Markdown rendering -->
-    <script src="{{ url_for('static', filename='vendor/marked.min.js') }}"></script>
-    <!-- Marked-KaTeX extension for LaTeX in Markdown -->
-    <script src="{{ url_for('static', filename='vendor/marked-katex-extension.min.js') }}"></script>
-
-    <!-- DOMPurify for sanitizing rendered markdown (XSS protection) -->
-    <script src="{{ url_for('static', filename='vendor/purify.min.js') }}"></script>
-
-    <!-- Plotly for cluster visualization -->
-    <script src="{{ url_for('static', filename='vendor/plotly.min.js') }}"></script>
 
     <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
@@ -998,7 +986,7 @@
         {% endif %}
     </script>
     {% endif %}
-    <script type="module" src="{{ url_for('static', filename='app.js') }}"></script>
+    <script type="module" src="{{ url_for('static', filename='dist/app.js') }}"></script>
 </body>
 
 </html>

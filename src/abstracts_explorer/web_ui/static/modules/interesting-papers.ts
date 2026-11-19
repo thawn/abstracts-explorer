@@ -1,6 +1,6 @@
 /**
  * Interesting Papers Module
- * 
+ *
  * Handles the display, management, and export of rated/interesting papers.
  */
 
@@ -19,20 +19,14 @@ import {
     updateSearchTermForMultiplePapers,
     updatePaperSearchTerm,
     savePriorities,
-    loadPriorities as loadPrioritiesFromState,
     paperPriorities
 } from './state.js';
 import { formatPaperCard } from './paper-card.js';
+import type { Paper, PaperPriority } from './types.js';
 
-/**
- * Track whether donation prompt was shown in this session to avoid being intrusive
- */
 let donationPromptShownThisSession = false;
 
-/**
- * Standard donation confirmation message
- */
-const DONATION_CONFIRMATION_MESSAGE = 
+const DONATION_CONFIRMATION_MESSAGE =
     'Would you like to donate your paper ratings to help improve our service?\n\n' +
     '✓ Your data will be fully anonymized\n' +
     '✓ No personal information will be collected\n' +
@@ -40,67 +34,54 @@ const DONATION_CONFIRMATION_MESSAGE =
     '✓ You can donate again, after rating more papers\n\n' +
     'Thank you for contributing to research!';
 
-/**
- * Check if data has already been donated for current priorities
- * @returns {boolean} True if data was already donated
- */
-function hasDataBeenDonated() {
+function hasDataBeenDonated(): boolean {
     const currentPriorities = JSON.stringify(getAllPaperPriorities());
     const donatedData = localStorage.getItem('donatedPrioritiesHash');
-    
+
     if (!donatedData) {
         return false;
     }
-    
-    // Simple hash comparison - if priorities match, data was already donated
+
     return donatedData === currentPriorities;
 }
 
-/**
- * Mark current data as donated
- */
-function markDataAsDonated() {
+function markDataAsDonated(): void {
     const currentPriorities = JSON.stringify(getAllPaperPriorities());
     localStorage.setItem('donatedPrioritiesHash', currentPriorities);
 }
 
 /**
  * Update visibility of control buttons based on whether papers are rated
- * and whether data has been donated
+ * and whether data has been donated.
  */
-export function updateControlsVisibility() {
+export function updateControlsVisibility(): void {
     const hasPapers = Object.keys(getAllPaperPriorities()).length > 0;
     const sortControl = document.getElementById('interesting-controls-sort');
     const actionsControl = document.getElementById('interesting-controls-actions');
     const donateBtn = document.getElementById('donate-data-btn');
-    
+
     if (sortControl) {
         sortControl.classList.toggle('hidden', !hasPapers);
     }
-    
+
     if (actionsControl) {
         actionsControl.classList.toggle('hidden', !hasPapers);
     }
-    
-    // Hide donate button if data was already donated
+
     if (donateBtn && hasPapers) {
         donateBtn.classList.toggle('hidden', hasDataBeenDonated());
     }
 }
 
 /**
- * Load and display interesting papers
- * @async
+ * Load and display interesting papers.
  */
-export async function loadInterestingPapers() {
-    const listDiv = document.getElementById('interesting-papers-list');
-    const tabsContainer = document.getElementById('interesting-session-tabs');
-    const tabsNav = document.getElementById('interesting-session-tabs-nav');
+export async function loadInterestingPapers(): Promise<void> {
+    const listDiv = document.getElementById('interesting-papers-list') as HTMLElement;
+    const tabsContainer = document.getElementById('interesting-session-tabs') as HTMLElement;
 
-    // Update visibility of control buttons
     updateControlsVisibility();
 
-    // If no rated papers, show empty state and hide tabs
     if (Object.keys(getAllPaperPriorities()).length === 0) {
         listDiv.innerHTML = renderEmptyState(
             'No papers rated yet',
@@ -109,7 +90,6 @@ export async function loadInterestingPapers() {
         );
         tabsContainer.classList.add('hidden');
 
-        // Update count to show 0
         const countElement = document.getElementById('interesting-count');
         if (countElement) {
             countElement.textContent = '0';
@@ -117,10 +97,8 @@ export async function loadInterestingPapers() {
         return;
     }
 
-    // Show tabs container
     tabsContainer.classList.remove('hidden');
 
-    // Show loading
     listDiv.innerHTML = `
         <div class="flex justify-center items-center py-12">
             <div class="spinner"></div>
@@ -128,7 +106,6 @@ export async function loadInterestingPapers() {
     `;
 
     try {
-        // Fetch details for all rated papers
         const paperIds = getPaperIdsWithPriorities();
         const response = await fetch(`${API_BASE}/api/papers/batch`, {
             method: 'POST',
@@ -149,30 +126,27 @@ export async function loadInterestingPapers() {
             return;
         }
 
-        displayInterestingPapers(data.papers);
+        displayInterestingPapers(data.papers as Paper[]);
     } catch (error) {
         console.error('Error loading interesting papers:', error);
         listDiv.innerHTML = `
             <div class="bg-red-50 border border-red-200 rounded-lg p-6">
-                <p class="text-red-700">${escapeHtml(error.message || 'Could not load papers. Please try again.')}</p>
+                <p class="text-red-700">${escapeHtml((error as Error).message || 'Could not load papers. Please try again.')}</p>
             </div>
         `;
     }
 }
 
 /**
- * Display interesting papers grouped by search term
- * @param {Array} papers - Array of paper objects
+ * Display interesting papers grouped by search term.
  */
-export function displayInterestingPapers(papers) {
-    const listDiv = document.getElementById('interesting-papers-list');
-    const tabsNav = document.getElementById('interesting-session-tabs-nav');
+export function displayInterestingPapers(papers: Paper[]): void {
+    const listDiv = document.getElementById('interesting-papers-list') as HTMLElement;
+    const tabsNav = document.getElementById('interesting-session-tabs-nav') as HTMLElement;
 
-    // Get selected year and conference from header
     const selectedYears = getSelectedYears();
     const selectedConference = getSelectedConference();
 
-    // Filter papers by year and conference
     let filteredPapers = papers;
     if (selectedYears.length > 0) {
         filteredPapers = filteredPapers.filter(paper => selectedYears.includes(Number(paper.year)));
@@ -181,17 +155,15 @@ export function displayInterestingPapers(papers) {
         filteredPapers = filteredPapers.filter(paper => paper.conference === selectedConference);
     }
 
-    // If no papers match the filter, show empty state
     if (filteredPapers.length === 0) {
         listDiv.innerHTML = renderEmptyState(
             'No papers match the selected filters',
             'Try selecting a different conference or year',
             'fa-filter'
         );
-        const tabsContainer = document.getElementById('interesting-session-tabs');
+        const tabsContainer = document.getElementById('interesting-session-tabs') as HTMLElement;
         tabsContainer.classList.add('hidden');
 
-        // Update count to show 0 filtered papers
         const countElement = document.getElementById('interesting-count');
         if (countElement) {
             countElement.textContent = '0';
@@ -199,7 +171,6 @@ export function displayInterestingPapers(papers) {
         return;
     }
 
-    // Add priority and search term to each paper
     const priorities = getAllPaperPriorities();
     filteredPapers.forEach(paper => {
         const paperData = priorities[paper.uid];
@@ -207,80 +178,73 @@ export function displayInterestingPapers(papers) {
         paper.searchTerm = paperData?.searchTerm || 'Unknown';
     });
 
-    // Sort papers based on the selected sort order
     const sortOrder = getInterestingPapersSortOrder();
     filteredPapers.sort((a, b) => {
-        // First by session (always)
         const sessionCompare = (a.session || '').localeCompare(b.session || '');
         if (sessionCompare !== 0) return sessionCompare;
 
-        // Then apply the selected sort order
         if (sortOrder === 'search-rating-poster') {
             const searchTermCompare = (a.searchTerm || '').localeCompare(b.searchTerm || '');
             if (searchTermCompare !== 0) return searchTermCompare;
-            
-            if (a.priority !== b.priority) return b.priority - a.priority;
-            
+
+            if (a.priority !== b.priority) return (b.priority ?? 0) - (a.priority ?? 0);
+
             return naturalSortPosterPosition(a.poster_position, b.poster_position);
         } else if (sortOrder === 'rating-poster-search') {
-            if (a.priority !== b.priority) return b.priority - a.priority;
-            
+            if (a.priority !== b.priority) return (b.priority ?? 0) - (a.priority ?? 0);
+
             const posterCompare = naturalSortPosterPosition(a.poster_position, b.poster_position);
             if (posterCompare !== 0) return posterCompare;
-            
+
             return (a.searchTerm || '').localeCompare(b.searchTerm || '');
         } else if (sortOrder === 'poster-search-rating') {
             const posterCompare = naturalSortPosterPosition(a.poster_position, b.poster_position);
             if (posterCompare !== 0) return posterCompare;
-            
+
             const searchTermCompare = (a.searchTerm || '').localeCompare(b.searchTerm || '');
             if (searchTermCompare !== 0) return searchTermCompare;
-            
-            return b.priority - a.priority;
+
+            return (b.priority ?? 0) - (a.priority ?? 0);
         }
+        return 0;
     });
 
-    // Group by session, then by grouping key based on sort order
-    const groupedBySession = {};
+    const groupedBySession: Record<string, Record<string, Paper[]>> = {};
     filteredPapers.forEach(paper => {
         const session = paper.session || 'No Session';
         if (!groupedBySession[session]) {
             groupedBySession[session] = {};
         }
-        
-        // Determine the grouping key based on sort order
-        let groupKey;
+
+        let groupKey: string;
         if (sortOrder === 'search-rating-poster') {
             groupKey = paper.searchTerm || 'Unknown';
         } else if (sortOrder === 'rating-poster-search') {
             groupKey = `${paper.priority} ${paper.priority === 1 ? 'star' : 'stars'}`;
-        } else if (sortOrder === 'poster-search-rating') {
+        } else {
             groupKey = 'All Papers';
         }
-        
+
         if (!groupedBySession[session][groupKey]) {
             groupedBySession[session][groupKey] = [];
         }
         groupedBySession[session][groupKey].push(paper);
     });
 
-    // Get all sessions
     const sessions = Object.keys(groupedBySession).sort();
 
-    // Set default session if not set or if the current session no longer exists
     let currentSession = getCurrentInterestingSession();
     if (!currentSession || !sessions.includes(currentSession)) {
         currentSession = sessions[0] || null;
         setCurrentInterestingSession(currentSession);
     }
 
-    // Generate session tabs
     let tabsHtml = '';
     sessions.forEach(session => {
         const isActive = session === currentSession;
         const activeClass = isActive ? 'border-b-2 border-purple-600 text-purple-600 dark:text-purple-400' : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:border-gray-300';
         tabsHtml += `
-            <button 
+            <button
                 onclick="switchInterestingSession(${escapeAttr(JSON.stringify(session))})"
                 class="px-6 py-3 text-sm font-medium ${activeClass} border-b-2 border-transparent focus:outline-none transition-colors whitespace-nowrap">
                 <i class="fas fa-calendar-alt mr-2"></i>${escapeHtml(session)}
@@ -289,13 +253,11 @@ export function displayInterestingPapers(papers) {
     });
     tabsNav.innerHTML = tabsHtml;
 
-    // Generate HTML for the selected session only
     let html = '';
 
     if (currentSession && groupedBySession[currentSession]) {
         const groups = groupedBySession[currentSession];
 
-        // Determine icon based on sort order
         let groupIcon = 'fa-search';
         if (sortOrder === 'rating-poster-search') {
             groupIcon = 'fa-star';
@@ -303,21 +265,20 @@ export function displayInterestingPapers(papers) {
             groupIcon = 'fa-list';
         }
 
-        // Sort group keys appropriately
-        let sortedGroupKeys = Object.keys(groups);
+        const sortedGroupKeys = Object.keys(groups);
         if (sortOrder === 'search-rating-poster') {
             sortedGroupKeys.sort();
         } else if (sortOrder === 'rating-poster-search') {
             sortedGroupKeys.sort((a, b) => {
-                const starsA = parseInt(a.split(' ')[0]);
-                const starsB = parseInt(b.split(' ')[0]);
+                const starsA = parseInt(a.split(' ')[0], 10);
+                const starsB = parseInt(b.split(' ')[0], 10);
                 return starsB - starsA;
             });
         }
 
         for (const groupKey of sortedGroupKeys) {
             const groupPapers = groups[groupKey];
-            
+
             if (sortOrder === 'poster-search-rating') {
                 html += '<div class="space-y-4">';
                 groupPapers.forEach(paper => {
@@ -326,8 +287,8 @@ export function displayInterestingPapers(papers) {
                 html += '</div>';
             } else {
                 const editButton = (sortOrder === 'search-rating-poster')
-                    ? `<button onclick="editSearchTerm(${escapeAttr(JSON.stringify(currentSession))}, ${escapeAttr(JSON.stringify(groupKey))}, event)" 
-                              class="ml-2 text-sm text-purple-600 hover:text-purple-800 focus:outline-none" 
+                    ? `<button onclick="editSearchTerm(${escapeAttr(JSON.stringify(currentSession))}, ${escapeAttr(JSON.stringify(groupKey))}, event)"
+                              class="ml-2 text-sm text-purple-600 hover:text-purple-800 focus:outline-none"
                               title="Edit search term">
                            <i class="fas fa-edit"></i>
                        </button>`
@@ -359,50 +320,43 @@ export function displayInterestingPapers(papers) {
 
     listDiv.innerHTML = html;
 
-    // Update the count in the tab heading to show filtered papers
     const countElement = document.getElementById('interesting-count');
     if (countElement) {
-        countElement.textContent = filteredPapers.length;
+        countElement.textContent = String(filteredPapers.length);
     }
 }
 
 /**
- * Save interesting papers as markdown (zip export)
- * @param {Event} event - Click event
- * @async
+ * Save interesting papers as markdown (zip export).
  */
-export async function saveInterestingPapersAsMarkdown(event) {
+export async function saveInterestingPapersAsMarkdown(event: Event): Promise<void> {
     if (Object.keys(getAllPaperPriorities()).length === 0) {
         alert('No papers rated yet. Rate some papers before saving.');
         return;
     }
 
-    // Show data donation prompt before export (only once per session to avoid being intrusive)
     if (!donationPromptShownThisSession) {
-        // Show a brief contextual prompt for export; the full details are in the donation function
-        const exportDonateMessage = 
+        const exportDonateMessage =
             '💡 Before you export, would you like to donate your ratings?\n\n' +
             'Your data helps improve our service and is fully anonymized.\n\n' +
             'Click "OK" to donate now (recommended)\n' +
             'Click "Cancel" to skip and continue with export';
-        
+
         if (confirm(exportDonateMessage)) {
-            // User wants to donate - call donation function which shows full details
             await donateInterestingPapersData();
         }
-        
-        // Mark that we've shown the prompt this session
+
         donationPromptShownThisSession = true;
     }
 
-    const button = event.target;
+    const button = event.target as HTMLButtonElement;
     const originalText = button.innerHTML;
     button.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Preparing download...';
     button.disabled = true;
 
     try {
         const paperIds = getPaperIdsWithPriorities();
-        const searchInput = document.getElementById('search-input');
+        const searchInput = document.getElementById('search-input') as HTMLInputElement | null;
         const searchQuery = searchInput ? searchInput.value : '';
 
         const response = await fetch(`${API_BASE}/api/export/interesting-papers`, {
@@ -439,16 +393,16 @@ export async function saveInterestingPapersAsMarkdown(event) {
         }, 2000);
     } catch (error) {
         console.error('Error saving markdown:', error);
-        alert('Error creating export: ' + error.message);
+        alert('Error creating export: ' + (error as Error).message);
         button.innerHTML = originalText;
         button.disabled = false;
     }
 }
 
 /**
- * Save interesting papers data as JSON file
+ * Save interesting papers data as JSON file.
  */
-export function saveInterestingPapersAsJSON() {
+export function saveInterestingPapersAsJSON(): void {
     if (Object.keys(getAllPaperPriorities()).length === 0) {
         alert('No papers rated yet. Rate some papers before saving.');
         return;
@@ -477,31 +431,31 @@ export function saveInterestingPapersAsJSON() {
         console.log('Successfully saved interesting papers as JSON');
     } catch (error) {
         console.error('Error saving JSON:', error);
-        alert('Error saving JSON file: ' + error.message);
+        alert('Error saving JSON file: ' + (error as Error).message);
     }
 }
 
 /**
- * Trigger file input for loading JSON
+ * Trigger file input for loading JSON.
  */
-export function loadInterestingPapersFromJSON() {
-    const fileInput = document.getElementById('json-file-input');
+export function loadInterestingPapersFromJSON(): void {
+    const fileInput = document.getElementById('json-file-input') as HTMLInputElement | null;
     if (fileInput) {
         fileInput.click();
     }
 }
 
 /**
- * Handle JSON file load
- * @param {Event} event - File input change event
+ * Handle JSON file load.
  */
-export function handleJSONFileLoad(event) {
-    const file = event.target.files[0];
+export function handleJSONFileLoad(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
     if (!file) return;
 
     if (!file.name.endsWith('.json')) {
         alert('Please select a JSON file.');
-        event.target.value = '';
+        input.value = '';
         return;
     }
 
@@ -509,14 +463,12 @@ export function handleJSONFileLoad(event) {
 
     reader.onload = function (e) {
         try {
-            const importData = JSON.parse(e.target.result);
+            const importData = JSON.parse((e.target as FileReader).result as string);
 
             if (!importData.paperPriorities || typeof importData.paperPriorities !== 'object') {
                 throw new Error('Invalid JSON format: missing or invalid paperPriorities');
             }
 
-            // Ratings must be objects with a priority (and optional searchTerm).
-            // Legacy scalar ratings are no longer supported.
             for (const [paperId, rating] of Object.entries(importData.paperPriorities)) {
                 if (typeof rating !== 'object' || rating === null || Array.isArray(rating)) {
                     throw new Error(
@@ -540,7 +492,7 @@ export function handleJSONFileLoad(event) {
             }
 
             if (!shouldProceed) {
-                event.target.value = '';
+                input.value = '';
                 return;
             }
 
@@ -551,14 +503,14 @@ export function handleJSONFileLoad(event) {
                 if (paperPriorities[paperId]) {
                     updatedCount++;
                 } else {
-                    paperPriorities[paperId] = data;
+                    paperPriorities[paperId] = data as PaperPriority;
                     newCount++;
                 }
             }
 
             if (importData.sortOrder && !localStorage.getItem('interestingPapersSortOrder')) {
                 setInterestingPapersSortOrder(importData.sortOrder);
-                const sortSelect = document.getElementById('sort-order');
+                const sortSelect = document.getElementById('sort-order') as HTMLSelectElement | null;
                 if (sortSelect) {
                     sortSelect.value = importData.sortOrder;
                 }
@@ -566,15 +518,12 @@ export function handleJSONFileLoad(event) {
 
             savePriorities();
 
-            // Trigger update of interesting papers count
             if (window.updateInterestingPapersCount) {
                 window.updateInterestingPapersCount();
             }
 
-            // Update controls visibility
             updateControlsVisibility();
 
-            // Reload interesting papers if on that tab
             const currentTab = document.querySelector('.tab-btn.border-purple-600')?.id?.replace('tab-', '');
             if (currentTab === 'interesting') {
                 loadInterestingPapers();
@@ -601,27 +550,24 @@ export function handleJSONFileLoad(event) {
 
         } catch (error) {
             console.error('Error loading JSON:', error);
-            alert('Error loading JSON file: ' + error.message + '\n\nPlease ensure the file is a valid interesting papers export.');
+            alert('Error loading JSON file: ' + (error as Error).message + '\n\nPlease ensure the file is a valid interesting papers export.');
         }
 
-        event.target.value = '';
+        input.value = '';
     };
 
     reader.onerror = function () {
         alert('Error reading file. Please try again.');
-        event.target.value = '';
+        input.value = '';
     };
 
     reader.readAsText(file);
 }
 
 /**
- * Edit search term for a group of papers
- * @param {string} session - Session name
- * @param {string} oldSearchTerm - Old search term
- * @param {Event} event - Click event
+ * Edit search term for a group of papers.
  */
-export function editSearchTerm(session, oldSearchTerm, event) {
+export function editSearchTerm(session: string, oldSearchTerm: string, event: Event): void {
     event.stopPropagation();
 
     const newSearchTerm = prompt('Edit search term:', oldSearchTerm);
@@ -646,11 +592,9 @@ export function editSearchTerm(session, oldSearchTerm, event) {
 }
 
 /**
- * Edit search term for a single paper
- * @param {string} paperId - Paper ID
- * @param {Event} event - Click event
+ * Edit search term for a single paper.
  */
-export function editPaperSearchTerm(paperId, event) {
+export function editPaperSearchTerm(paperId: string, event: Event): void {
     event.stopPropagation();
 
     const priorities = getAllPaperPriorities();
@@ -678,40 +622,35 @@ export function editPaperSearchTerm(paperId, event) {
 }
 
 /**
- * Switch to a different session in the interesting papers tab
- * @param {string} session - Session name
+ * Switch to a different session in the interesting papers tab.
  */
-export function switchInterestingSession(session) {
+export function switchInterestingSession(session: string): void {
     setCurrentInterestingSession(session);
     loadInterestingPapers();
 }
 
 /**
- * Change the sort order for interesting papers
- * @param {string} sortOrder - New sort order
+ * Change the sort order for interesting papers.
  */
-export function changeInterestingPapersSortOrder(sortOrder) {
+export function changeInterestingPapersSortOrder(sortOrder: string): void {
     setInterestingPapersSortOrder(sortOrder);
     loadInterestingPapers();
 }
 
 /**
- * Donate interesting papers data for validation purposes
- * @async
+ * Donate interesting papers data for validation purposes.
  */
-export async function donateInterestingPapersData() {
+export async function donateInterestingPapersData(): Promise<void> {
     if (Object.keys(getAllPaperPriorities()).length === 0) {
         alert('No papers rated yet. Rate some papers before donating data.');
         return;
     }
 
-    // Check if data was already donated
     if (hasDataBeenDonated()) {
         alert('You have already donated this data. Thank you for your contribution!');
         return;
     }
 
-    // Show confirmation dialog with information about data anonymization
     if (!confirm(DONATION_CONFIRMATION_MESSAGE)) {
         return;
     }
@@ -729,16 +668,13 @@ export async function donateInterestingPapersData() {
 
         const result = await parseJsonResponse(response);
 
-        // Mark data as donated
         markDataAsDonated();
-        
-        // Update button visibility
         updateControlsVisibility();
 
         alert(`✅ ${result.message}\n\nThank you for helping improve our service!`);
         console.log('Successfully donated data:', result);
     } catch (error) {
         console.error('Error donating data:', error);
-        alert('❌ Error donating data: ' + error.message + '\n\nPlease try again later.');
+        alert('❌ Error donating data: ' + (error as Error).message + '\n\nPlease try again later.');
     }
 }

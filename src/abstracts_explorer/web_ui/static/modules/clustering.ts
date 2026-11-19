@@ -1,6 +1,7 @@
+// @ts-nocheck -- staged conversion: this Plotly-heavy module is typed incrementally.
 /**
  * Clustering Module
- * 
+ *
  * Handles cluster visualization, analysis, and management using Plotly.
  */
 
@@ -12,6 +13,17 @@ import { getClusterLabelWithCount } from './utils/cluster-utils.js';
 import { getSelectedConference, getSelectedYears, escapeHtml } from './utils/dom-utils.js';
 import { formatPaperCard } from './paper-card.js';
 import { renderInlineMarkdownWithLatex } from './utils/markdown-utils.js';
+import { ensurePlotly, getPlotly } from './plotly-loader.js';
+
+// Plotly is loaded lazily (and tests inject a global mock). The proxy defers
+// resolution to call time so the existing `Plotly.xxx` call sites keep working.
+const Plotly: any = new Proxy({}, {
+    get(_target, prop) {
+        const impl = getPlotly();
+        const value = impl[prop];
+        return typeof value === 'function' ? value.bind(impl) : value;
+    }
+});
 
 /**
  * Returns Plotly background and font colours matching the current colour scheme.
@@ -121,6 +133,7 @@ export function resetClusters() {
  */
 export async function loadClusters() {
     try {
+        await ensurePlotly();
         showLoading('cluster-plot', 'Loading clusters...');
 
         // Build request body with conference/year filters
@@ -1974,6 +1987,7 @@ export async function loadPapersPerYear() {
     }
 
     try {
+        await ensurePlotly();
         const response = await fetch(url);
         const data = await parseJsonResponse(response);
         if (data.error) {

@@ -5,6 +5,10 @@ on:
         branches: [main, develop]
         paths:
             - "src/**/*.js"
+            - "src/**/*.ts"
+            - "src/abstracts_explorer/web_ui/types/**"
+            - "tsconfig.json"
+            - "scripts/**"
             - "src/abstracts_explorer/web_ui/templates/**"
             - "package.json"
             - "package-lock.json"
@@ -16,6 +20,10 @@ on:
         branches: [main, develop]
         paths:
             - "src/**/*.js"
+            - "src/**/*.ts"
+            - "src/abstracts_explorer/web_ui/types/**"
+            - "tsconfig.json"
+            - "scripts/**"
             - "src/abstracts_explorer/web_ui/templates/**"
             - "package.json"
             - "package-lock.json"
@@ -37,6 +45,12 @@ jobs:
               with:
                   python-version: "3.12"
                   install-node: "true"
+
+            - name: Type-check TypeScript sources
+              run: npm run typecheck
+
+            - name: Build web UI bundle
+              run: npm run build:js
 
             - name: Run JavaScript tests
               run: npm test

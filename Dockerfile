@@ -1,6 +1,18 @@
 # Multi-stage Dockerfile for Abstracts Explorer
 # This Dockerfile supports both Docker and Podman
 
+# Stage 0: Build the TypeScript web UI bundle with esbuild
+FROM node:20-slim AS frontend-builder
+
+WORKDIR /app
+
+COPY package.json package-lock.json tsconfig.json ./
+COPY scripts ./scripts
+COPY src/abstracts_explorer/web_ui/static ./src/abstracts_explorer/web_ui/static
+COPY src/abstracts_explorer/web_ui/types ./src/abstracts_explorer/web_ui/types
+
+RUN npm ci --ignore-scripts && node node_modules/esbuild/install.js && npm run build:js
+
 # Stage 1: Build Python application
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS python-builder
 
@@ -17,6 +29,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /
 COPY . .
 RUN git checkout -- .
 RUN rm -f src/abstracts_explorer/_version.py
+
+# Bring in the compiled web UI bundle produced by the frontend stage
+COPY --from=frontend-builder /app/src/abstracts_explorer/web_ui/static/dist ./src/abstracts_explorer/web_ui/static/dist
+
 RUN uv sync --frozen --no-dev --extra web
 
 
