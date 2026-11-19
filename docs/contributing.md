@@ -47,7 +47,7 @@ cp .env.example .env
 
 For containerized development with Podman or Docker:
 
-**Note:** The Docker image uses pre-built static vendor files (CSS/JS libraries) that are committed to the repository. Node.js is **not required** for production containers - it's only needed for local development if you want to rebuild these vendor files.
+**Note:** The Docker build compiles the TypeScript web UI in a dedicated Node.js build stage and the runtime image stays Node-free. JavaScript libraries (Plotly, Marked, KaTeX, DOMPurify) are bundled from npm; CSS/font assets are committed to the repository.
 
 ### Quick Start
 
@@ -272,7 +272,8 @@ def test_add_paper(db):
 
 ### JavaScript Testing
 
-The web UI uses Jest for JavaScript unit testing with jsdom for DOM simulation.
+The web UI sources are TypeScript (`static/**/*.ts`) bundled with esbuild. Tests
+use Jest with jsdom, transpiling TypeScript via `@swc/jest`.
 
 #### Running JavaScript Tests
 
@@ -280,7 +281,13 @@ The web UI uses Jest for JavaScript unit testing with jsdom for DOM simulation.
 # Install Node.js dependencies (first time only)
 npm install
 
-# Run all JavaScript tests
+# Type-check TypeScript sources
+npm run typecheck
+
+# Build the esbuild bundle -> static/dist/app.js
+npm run build:js
+
+# Run all frontend tests
 npm test
 
 # Run with coverage report

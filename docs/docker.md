@@ -2,7 +2,7 @@
 
 This guide explains how to run Abstracts Explorer using containers with Podman (recommended) or Docker.
 
-**Note:** The container images are production-optimized and use pre-built static vendor files (CSS/JS libraries). Node.js is **not required** for production containers - it's only needed for local development if you want to rebuild vendor files.
+**Note:** The Docker build compiles the TypeScript web UI bundle in a dedicated Node.js build stage (esbuild); the runtime container is production-optimized and does **not** require Node.js. CSS/font assets are committed to the repository.
 
 ## Rootless Containers with Podman Quadlets (recommended systemd-native setup)
 

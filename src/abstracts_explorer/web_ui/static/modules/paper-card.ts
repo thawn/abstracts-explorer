@@ -1,6 +1,6 @@
 /**
  * Paper Card Module
- * 
+ *
  * Handles formatting and display of paper cards, paper details modal,
  * and star ratings.
  */
@@ -14,18 +14,26 @@ import {
     getPaperPriority,
     setPaperPriority as setPaperPriorityInState,
     getPaperIdsWithPriorities,
-    getAllPaperPriorities,
     getCurrentTab
 } from './state.js';
+import type { Paper } from './types.js';
+
+export interface PaperCardOptions {
+    compact?: boolean;
+    showNumber?: number | null;
+    abstractLength?: number;
+    idPrefix?: string;
+    showSearchTerm?: boolean;
+}
 
 /**
- * Build URL badges HTML for a paper
- * @param {Object} paper - Paper object with optional url, paper_pdf_url, poster_image_url
- * @param {boolean} compact - Whether to use compact styling
- * @param {boolean} stopPropagation - Whether to include onclick="event.stopPropagation()"
- * @returns {string} HTML string (empty string if no URLs available)
+ * Build URL badges HTML for a paper.
  */
-export function buildUrlBadges(paper, compact = false, stopPropagation = true) {
+export function buildUrlBadges(
+    paper: Paper,
+    compact = false,
+    stopPropagation = true
+): string {
     const stop = stopPropagation ? ' onclick="event.stopPropagation()"' : '';
     const size = compact ? 'px-2 py-0.5 text-xs' : 'px-2 py-1 text-xs';
     let badges = '';
@@ -42,12 +50,9 @@ export function buildUrlBadges(paper, compact = false, stopPropagation = true) {
 }
 
 /**
- * Format a single paper card
- * @param {Object} paper - Paper object
- * @param {Object} options - Display options
- * @returns {string} HTML string
+ * Format a single paper card.
  */
-export function formatPaperCard(paper, options = {}) {
+export function formatPaperCard(paper: Paper, options: PaperCardOptions = {}): string {
     const {
         compact = false,
         showNumber = null,
@@ -58,7 +63,6 @@ export function formatPaperCard(paper, options = {}) {
 
     const title = paper.title || 'Untitled';
 
-    // Validate authors is an array
     if (paper.authors && !Array.isArray(paper.authors)) {
         throw new TypeError(`Expected authors to be an array, got ${typeof paper.authors}`);
     }
@@ -67,7 +71,6 @@ export function formatPaperCard(paper, options = {}) {
         ? paper.authors.join(', ')
         : 'Unknown';
 
-    // Build abstract with collapsible details if needed
     let abstractHtml = '';
     if (paper.abstract) {
         if (paper.abstract.length > abstractLength) {
@@ -91,7 +94,6 @@ export function formatPaperCard(paper, options = {}) {
         abstractHtml = `<p class="text-gray-700 dark:text-gray-300 text-sm leading-relaxed">No abstract available</p>`;
     }
 
-    // Build metadata badges
     let metadata = '';
     if (paper.conference) {
         metadata += `<span class="px-2 py-1 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-xs rounded-full mr-${compact ? '1' : '2'}"><i class="fas fa-university mr-1"></i>${escapeHtml(paper.conference)}</span>`;
@@ -119,10 +121,8 @@ export function formatPaperCard(paper, options = {}) {
         ? 'paper-card bg-white dark:bg-gray-800 rounded-lg shadow-sm p-3 hover:shadow-md cursor-pointer border border-gray-200 dark:border-gray-700'
         : 'paper-card bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 hover:shadow-lg cursor-pointer';
 
-    // Get current priority for this paper
     const currentPriority = getPaperPriority(paper.uid);
 
-    // Generate star rating HTML
     let starsHtml = '<div class="flex-shrink-0 ml-2 flex items-center gap-0.5" onclick="event.stopPropagation()" title="Rate this paper">';
     for (let i = 1; i <= 5; i++) {
         const isSelected = i <= currentPriority;
@@ -163,28 +163,24 @@ export function formatPaperCard(paper, options = {}) {
 }
 
 /**
- * Show paper details in modal
- * @param {string} paperId - Paper ID
- * @async
+ * Show paper details in a modal.
  */
-export async function showPaperDetails(paperId) {
+export async function showPaperDetails(paperId: string): Promise<void> {
     try {
         const response = await fetch(`${API_BASE}/api/paper/${paperId}`);
-        const paper = await parseJsonResponse(response);
+        const paper = await parseJsonResponse(response) as Paper;
 
-        if (paper.error) {
-            showError(paper.error);
+        if ((paper as any).error) {
+            showError((paper as any).error);
             return;
         }
 
-        // Create modal
         const modal = document.createElement('div');
         modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50';
         modal.onclick = (e) => {
             if (e.target === modal) modal.remove();
         };
 
-        // Validate authors is an array
         if (paper.authors && !Array.isArray(paper.authors)) {
             throw new TypeError(`Expected authors to be an array, got ${typeof paper.authors}`);
         }
@@ -202,7 +198,7 @@ export async function showPaperDetails(paperId) {
                         <i class="fas fa-times text-xl"></i>
                     </button>
                 </div>
-                
+
                 <div class="mb-4 flex flex-wrap gap-2">
                     ${paper.conference ? `
                         <span class="px-3 py-1 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-full text-sm">
@@ -223,7 +219,7 @@ export async function showPaperDetails(paperId) {
                         <i class="fas fa-fingerprint mr-1"></i>ID: ${paper.uid}
                     </span>
                 </div>
-                
+
                 <div class="mb-6">
                     <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                         <i class="fas fa-users mr-2"></i>Authors
@@ -231,7 +227,7 @@ export async function showPaperDetails(paperId) {
                     <p class="text-gray-700 dark:text-gray-300 mb-3">${escapeHtml(authors)}</p>
                     ${buildUrlBadges(paper, false, false)}
                 </div>
-                
+
                 <div class="mb-6">
                     <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                         <i class="fas fa-file-alt mr-2"></i>Abstract
@@ -244,36 +240,32 @@ export async function showPaperDetails(paperId) {
         document.body.appendChild(modal);
     } catch (error) {
         console.error('Error loading paper details:', error);
-        showError(error.message || 'Could not load paper details. Please try again.');
+        showError((error as Error).message || 'Could not load paper details. Please try again.');
     }
 }
 
 /**
- * Update star rating display for a paper
- * @param {string} paperId - Paper ID
+ * Update star rating display for a paper.
  */
-export function updateStarDisplay(paperId) {
+export function updateStarDisplay(paperId: string): void {
     const priority = getPaperPriority(paperId);
 
-    // Find all star elements for this paper anywhere on the page using the paper-star class
     const allStars = document.querySelectorAll(`.paper-star[data-paper-id="${paperId}"]`);
-    
+
     allStars.forEach((star) => {
-        // Determine which star number this is by looking at its onclick attribute
-        const onclickMatch = star.getAttribute('onclick').match(/setPaperPriority\('[^']+',\s*(\d+)/);
+        const onclickAttr = star.getAttribute('onclick');
+        if (!onclickAttr) return;
+        const onclickMatch = onclickAttr.match(/setPaperPriority\('[^']+',\s*(\d+)/);
         if (!onclickMatch) return;
-        
+
         const starNumber = parseInt(onclickMatch[1], 10);
-        
+
         if (starNumber <= priority) {
-            // Set to filled star
             star.classList.remove('far', 'text-gray-300', 'dark:text-gray-600');
             star.classList.add('fas', 'text-yellow-400');
-            // Update hover state
             star.classList.remove('hover:text-yellow-400');
             star.classList.add('hover:text-yellow-500');
         } else {
-            // Set to empty star
             star.classList.remove('fas', 'text-yellow-400', 'hover:text-yellow-500');
             star.classList.add('far', 'text-gray-300', 'dark:text-gray-600', 'hover:text-yellow-400');
         }
@@ -281,10 +273,9 @@ export function updateStarDisplay(paperId) {
 }
 
 /**
- * Update interesting papers count in tab
- * @async
+ * Update interesting papers count in tab.
  */
-export async function updateInterestingPapersCount() {
+export async function updateInterestingPapersCount(): Promise<void> {
     const countElement = document.getElementById('interesting-count');
     if (!countElement) {
         return;
@@ -296,17 +287,14 @@ export async function updateInterestingPapersCount() {
         return;
     }
 
-    // Get selected year and conference from header
     const selectedYears = getSelectedYears();
     const selectedConference = getSelectedConference();
 
-    // If no filters, show total count
     if (selectedYears.length === 0 && !selectedConference) {
-        countElement.textContent = paperIds.length;
+        countElement.textContent = String(paperIds.length);
         return;
     }
 
-    // Fetch papers to filter by year/conference
     try {
         const response = await fetch(`${API_BASE}/api/papers/batch`, {
             method: 'POST',
@@ -319,11 +307,11 @@ export async function updateInterestingPapersCount() {
         const data = await parseJsonResponse(response);
 
         if (data.error || !data.papers) {
-            countElement.textContent = paperIds.length;
+            countElement.textContent = String(paperIds.length);
             return;
         }
 
-        let filteredPapers = data.papers;
+        let filteredPapers = data.papers as Paper[];
         if (selectedYears.length > 0) {
             filteredPapers = filteredPapers.filter(paper => selectedYears.includes(Number(paper.year)));
         }
@@ -331,20 +319,17 @@ export async function updateInterestingPapersCount() {
             filteredPapers = filteredPapers.filter(paper => paper.conference === selectedConference);
         }
 
-        countElement.textContent = filteredPapers.length;
+        countElement.textContent = String(filteredPapers.length);
     } catch (error) {
         console.error('Error updating interesting papers count:', error);
-        countElement.textContent = paperIds.length;
+        countElement.textContent = String(paperIds.length);
     }
 }
 
 /**
- * Set paper priority (wrapper function called from HTML)
- * @param {string} paperId - Paper ID
- * @param {number} priority - Priority (1-5)
+ * Set paper priority (wrapper function called from HTML).
  */
-export function setPaperPriority(paperId, priority, evt) {
-    // Stop event propagation to prevent opening paper details
+export function setPaperPriority(paperId: string, priority: number, evt?: Event): void {
     if (evt) {
         evt.stopPropagation();
     } else if (typeof window !== 'undefined' && window.event) {
@@ -353,13 +338,9 @@ export function setPaperPriority(paperId, priority, evt) {
 
     setPaperPriorityInState(paperId, priority);
 
-    // Update the stars display
     updateStarDisplay(paperId);
-
-    // Update interesting papers count
     updateInterestingPapersCount();
 
-    // Refresh interesting papers tab if it's currently visible
     const currentTab = getCurrentTab();
     if (currentTab === 'interesting') {
         if (window.loadInterestingPapers) {

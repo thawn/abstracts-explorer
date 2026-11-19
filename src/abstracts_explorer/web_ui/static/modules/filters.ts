@@ -1,6 +1,6 @@
 /**
  * Filters Module
- * 
+ *
  * Handles filter options, settings modals, and filter synchronization.
  */
 
@@ -13,9 +13,8 @@ let latestFilterRequest = 0;
 
 /**
  * Show the conference URL error banner if window.urlConferenceError is set.
- * Clears the global after showing so it only appears once.
  */
-function showConferenceErrorBanner() {
+function showConferenceErrorBanner(): void {
     if (!window.urlConferenceError) return;
 
     const error = window.urlConferenceError;
@@ -46,7 +45,7 @@ function showConferenceErrorBanner() {
 /**
  * Dismiss the conference error banner.
  */
-export function dismissConferenceError() {
+export function dismissConferenceError(): void {
     const banner = document.getElementById('conference-error-banner');
     if (banner) {
         banner.classList.add('hidden');
@@ -55,10 +54,9 @@ export function dismissConferenceError() {
 
 /**
  * Show the configured default conference/year error banner.
- * @param {Object|null} error - Error details from /api/available-filters.
  */
-function showDefaultFilterErrorBanner(error) {
-    const banner = document.getElementById('default-filter-error-banner');
+function showDefaultFilterErrorBanner(error: any): void {
+    const banner = document.getElementById('default-filter-error-banner') as HTMLElement | null;
     const messageEl = document.getElementById('default-filter-error-message');
     const availableEl = document.getElementById('default-filter-error-available');
     const guidanceEl = document.getElementById('default-filter-error-guidance');
@@ -73,7 +71,7 @@ function showDefaultFilterErrorBanner(error) {
     messageEl.textContent = error.message || 'The configured default filter is not available.';
 
     if (availableEl) {
-        const parts = [];
+        const parts: string[] = [];
         if (error.available_conferences && error.available_conferences.length > 0) {
             parts.push(`<strong>Available conferences:</strong> ${error.available_conferences.map(escapeHtml).join(', ')}`);
         }
@@ -93,7 +91,7 @@ function showDefaultFilterErrorBanner(error) {
 /**
  * Dismiss the configured default filter error banner.
  */
-export function dismissDefaultFilterError() {
+export function dismissDefaultFilterError(): void {
     const banner = document.getElementById('default-filter-error-banner');
     if (banner) {
         banner.classList.add('hidden');
@@ -101,27 +99,22 @@ export function dismissDefaultFilterError() {
 }
 
 /**
- * Load filter options from API
- * @async
+ * Load filter options from API.
  */
-export async function loadFilterOptions() {
+export async function loadFilterOptions(): Promise<void> {
     const requestId = ++latestFilterRequest;
     try {
-        // Show conference URL error banner if present (only on first call)
         showConferenceErrorBanner();
 
-        // Get selected year and conference from header
-        const yearSelect = document.getElementById('year-selector');
-        const conferenceSelect = document.getElementById('conference-selector');
+        const yearSelect = document.getElementById('year-selector') as HTMLSelectElement | null;
+        const conferenceSelect = document.getElementById('conference-selector') as HTMLSelectElement | null;
         const selectedConference = getSelectedConference();
         const selectedYears = getSelectedYears();
 
-        // Build query params for filters
         const filterParams = new URLSearchParams();
-        if (selectedYears.length === 1) filterParams.append('year', selectedYears[0]);
+        if (selectedYears.length === 1) filterParams.append('year', String(selectedYears[0]));
         if (selectedConference) filterParams.append('conference', selectedConference);
 
-        // Load session, topic, eventtype filters from database
         const filtersResponse = await fetch(`${API_BASE}/api/filters?${filterParams.toString()}`);
         const filtersData = await parseJsonResponse(filtersResponse);
 
@@ -132,7 +125,6 @@ export async function loadFilterOptions() {
             return;
         }
 
-        // Load available conferences and years from database
         const availableResponse = await fetch(`${API_BASE}/api/available-filters`);
         const availableData = await parseJsonResponse(availableResponse);
 
@@ -141,35 +133,29 @@ export async function loadFilterOptions() {
         if (availableData.error) {
             console.error('Error loading available filters:', availableData.error);
         } else {
-            // Show an informative error when the configured default is unavailable.
             showDefaultFilterErrorBanner(availableData.default_conference_error);
             const hasDefaultError = Boolean(availableData.default_conference_error);
 
-            // Store conference_years mapping and all years for future use
             window.conferenceYearsMap = availableData.conference_years || {};
             window.allYears = availableData.years || [];
 
-            // Populate year selector in header (only on initial load when empty)
-            // Track if we just populated it to apply defaults afterward.
             let yearsJustPopulated = false;
             if (yearSelect && yearSelect.options.length === 0) {
                 if (availableData.years && availableData.years.length > 0) {
-                    availableData.years.forEach(year => {
+                    availableData.years.forEach((year: number | string) => {
                         const option = document.createElement('option');
-                        option.value = year;
-                        option.textContent = year;
+                        option.value = String(year);
+                        option.textContent = String(year);
                         yearSelect.appendChild(option);
                     });
                     yearsJustPopulated = true;
                 }
             }
 
-            // Populate conference selector in header (only on initial load when empty)
-            // Track if we just populated it to apply defaults afterward.
             let conferencesJustPopulated = false;
             if (conferenceSelect && conferenceSelect.options.length === 0) {
                 if (availableData.conferences && availableData.conferences.length > 0) {
-                    availableData.conferences.forEach(conference => {
+                    availableData.conferences.forEach((conference: string) => {
                         const option = document.createElement('option');
                         option.value = conference;
                         option.textContent = conference;
@@ -179,27 +165,24 @@ export async function loadFilterOptions() {
                 }
             }
 
-            // Apply defaults only on initial load (right after the selectors were populated)
             let defaultApplied = false;
 
-            // URL-specified conference takes highest priority
             if (conferencesJustPopulated && window.urlConference) {
                 const urlConf = String(window.urlConference);
-                const confOption = Array.from(conferenceSelect.options).find(opt => opt.value === urlConf);
+                const confOption = Array.from(conferenceSelect!.options).find(opt => opt.value === urlConf);
                 if (confOption) {
-                    conferenceSelect.value = urlConf;
+                    conferenceSelect!.value = urlConf;
                     updateYearsForConference();
                     defaultApplied = true;
                 }
-                // Clear so it's only applied once
                 delete window.urlConference;
             }
 
             if (!defaultApplied && conferencesJustPopulated && availableData.default_conference) {
                 const defaultConf = String(availableData.default_conference);
-                const confOption = Array.from(conferenceSelect.options).find(opt => opt.value === defaultConf);
+                const confOption = Array.from(conferenceSelect!.options).find(opt => opt.value === defaultConf);
                 if (confOption) {
-                    conferenceSelect.value = defaultConf;
+                    conferenceSelect!.value = defaultConf;
                     updateYearsForConference();
                     defaultApplied = true;
                 }
@@ -210,7 +193,6 @@ export async function loadFilterOptions() {
                 conferenceSelect &&
                 conferenceSelect.options.length > 0
             ) {
-                // No specific default and no configuration error — select the first one
                 conferenceSelect.selectedIndex = 0;
                 updateYearsForConference();
                 defaultApplied = true;
@@ -225,27 +207,24 @@ export async function loadFilterOptions() {
                 }
             }
 
-            // Refresh stats to reflect the newly applied defaults
             if (defaultApplied && window.loadStats) {
                 window.loadStats();
             }
 
-            // Set distance threshold input: prefer localStorage, then API default
-            const dtInput = document.getElementById('distance-threshold-input');
+            const dtInput = document.getElementById('distance-threshold-input') as HTMLInputElement | null;
             if (dtInput) {
                 const stored = localStorage.getItem('searchDistanceThreshold');
                 if (stored !== null) {
                     dtInput.value = stored;
                 } else if (availableData.default_distance_threshold != null) {
-                    dtInput.value = availableData.default_distance_threshold;
+                    dtInput.value = String(availableData.default_distance_threshold);
                 }
             }
         }
 
-        // Clear and repopulate search session filter
-        const sessionSelect = document.getElementById('session-filter');
+        const sessionSelect = document.getElementById('session-filter') as HTMLSelectElement;
         sessionSelect.innerHTML = '';
-        filtersData.sessions.forEach(session => {
+        filtersData.sessions.forEach((session: string) => {
             const option = document.createElement('option');
             option.value = session;
             option.textContent = session;
@@ -253,10 +232,9 @@ export async function loadFilterOptions() {
             sessionSelect.appendChild(option);
         });
 
-        // Clear and repopulate chat session filter
-        const chatSessionSelect = document.getElementById('chat-session-filter');
+        const chatSessionSelect = document.getElementById('chat-session-filter') as HTMLSelectElement;
         chatSessionSelect.innerHTML = '';
-        filtersData.sessions.forEach(session => {
+        filtersData.sessions.forEach((session: string) => {
             const option = document.createElement('option');
             option.value = session;
             option.textContent = session;
@@ -269,39 +247,37 @@ export async function loadFilterOptions() {
 }
 
 /**
- * Select all options in a filter
- * @param {string} filterId - Filter element ID
+ * Select all options in a filter.
  */
-export function selectAllFilter(filterId) {
-    const select = document.getElementById(filterId);
+export function selectAllFilter(filterId: string): void {
+    const select = document.getElementById(filterId) as HTMLSelectElement;
     Array.from(select.options).forEach(option => {
         option.selected = true;
     });
 }
 
 /**
- * Deselect all options in a filter
- * @param {string} filterId - Filter element ID
+ * Deselect all options in a filter.
  */
-export function deselectAllFilter(filterId) {
-    const select = document.getElementById(filterId);
+export function deselectAllFilter(filterId: string): void {
+    const select = document.getElementById(filterId) as HTMLSelectElement;
     Array.from(select.options).forEach(option => {
         option.selected = false;
     });
 }
 
 /**
- * Open search settings modal
+ * Open search settings modal.
  */
-export function openSearchSettings() {
+export function openSearchSettings(): void {
     syncFiltersToModal('search');
 
-    document.getElementById('modal-title').textContent = 'Search Settings';
+    document.getElementById('modal-title')!.textContent = 'Search Settings';
 
-    document.getElementById('search-settings-section').classList.remove('hidden');
-    document.getElementById('chat-settings-section').classList.add('hidden');
+    document.getElementById('search-settings-section')!.classList.remove('hidden');
+    document.getElementById('chat-settings-section')!.classList.add('hidden');
 
-    const modal = document.getElementById('settings-modal');
+    const modal = document.getElementById('settings-modal') as HTMLElement;
     modal.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
 
@@ -309,17 +285,17 @@ export function openSearchSettings() {
 }
 
 /**
- * Open chat settings modal
+ * Open chat settings modal.
  */
-export function openChatSettings() {
+export function openChatSettings(): void {
     syncFiltersToModal('chat');
 
-    document.getElementById('modal-title').textContent = 'Chat Settings';
+    document.getElementById('modal-title')!.textContent = 'Chat Settings';
 
-    document.getElementById('search-settings-section').classList.add('hidden');
-    document.getElementById('chat-settings-section').classList.remove('hidden');
+    document.getElementById('search-settings-section')!.classList.add('hidden');
+    document.getElementById('chat-settings-section')!.classList.remove('hidden');
 
-    const modal = document.getElementById('settings-modal');
+    const modal = document.getElementById('settings-modal') as HTMLElement;
     modal.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
 
@@ -327,10 +303,10 @@ export function openChatSettings() {
 }
 
 /**
- * Close settings modal
+ * Close settings modal.
  */
-export function closeSettings() {
-    const modal = document.getElementById('settings-modal');
+export function closeSettings(): void {
+    const modal = document.getElementById('settings-modal') as HTMLElement;
     const context = modal.dataset.context;
 
     if (context) {
@@ -342,14 +318,13 @@ export function closeSettings() {
 }
 
 /**
- * Sync filters from search/chat to modal
- * @param {string} context - 'search' or 'chat'
+ * Sync filters from search/chat to modal.
  */
-export function syncFiltersToModal(context) {
+export function syncFiltersToModal(context: string): void {
     const prefix = context === 'search' ? '' : 'chat-';
 
-    const sessionFilter = document.getElementById(prefix + 'session-filter');
-    const modalSessionFilter = document.getElementById('modal-session-filter');
+    const sessionFilter = document.getElementById(prefix + 'session-filter') as HTMLSelectElement | null;
+    const modalSessionFilter = document.getElementById('modal-session-filter') as HTMLSelectElement | null;
     if (sessionFilter && modalSessionFilter) {
         if (modalSessionFilter.options.length === 0) {
             modalSessionFilter.innerHTML = sessionFilter.innerHTML;
@@ -361,14 +336,13 @@ export function syncFiltersToModal(context) {
 }
 
 /**
- * Sync filters from modal back to search/chat
- * @param {string} context - 'search' or 'chat'
+ * Sync filters from modal back to search/chat.
  */
-export function syncFiltersFromModal(context) {
+export function syncFiltersFromModal(context: string): void {
     const prefix = context === 'search' ? '' : 'chat-';
 
-    const sessionFilter = document.getElementById(prefix + 'session-filter');
-    const modalSessionFilter = document.getElementById('modal-session-filter');
+    const sessionFilter = document.getElementById(prefix + 'session-filter') as HTMLSelectElement | null;
+    const modalSessionFilter = document.getElementById('modal-session-filter') as HTMLSelectElement | null;
     if (sessionFilter && modalSessionFilter) {
         Array.from(sessionFilter.options).forEach((opt, idx) => {
             opt.selected = modalSessionFilter.options[idx]?.selected || false;
@@ -376,27 +350,27 @@ export function syncFiltersFromModal(context) {
     }
 }
 
+function currentActiveTab(): string | undefined {
+    return document.querySelector('.tab-btn.border-purple-600')?.id?.replace('tab-', '');
+}
+
 /**
- * Handle year selector change
+ * Handle year selector change.
  */
-export function handleYearChange() {
+export function handleYearChange(): void {
     cancelPendingSearch();
 
-    // Reload stats
     if (window.loadStats) window.loadStats();
 
-    // Reload filter options
     loadFilterOptions();
 
-    // Refresh interesting papers or update count
-    const currentTab = document.querySelector('.tab-btn.border-purple-600')?.id?.replace('tab-', '');
+    const currentTab = currentActiveTab();
     if (currentTab === 'interesting') {
         if (window.loadInterestingPapers) window.loadInterestingPapers();
     } else {
         if (window.updateInterestingPapersCount) window.updateInterestingPapersCount();
     }
 
-    // Clear search results
     const resultsDiv = document.getElementById('search-results');
     if (resultsDiv) {
         resultsDiv.innerHTML = `
@@ -407,8 +381,7 @@ export function handleYearChange() {
             </div>
         `;
     }
-    
-    // Reset cluster data and refresh if currently viewing clusters
+
     if (window.resetClusters) {
         window.resetClusters();
         if (currentTab === 'clusters' && window.loadClusters) {
@@ -416,34 +389,29 @@ export function handleYearChange() {
         }
     }
 
-    // Refresh papers-per-year chart if on clusters tab
     if (currentTab === 'clusters' && window.loadPapersPerYear) {
         window.loadPapersPerYear();
     }
 }
 
 /**
- * Handle conference selector change
+ * Handle conference selector change.
  */
-export function handleConferenceChange() {
+export function handleConferenceChange(): void {
     updateYearsForConference();
     cancelPendingSearch();
 
-    // Reload stats
     if (window.loadStats) window.loadStats();
 
-    // Reload filter options
     loadFilterOptions();
 
-    // Refresh interesting papers or update count
-    const currentTab = document.querySelector('.tab-btn.border-purple-600')?.id?.replace('tab-', '');
+    const currentTab = currentActiveTab();
     if (currentTab === 'interesting') {
         if (window.loadInterestingPapers) window.loadInterestingPapers();
     } else {
         if (window.updateInterestingPapersCount) window.updateInterestingPapersCount();
     }
 
-    // Clear search results
     const resultsDiv = document.getElementById('search-results');
     if (resultsDiv) {
         resultsDiv.innerHTML = `
@@ -455,7 +423,6 @@ export function handleConferenceChange() {
         `;
     }
 
-    // Reset cluster data and refresh if currently viewing clusters
     if (window.resetClusters) {
         window.resetClusters();
         if (currentTab === 'clusters' && window.loadClusters) {
@@ -463,49 +430,46 @@ export function handleConferenceChange() {
         }
     }
 
-    // Refresh papers-per-year chart if on clusters tab
     if (currentTab === 'clusters' && window.loadPapersPerYear) {
         window.loadPapersPerYear();
     }
 }
 
 /**
- * Update years dropdown based on selected conference
+ * Update years dropdown based on selected conference.
  */
-export function updateYearsForConference() {
-    const conferenceSelect = document.getElementById('conference-selector');
-    const yearSelect = document.getElementById('year-selector');
+export function updateYearsForConference(): void {
+    const conferenceSelect = document.getElementById('conference-selector') as HTMLSelectElement | null;
+    const yearSelect = document.getElementById('year-selector') as HTMLSelectElement | null;
 
     if (!conferenceSelect || !yearSelect || !window.conferenceYearsMap) {
         return;
     }
 
     const selectedConference = conferenceSelect.value;
-    // Preserve currently selected year (single-select)
     const currentYear = yearSelect.value;
 
     yearSelect.innerHTML = '';
 
     if (selectedConference) {
         const yearsForConference = window.conferenceYearsMap[selectedConference] || [];
-        yearsForConference.forEach(year => {
+        yearsForConference.forEach((year) => {
             const option = document.createElement('option');
-            option.value = year;
-            option.textContent = year;
+            option.value = String(year);
+            option.textContent = String(year);
             yearSelect.appendChild(option);
         });
     } else {
         if (window.allYears && window.allYears.length > 0) {
-            window.allYears.forEach(year => {
+            window.allYears.forEach((year) => {
                 const option = document.createElement('option');
-                option.value = year;
-                option.textContent = year;
+                option.value = String(year);
+                option.textContent = String(year);
                 yearSelect.appendChild(option);
             });
         }
     }
 
-    // Restore previous selection if still available; fall back to first year
     const availableYears = Array.from(yearSelect.options).map(opt => opt.value);
     if (currentYear && availableYears.includes(currentYear)) {
         yearSelect.value = currentYear;

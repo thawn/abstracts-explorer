@@ -1,19 +1,19 @@
 /**
  * UI Component Utilities
- * 
+ *
  * This module provides reusable UI components and patterns.
  */
 
 import { escapeHtml } from './dom-utils.js';
 
 /**
- * Render an empty state message
- * @param {string} message - Main message
- * @param {string} subtext - Subtext
- * @param {string} icon - FontAwesome icon class
- * @returns {string} HTML string
+ * Render an empty state message.
  */
-export function renderEmptyState(message, subtext, icon = 'fa-inbox') {
+export function renderEmptyState(
+    message: string,
+    subtext: string,
+    icon = 'fa-inbox'
+): string {
     return `
         <div class="text-center text-gray-500 py-12">
             <i class="fas ${icon} text-6xl mb-4 opacity-20"></i>
@@ -24,11 +24,9 @@ export function renderEmptyState(message, subtext, icon = 'fa-inbox') {
 }
 
 /**
- * Render error block
- * @param {string} message - Error message
- * @returns {string} HTML string
+ * Render error block.
  */
-export function renderErrorBlock(message) {
+export function renderErrorBlock(message: string): string {
     return `
         <div class="bg-red-50 border border-red-200 rounded-lg p-6">
             <div class="flex items-center">
@@ -43,11 +41,9 @@ export function renderErrorBlock(message) {
 }
 
 /**
- * Show loading in element
- * @param {string} elementId - Element ID
- * @param {string} message - Loading message
+ * Show loading in element.
  */
-export function showLoading(elementId, message) {
+export function showLoading(elementId: string, message: string): void {
     const element = document.getElementById(elementId);
     if (!element) {
         console.error(`Element with id '${elementId}' not found`);
@@ -63,11 +59,9 @@ export function showLoading(elementId, message) {
 }
 
 /**
- * Show error in element
- * @param {string} elementId - Element ID
- * @param {string} message - Error message
+ * Show error in element.
  */
-export function showErrorInElement(elementId, message) {
+export function showErrorInElement(elementId: string, message: string): void {
     const element = document.getElementById(elementId);
     if (!element) {
         console.error(`Element with id '${elementId}' not found`);
@@ -77,10 +71,9 @@ export function showErrorInElement(elementId, message) {
 }
 
 /**
- * Show error in search results
- * @param {string} message - Error message
+ * Show error in search results.
  */
-export function showError(message) {
+export function showError(message: string): void {
     const resultsDiv = document.getElementById('search-results');
     if (resultsDiv) {
         resultsDiv.innerHTML = renderErrorBlock(message);

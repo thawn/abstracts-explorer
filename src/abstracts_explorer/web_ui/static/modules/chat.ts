@@ -1,10 +1,11 @@
 /**
  * Chat Module
- * 
+ *
  * Handles chat functionality including message sending, display,
  * and conversation management.
  */
 
+import PlotlyLib from 'plotly.js-dist-min';
 import { API_BASE } from './utils/constants.js';
 import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
 import { parseJsonResponse } from './utils/api-utils.js';
@@ -12,6 +13,17 @@ import { renderEmptyState } from './utils/ui-utils.js';
 import { setCurrentSearchTerm, getAllPaperPriorities } from './state.js';
 import { formatPaperCard } from './paper-card.js';
 import { renderMarkdownWithLatex } from './utils/markdown-utils.js';
+import type { Paper, Visualization, ChatMetadata } from './types.js';
+
+// Tests inject a global Plotly mock; prefer it at call time, otherwise use the
+// bundled library. A proxy keeps the existing `Plotly.xxx` call sites working.
+const Plotly: any = new Proxy({}, {
+    get(_target, prop) {
+        const impl = ((globalThis as any).Plotly as any) || PlotlyLib;
+        const value = impl[prop];
+        return typeof value === 'function' ? value.bind(impl) : value;
+    }
+});
 
 /** Whether the user has sent at least one chat message in this session. */
 let _hasUserSentMessage = false;
@@ -22,11 +34,7 @@ let _feedbackHighlightShown = false;
 /** Monotonically increasing counter used to generate unique message IDs. */
 let _messageIdCounter = 0;
 
-/**
- * Get the current chat donation consent status from localStorage.
- * @returns {boolean|null} true if accepted, false if declined, null if not yet asked
- */
-function getChatDonationConsent() {
+function getChatDonationConsent(): boolean | null {
     const stored = localStorage.getItem('chatDonationConsent');
     if (stored === 'true') return true;
     if (stored === 'false') return false;
@@ -35,9 +43,8 @@ function getChatDonationConsent() {
 
 /**
  * Build HTML for the MCP tools hint bubble.
- * @returns {string} HTML string
  */
-export function buildMcpToolsHintHtml() {
+export function buildMcpToolsHintHtml(): string {
     return `
         <div id="mcp-tools-hint" class="mcp-tools-hint bg-gradient-to-br from-purple-50 dark:from-purple-900/30 to-blue-50 dark:to-blue-900/30 border border-purple-200 dark:border-purple-700 rounded-lg p-4 shadow-sm max-w-2xl mx-auto">
             <div class="flex items-start gap-2 mb-3">
@@ -88,12 +95,10 @@ export function buildMcpToolsHintHtml() {
 /**
  * Remove the MCP tools hint bubble from the chat area (if present).
  */
-export function removeMcpToolsHint() {
+export function removeMcpToolsHint(): void {
     const hint = document.getElementById('mcp-tools-hint');
     if (hint) {
         hint.classList.add('mcp-tools-hint-hide');
-        // Remove after animation; fall back to a timeout in case animationend never fires.
-        // Guard against double invocation since both paths could fire.
         let removed = false;
         const remove = () => {
             if (!removed) {
@@ -108,9 +113,8 @@ export function removeMcpToolsHint() {
 
 /**
  * Insert the MCP tools hint bubble into the chat messages area.
- * Called once on page load so the hint HTML lives in a single place (buildMcpToolsHintHtml).
  */
-export function initMcpToolsHint() {
+export function initMcpToolsHint(): void {
     const messagesDiv = document.getElementById('chat-messages');
     if (messagesDiv && !document.getElementById('mcp-tools-hint')) {
         messagesDiv.insertAdjacentHTML('beforeend', buildMcpToolsHintHtml());
@@ -118,65 +122,53 @@ export function initMcpToolsHint() {
 }
 
 /**
- * Send chat message
- * @async
+ * Send chat message.
  */
-export async function sendChatMessage() {
-    const input = document.getElementById('chat-input');
+export async function sendChatMessage(): Promise<void> {
+    const input = document.getElementById('chat-input') as HTMLInputElement;
     const message = input.value.trim();
 
     if (!message) return;
 
-    // Remove the MCP tools hint on first user message
     if (!_hasUserSentMessage) {
         _hasUserSentMessage = true;
         removeMcpToolsHint();
     }
 
-    // Store the current search term for rating papers from chat
     setCurrentSearchTerm(message);
 
-    // Add user message
     addChatMessage(message, 'user');
     input.value = '';
 
-    // Show loading
     const loadingId = addChatMessage('Thinking...', 'assistant', true);
 
     try {
-        const nPapers = parseInt(document.getElementById('n-papers').value);
+        const nPapers = parseInt((document.getElementById('n-papers') as HTMLSelectElement).value, 10);
 
-        // Get multiple selected values from chat multi-select dropdowns
-        const chatSessionSelect = document.getElementById('chat-session-filter');
+        const chatSessionSelect = document.getElementById('chat-session-filter') as HTMLSelectElement;
         const sessions = Array.from(chatSessionSelect.selectedOptions).map(opt => opt.value);
 
-        // Get year and conference from header selectors
         const selectedYears = getSelectedYears();
         const selectedConference = getSelectedConference();
 
-        const requestBody = {
+        const requestBody: Record<string, any> = {
             message,
             n_papers: nPapers
         };
 
-        // Forward the user's interesting-paper ratings so the chat can
-        // summarize them and recommend related papers.
         const paperPriorities = getAllPaperPriorities();
         if (paperPriorities && Object.keys(paperPriorities).length > 0) {
             requestBody.paper_priorities = paperPriorities;
         }
 
-        // Add filters only if NOT all options are selected (all selected = no filter)
         if (sessions.length > 0 && sessions.length < chatSessionSelect.options.length) {
             requestBody.sessions = sessions;
         }
 
-        // Add year filter if selected
         if (selectedYears.length > 0) {
             requestBody.years = selectedYears;
         }
 
-        // Add conference filter if selected
         if (selectedConference) {
             requestBody.conferences = [selectedConference];
         }
@@ -191,7 +183,6 @@ export async function sendChatMessage() {
 
         const data = await parseJsonResponse(response);
 
-        // Remove loading message
         document.getElementById(loadingId)?.remove();
 
         if (data.error) {
@@ -199,8 +190,10 @@ export async function sendChatMessage() {
             return;
         }
 
-        // Extract response text and papers from the response object
-        let responseText, papers, metadata, visualizations;
+        let responseText: string;
+        let papers: Paper[];
+        let metadata: ChatMetadata;
+        let visualizations: Visualization[];
         if (typeof data.response === 'object' && data.response !== null) {
             responseText = data.response.response || JSON.stringify(data.response);
             papers = data.response.papers || [];
@@ -218,36 +211,31 @@ export async function sendChatMessage() {
             visualizations = [];
         }
 
-        // Update currentSearchTerm to use the rewritten query if available
         if (metadata.rewritten_query) {
             setCurrentSearchTerm(metadata.rewritten_query);
         }
 
         addChatMessage(responseText, 'assistant');
 
-        // Display visualizations from MCP tool results
         if (visualizations.length > 0) {
             renderChatVisualizations(visualizations);
         }
 
-        // Display relevant papers with metadata (including rewritten query)
         displayChatPapers(papers, metadata);
     } catch (error) {
         console.error('Chat error:', error);
         document.getElementById(loadingId)?.remove();
-        const message = error && error.message
-            ? `Sorry, I couldn't complete that request. ${error.message}`
+        const message = error && (error as Error).message
+            ? `Sorry, I couldn't complete that request. ${(error as Error).message}`
             : "Sorry, I couldn't complete that request. Please try again.";
         addChatMessage(message, 'assistant');
     }
 }
 
 /**
- * Display chat papers in the side panel and mobile modal
- * @param {Array} papers - Array of paper objects
- * @param {Object} metadata - Metadata about the search
+ * Display chat papers in the side panel and mobile modal.
  */
-export function displayChatPapers(papers, metadata = {}) {
+export function displayChatPapers(papers: Paper[], metadata: ChatMetadata = {}): void {
     const papersDiv = document.getElementById('chat-papers');
     const modalContent = document.getElementById('papers-modal-content');
     const mobileBtnWrapper = document.getElementById('mobile-papers-btn-wrapper');
@@ -267,7 +255,6 @@ export function displayChatPapers(papers, metadata = {}) {
 
     let html = '';
 
-    // Display rewritten query if available
     if (metadata.rewritten_query) {
         const wasRetrieved = metadata.retrieved_new_papers !== false;
         const cacheIcon = wasRetrieved ? 'fa-sync-alt' : 'fa-check-circle';
@@ -292,7 +279,6 @@ export function displayChatPapers(papers, metadata = {}) {
         `;
     }
 
-    // Display papers
     papers.forEach((paper, index) => {
         html += formatPaperCard(paper, {
             compact: true,
@@ -304,22 +290,19 @@ export function displayChatPapers(papers, metadata = {}) {
     if (papersDiv) papersDiv.innerHTML = html;
     if (modalContent) modalContent.innerHTML = html;
 
-    // Show the mobile "View Papers" button with paper count
     if (mobileBtnWrapper) {
         mobileBtnWrapper.classList.remove('hidden');
-        if (mobileCount) mobileCount.textContent = papers.length;
+        if (mobileCount) mobileCount.textContent = String(papers.length);
     }
 }
 
 /**
- * Add chat message to conversation
- * @param {string} text - Message text
- * @param {string} role - 'user' or 'assistant'
- * @param {boolean} isLoading - Whether to show loading spinner
- * @returns {string} Message ID
+ * Add chat message to conversation.
+ *
+ * @returns Message ID
  */
-export function addChatMessage(text, role, isLoading = false) {
-    const messagesDiv = document.getElementById('chat-messages');
+export function addChatMessage(text: string, role: string, isLoading = false): string {
+    const messagesDiv = document.getElementById('chat-messages') as HTMLElement;
     const messageId = `msg-${++_messageIdCounter}`;
 
     const isUser = role === 'user';
@@ -328,7 +311,6 @@ export function addChatMessage(text, role, isLoading = false) {
     const icon = isUser ? 'fa-user' : 'fa-robot';
     const justifyClass = isUser ? 'justify-end' : 'justify-start';
 
-    // Render markdown for assistant messages, escape HTML for user messages
     const contentHtml = isUser
         ? `<p class="whitespace-pre-wrap">${escapeHtml(text)}</p>`
         : `<div class="markdown-content">${renderMarkdownWithLatex(text)}</div>`;
@@ -369,12 +351,12 @@ export function addChatMessage(text, role, isLoading = false) {
         </div>
     `;
 
-    // Attach click handlers for feedback buttons
     if (!isUser && !isLoading) {
         const feedbackBtns = messageDiv.querySelectorAll('.chat-feedback-btn');
         feedbackBtns.forEach(btn => {
             btn.addEventListener('click', () => {
-                handleChatFeedback(btn.dataset.msgId, btn.dataset.rating);
+                const el = btn as HTMLElement;
+                handleChatFeedback(el.dataset.msgId as string, el.dataset.rating as string);
             });
         });
     }
@@ -382,7 +364,6 @@ export function addChatMessage(text, role, isLoading = false) {
     messagesDiv.appendChild(messageDiv);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
-    // Trigger a brief highlight + bounce animation on feedback buttons the first time they appear
     if (!isUser && !isLoading && !_feedbackHighlightShown) {
         _feedbackHighlightShown = true;
         const feedbackDiv = messageDiv.querySelector('.chat-feedback-buttons');
@@ -390,7 +371,7 @@ export function addChatMessage(text, role, isLoading = false) {
             feedbackDiv.classList.add('feedback-highlight');
             const buttons = feedbackDiv.querySelectorAll('.chat-feedback-btn');
             buttons.forEach((btn, index) => {
-                btn.style.animationDelay = `${index * 0.15 + 0.5}s`;
+                (btn as HTMLElement).style.animationDelay = `${index * 0.15 + 0.5}s`;
                 btn.classList.add('feedback-bounce');
             });
         }
@@ -400,10 +381,9 @@ export function addChatMessage(text, role, isLoading = false) {
 }
 
 /**
- * Reset chat conversation
- * @async
+ * Reset chat conversation.
  */
-export async function resetChat() {
+export async function resetChat(): Promise<void> {
     try {
         const response = await fetch(`${API_BASE}/api/chat/reset`, {
             method: 'POST'
@@ -412,16 +392,14 @@ export async function resetChat() {
             throw new Error(`Reset failed (HTTP ${response.status})`);
         }
 
-        const messagesDiv = document.getElementById('chat-messages');
+        const messagesDiv = document.getElementById('chat-messages') as HTMLElement;
         messagesDiv.innerHTML = '';
         const conf = getSelectedConference() || 'conference';
         addChatMessage(`Conversation reset. How can I help you explore ${conf} abstracts?`, 'assistant');
 
-        // Re-show the MCP tools hint
         _hasUserSentMessage = false;
         initMcpToolsHint();
 
-        // Clear papers panel and modal
         const emptyHtml = renderEmptyState(
             'Ask a question to see relevant papers',
             '',
@@ -432,7 +410,6 @@ export async function resetChat() {
         const modalContent = document.getElementById('papers-modal-content');
         if (modalContent) modalContent.innerHTML = emptyHtml;
 
-        // Hide mobile papers button
         const mobileBtnWrapper = document.getElementById('mobile-papers-btn-wrapper');
         if (mobileBtnWrapper) mobileBtnWrapper.classList.add('hidden');
     } catch (error) {
@@ -442,10 +419,9 @@ export async function resetChat() {
 
 /**
  * Render visualizations returned by MCP tools in the chat area.
- * @param {Array} visualizations - Array of visualization descriptor objects
  */
-export function renderChatVisualizations(visualizations) {
-    const messagesDiv = document.getElementById('chat-messages');
+export function renderChatVisualizations(visualizations: Visualization[]): void {
+    const messagesDiv = document.getElementById('chat-messages') as HTMLElement;
 
     for (let i = 0; i < visualizations.length; i++) {
         const viz = visualizations[i];
@@ -479,24 +455,19 @@ export function renderChatVisualizations(visualizations) {
 
 /**
  * Color palette for multi-conference line plots.
- * @type {string[]}
  */
 const CONFERENCE_COLORS = ['#7c3aed', '#2563eb', '#059669', '#d97706', '#dc2626', '#6366f1', '#0891b2', '#be185d'];
 
 /**
  * Render a topic evolution line chart using Plotly.
- * Supports multiple topics and multiple conferences as separate traces.
- * @param {string} plotId - DOM element id for the plot container
- * @param {Object} viz - Visualization data with topics (list of topic name strings)
- *     and conference_data keyed by topic name then conference name
  */
-function _renderTopicEvolutionChart(plotId, viz) {
+function _renderTopicEvolutionChart(plotId: string, viz: Visualization): void {
     const topics = viz.topics || [];
     const topicConferenceData = viz.conference_data || {};
 
-    const traces = [];
+    const traces: any[] = [];
     let colorIdx = 0;
-    const allConferences = new Set();
+    const allConferences = new Set<string>();
 
     for (const topicName of topics) {
         const conferenceData = topicConferenceData[topicName] || {};
@@ -509,8 +480,7 @@ function _renderTopicEvolutionChart(plotId, viz) {
             const years = Object.keys(yearRelative).sort();
             const values = years.map(y => yearRelative[y]);
 
-            // Build trace name: include topic and/or conference as needed
-            let name;
+            let name: string;
             if (topics.length > 1 && allConferences.size > 1) {
                 name = `${topicName} (${conf})`;
             } else if (topics.length > 1) {
@@ -534,7 +504,6 @@ function _renderTopicEvolutionChart(plotId, viz) {
 
     if (traces.length === 0) return;
 
-    // Build title
     const uniqueConfs = [...allConferences];
     const confLabel = uniqueConfs.length === 1
         ? ` (${uniqueConfs[0]})`
@@ -546,7 +515,7 @@ function _renderTopicEvolutionChart(plotId, viz) {
         : topics.join(', ');
 
     const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const fontColor = isDark ? '#e5e7eb' : '#374151';  // gray-200 vs gray-700
+    const fontColor = isDark ? '#e5e7eb' : '#374151';
 
     const layout = {
         title: { text: `Topic Evolution: ${topicLabel}${confLabel}` },
@@ -559,7 +528,6 @@ function _renderTopicEvolutionChart(plotId, viz) {
         showlegend: traces.length > 1
     };
 
-    /* global Plotly */
     if (typeof Plotly !== 'undefined') {
         Plotly.newPlot(plotId, traces, layout, { responsive: true, displayModeBar: false });
     }
@@ -567,17 +535,14 @@ function _renderTopicEvolutionChart(plotId, viz) {
 
 /**
  * Render a cluster visualization scatter plot using Plotly.
- * @param {string} plotId - DOM element id for the plot container
- * @param {Object} viz - Visualization data with points and statistics
  */
-function _renderClusterVisualizationChart(plotId, viz) {
+function _renderClusterVisualizationChart(plotId: string, viz: Visualization): void {
     const points = viz.points || [];
     if (points.length === 0) return;
 
-    // Group points by cluster
-    const clusters = {};
+    const clusters: Record<string, { x: number[]; y: number[]; text: string[] }> = {};
     for (const p of points) {
-        let cid = 0;
+        let cid: number | string = 0;
         if (p.cluster !== undefined) {
             cid = p.cluster;
         } else if (p.cluster_id !== undefined) {
@@ -604,7 +569,7 @@ function _renderClusterVisualizationChart(plotId, viz) {
     const title = `Cluster Visualization (${stats.total_papers || points.length} papers, ${stats.n_clusters || Object.keys(clusters).length} clusters)`;
 
     const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const fontColor = isDark ? '#e5e7eb' : '#374151';  // gray-200 vs gray-700
+    const fontColor = isDark ? '#e5e7eb' : '#374151';
 
     const layout = {
         title: title,
@@ -625,23 +590,22 @@ function _renderClusterVisualizationChart(plotId, viz) {
 
 /**
  * Collect the current chat transcript from the DOM.
- * @returns {Array<{role: string, text: string}>} Array of message objects
  */
-function collectChatTranscript() {
+function collectChatTranscript(): Array<{ role: string; text: string }> {
     const messagesDiv = document.getElementById('chat-messages');
     if (!messagesDiv) return [];
 
-    const messages = [];
+    const messages: Array<{ role: string; text: string }> = [];
     const messageDivs = messagesDiv.querySelectorAll('.chat-message[data-role]');
 
     for (const msgDiv of messageDivs) {
-        const role = msgDiv.dataset.role;
+        const role = (msgDiv as HTMLElement).dataset.role;
         const contentEl = msgDiv.querySelector('[data-chat-content]');
 
         if (contentEl) {
             messages.push({
-                role: role,
-                text: contentEl.textContent.trim()
+                role: role as string,
+                text: contentEl.textContent!.trim()
             });
         }
     }
@@ -651,16 +615,10 @@ function collectChatTranscript() {
 
 /**
  * Handle chat feedback (thumbs up/down) button click.
- * Shows a consent popup on first use, then sends the transcript to the server.
- * @param {string} messageId - The ID of the message being rated
- * @param {string} rating - 'up' or 'down'
- * @async
  */
-export async function handleChatFeedback(messageId, rating) {
-    // Check consent status from localStorage
+export async function handleChatFeedback(messageId: string, rating: string): Promise<void> {
     let consent = getChatDonationConsent();
 
-    // If consent has not been asked yet, show the consent popup
     if (consent === null) {
         const accepted = confirm(
             'Thank you for your feedback! 🎉❤️\n\n' +
@@ -679,26 +637,22 @@ export async function handleChatFeedback(messageId, rating) {
         }
     }
 
-    // If user previously declined, do nothing
     if (consent === false) {
         return;
     }
 
-    // Collect transcript and send to backend
     const transcript = collectChatTranscript();
     if (transcript.length === 0) {
         return;
     }
 
-    // Disable the feedback buttons for this message to prevent duplicate submissions
     const messageDiv = document.getElementById(messageId);
     if (messageDiv) {
         const feedbackDiv = messageDiv.querySelector('.chat-feedback-buttons');
         if (feedbackDiv) {
             const buttons = feedbackDiv.querySelectorAll('.chat-feedback-btn');
-            buttons.forEach(btn => { btn.disabled = true; });
+            buttons.forEach(btn => { (btn as HTMLButtonElement).disabled = true; });
 
-            // Highlight the selected rating button
             const selectedBtn = feedbackDiv.querySelector(`[data-rating="${rating}"]`);
             if (selectedBtn) {
                 selectedBtn.classList.remove('text-gray-400');
@@ -716,9 +670,8 @@ export async function handleChatFeedback(messageId, rating) {
             body: JSON.stringify({ rating, transcript })
         });
 
-        const result = await parseJsonResponse(response);
+        await parseJsonResponse(response);
 
-        // Show a brief "thank you" in place of the buttons
         if (messageDiv) {
             const feedbackDiv = messageDiv.querySelector('.chat-feedback-buttons');
             if (feedbackDiv) {
@@ -727,15 +680,14 @@ export async function handleChatFeedback(messageId, rating) {
         }
     } catch (error) {
         console.error('Error sending chat feedback:', error);
-        // Re-enable buttons on error and show a short failure message.
         if (messageDiv) {
             const feedbackDiv = messageDiv.querySelector('.chat-feedback-buttons');
             if (feedbackDiv) {
                 const buttons = feedbackDiv.querySelectorAll('.chat-feedback-btn');
-                buttons.forEach(btn => { btn.disabled = false; });
+                buttons.forEach(btn => { (btn as HTMLButtonElement).disabled = false; });
                 const errorSpan = document.createElement('span');
                 errorSpan.className = 'text-s text-red-500';
-                errorSpan.textContent = error.message || 'Could not send feedback. Please try again.';
+                errorSpan.textContent = (error as Error).message || 'Could not send feedback. Please try again.';
                 feedbackDiv.appendChild(errorSpan);
             }
         }
@@ -745,7 +697,7 @@ export async function handleChatFeedback(messageId, rating) {
 /**
  * Open the relevant papers modal (used on narrow screens).
  */
-export function openPapersModal() {
+export function openPapersModal(): void {
     const modal = document.getElementById('papers-modal');
     if (modal) {
         modal.classList.remove('hidden');
@@ -756,7 +708,7 @@ export function openPapersModal() {
 /**
  * Close the relevant papers modal.
  */
-export function closePapersModal() {
+export function closePapersModal(): void {
     const modal = document.getElementById('papers-modal');
     if (modal) {
         modal.classList.add('hidden');
@@ -767,7 +719,7 @@ export function closePapersModal() {
 /**
  * Reset internal module state. Intended for use in tests only.
  */
-export function _resetChatState() {
+export function _resetChatState(): void {
     _hasUserSentMessage = false;
     _feedbackHighlightShown = false;
     _messageIdCounter = 0;
@@ -775,20 +727,17 @@ export function _resetChatState() {
 
 /**
  * Re-apply font colour to every active Plotly chart inside the chat message area.
- * Called automatically when the OS colour scheme changes.
  */
-function _refreshChatPlotColors() {
+function _refreshChatPlotColors(): void {
     const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
     const fontColor = isDark ? '#e5e7eb' : '#374151';
     const messagesDiv = document.getElementById('chat-messages');
     if (!messagesDiv || typeof Plotly === 'undefined') return;
-    /* global Plotly */
     messagesDiv.querySelectorAll('.js-plotly-plot').forEach(function (el) {
         Plotly.relayout(el, { 'font.color': fontColor });
     });
 }
 
-// Keep chat charts in sync when the OS colour scheme changes
 if (typeof window !== 'undefined' && window.matchMedia) {
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', _refreshChatPlotColors);
 }

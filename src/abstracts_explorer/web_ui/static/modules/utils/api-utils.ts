@@ -18,11 +18,11 @@ const UNAVAILABLE_MESSAGE =
  * ``response.json()`` directly then throws a cryptic ``SyntaxError``.  This
  * helper converts that case into an actionable error message.
  *
- * @param {Response} response - Fetch response
- * @returns {Promise<Object>} Parsed JSON body
+ * @param response - Fetch response
+ * @returns Parsed JSON body
  */
-export async function parseJsonResponse(response) {
-    let data;
+export async function parseJsonResponse(response: Response): Promise<any> {
+    let data: any;
     try {
         data = await response.json();
     } catch (error) {

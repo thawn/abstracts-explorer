@@ -71,12 +71,13 @@ src/abstracts_explorer/web_ui/
 ├── dependencies.py      # Request-scoped DB/embeddings/RAG helpers and caches
 ├── api_utils.py         # Shared API helpers
 ├── static/
-│   ├── app.js           # Frontend entry point
-│   ├── modules/         # ES6 modules (chat, search, clustering, state, ...)
-│   │   └── utils/       # Shared ES6 utilities
+│   ├── app.ts           # Frontend entry point (bundled by esbuild)
+│   ├── modules/         # TypeScript modules (chat, search, clustering, state, ...)
+│   │   └── utils/       # Shared TypeScript utilities
 │   ├── templates/       # HTML templates
 │   ├── style.css        # Custom styles
-│   └── vendor/          # Vendored JS libraries (plotly, marked, katex)
+│   ├── dist/            # esbuild output (generated, gitignored)
+│   └── vendor/          # CSS/font assets (JS libs are bundled from npm)
 └── tests/               # Jest test suite
 ```
 
@@ -131,7 +132,7 @@ Run the web UI tests:
 
 ```bash
 uv run pytest tests/test_web_ui.py -v          # Python (Flask) tests
-npm test --prefix src/abstracts_explorer/web_ui  # Jest tests for the ES6 modules
+npm run typecheck && npm test                     # Type-check and test the TypeScript modules
 ```
 
 ## Development

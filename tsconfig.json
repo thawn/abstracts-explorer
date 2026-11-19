@@ -1,0 +1,22 @@
+{
+    "compilerOptions": {
+        "target": "ES2022",
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "lib": ["DOM", "DOM.Iterable", "ES2022"],
+        "strict": true,
+        "noEmit": true,
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
+        "isolatedModules": true,
+        "noUnusedLocals": false,
+        "noUnusedParameters": false,
+        "resolveJsonModule": true,
+        "types": []
+    },
+    "include": [
+        "src/abstracts_explorer/web_ui/static/**/*.ts",
+        "src/abstracts_explorer/web_ui/types/**/*.d.ts"
+    ],
+    "exclude": ["node_modules", "src/abstracts_explorer/web_ui/static/dist"]
+}

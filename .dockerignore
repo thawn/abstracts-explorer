@@ -26,6 +26,8 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+# Compiled web UI bundle (rebuilt in the frontend-builder stage)
+src/abstracts_explorer/web_ui/static/dist/
 
 # Data and databases (these should be in volumes)
 data/

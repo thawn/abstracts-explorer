@@ -2057,13 +2057,13 @@ class TestServerInitialization:
             / "static"
             / "modules"
             / "utils"
-            / "constants.js"
+            / "constants.ts"
         )
         with open(constants_path, "r", encoding="utf-8") as f:
             constants_content = f.read()
 
         # Check that Plotly colors are defined (using constant naming convention)
-        assert "PLOTLY_COLORS = [" in constants_content, "Plotly colors should be explicitly defined in constants.js"
+        assert "PLOTLY_COLORS" in constants_content, "Plotly colors should be explicitly defined in constants.ts"
 
         # Check clustering module for color assignment
         clustering_path = (
@@ -2073,7 +2073,7 @@ class TestServerInitialization:
             / "web_ui"
             / "static"
             / "modules"
-            / "clustering.js"
+            / "clustering.ts"
         )
         with open(clustering_path, "r", encoding="utf-8") as f:
             clustering_content = f.read()

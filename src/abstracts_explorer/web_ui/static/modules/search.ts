@@ -1,6 +1,6 @@
 /**
  * Search Module
- * 
+ *
  * Handles paper search functionality including query submission
  * and results display.
  */
@@ -11,32 +11,29 @@ import { parseJsonResponse } from './utils/api-utils.js';
 import { showError, renderEmptyState } from './utils/ui-utils.js';
 import { setCurrentSearchTerm } from './state.js';
 import { formatPaperCard } from './paper-card.js';
+import type { Paper } from './types.js';
 
 let latestSearchRequest = 0;
 
 /**
  * Invalidate any in-flight search request so its response is ignored.
- * Call this when filters change while a search may still be running.
  */
-export function cancelPendingSearch() {
+export function cancelPendingSearch(): void {
     latestSearchRequest += 1;
 }
 
 /**
- * Search papers using the search API
- * @async
+ * Search papers using the search API.
  */
-export async function searchPapers() {
-    const query = document.getElementById('search-input').value.trim();
-    const limit = parseInt(document.getElementById('limit-select').value);
-    const distanceThresholdInput = document.getElementById('distance-threshold-input');
+export async function searchPapers(): Promise<void> {
+    const query = (document.getElementById('search-input') as HTMLInputElement).value.trim();
+    const limit = parseInt((document.getElementById('limit-select') as HTMLSelectElement).value, 10);
+    const distanceThresholdInput = document.getElementById('distance-threshold-input') as HTMLInputElement | null;
     const distanceThreshold = distanceThresholdInput ? parseFloat(distanceThresholdInput.value) : undefined;
 
-    // Get multiple selected values from multi-select dropdowns
-    const sessionSelect = document.getElementById('session-filter');
+    const sessionSelect = document.getElementById('session-filter') as HTMLSelectElement;
     const sessions = Array.from(sessionSelect.selectedOptions).map(opt => opt.value);
 
-    // Get year and conference from header selectors
     const selectedYears = getSelectedYears();
     const selectedConference = getSelectedConference();
 
@@ -47,11 +44,9 @@ export async function searchPapers() {
 
     const requestId = ++latestSearchRequest;
 
-    // Store the current search term for rating papers
     setCurrentSearchTerm(query);
 
-    // Show loading
-    const resultsDiv = document.getElementById('search-results');
+    const resultsDiv = document.getElementById('search-results') as HTMLElement;
     resultsDiv.innerHTML = `
         <div class="flex justify-center items-center py-12">
             <div class="spinner"></div>
@@ -59,28 +54,24 @@ export async function searchPapers() {
     `;
 
     try {
-        const requestBody = {
+        const requestBody: Record<string, any> = {
             query,
             use_embeddings: true,
             limit
         };
 
-        // Include distance threshold if available and valid
         if (distanceThreshold !== undefined && !isNaN(distanceThreshold) && distanceThreshold > 0) {
             requestBody.distance_threshold = distanceThreshold;
         }
 
-        // Add filters only if NOT all options are selected (all selected = no filter)
         if (sessions.length > 0 && sessions.length < sessionSelect.options.length) {
             requestBody.sessions = sessions;
         }
 
-        // Add year filter if selected
         if (selectedYears.length > 0) {
             requestBody.years = selectedYears;
         }
 
-        // Add conference filter if selected
         if (selectedConference) {
             requestBody.conferences = [selectedConference];
         }
@@ -108,16 +99,15 @@ export async function searchPapers() {
     } catch (error) {
         if (requestId !== latestSearchRequest) return;
         console.error('Search error:', error);
-        showError(error && error.message ? error.message : 'We could not complete the search. Please try again.');
+        showError(error && (error as Error).message ? (error as Error).message : 'We could not complete the search. Please try again.');
     }
 }
 
 /**
- * Display search results
- * @param {Object} data - Search results data
+ * Display search results.
  */
-export function displaySearchResults(data) {
-    const resultsDiv = document.getElementById('search-results');
+export function displaySearchResults(data: any): void {
+    const resultsDiv = document.getElementById('search-results') as HTMLElement;
 
     if (!data.papers || data.papers.length === 0) {
         resultsDiv.innerHTML = renderEmptyState(
@@ -128,7 +118,6 @@ export function displaySearchResults(data) {
         return;
     }
 
-    // Display results header
     let html = `
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 mb-4">
             <div class="flex items-center justify-between">
@@ -141,7 +130,7 @@ export function displaySearchResults(data) {
             <div class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
                 <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Related Topics</span>
                 <div class="flex flex-wrap gap-2 mt-2">
-                    ${data.related_topics.map(kw => `<button
+                    ${data.related_topics.map((kw: string) => `<button
                         class="px-3 py-1 bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-sm rounded-full border border-blue-200 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-800 transition-colors cursor-pointer"
                         data-topic="${escapeHtml(kw)}"
                         onclick="document.getElementById('search-input').value = this.dataset.topic; searchPapers();"
@@ -151,14 +140,13 @@ export function displaySearchResults(data) {
         </div>
     `;
 
-    // Display papers using the shared formatting function
     try {
-        data.papers.forEach(paper => {
+        (data.papers as Paper[]).forEach(paper => {
             html += formatPaperCard(paper, { compact: false });
         });
     } catch (error) {
         console.error('Error formatting papers:', error);
-        showError(`Error displaying search results: ${error.message}`);
+        showError(`Error displaying search results: ${(error as Error).message}`);
         return;
     }
 
@@ -167,10 +155,8 @@ export function displaySearchResults(data) {
 
 /**
  * Advanced search field definitions.
- * Each entry maps a DOM input id to the field:"value" syntax name.
- * @type {Array<{id: string, field: string}>}
  */
-const ADVANCED_FIELDS = [
+const ADVANCED_FIELDS: Array<{ id: string; field: string }> = [
     { id: 'adv-authors', field: 'authors' },
     { id: 'adv-title', field: 'title' },
     { id: 'adv-keywords', field: 'keywords' },
@@ -180,18 +166,15 @@ const ADVANCED_FIELDS = [
 
 /**
  * Open the advanced search modal.
- * Parses the current search input to pre-populate modal fields.
  */
-export function openAdvancedSearch() {
-    const searchInput = document.getElementById('search-input');
+export function openAdvancedSearch(): void {
+    const searchInput = document.getElementById('search-input') as HTMLInputElement | null;
     const query = searchInput ? searchInput.value.trim() : '';
 
-    // Parse existing query into topic + field filters
     let remaining = query;
     for (const { id, field } of ADVANCED_FIELDS) {
-        const input = document.getElementById(id);
+        const input = document.getElementById(id) as HTMLInputElement | null;
         if (!input) continue;
-        // Match field:"value" (case-insensitive field name)
         const regex = new RegExp(`${field}:"([^"]+)"`, 'i');
         const match = remaining.match(regex);
         if (match) {
@@ -201,8 +184,8 @@ export function openAdvancedSearch() {
             input.value = '';
         }
     }
-    // Also try the "author" alias
-    const authorsInput = document.getElementById('adv-authors');
+
+    const authorsInput = document.getElementById('adv-authors') as HTMLInputElement | null;
     if (authorsInput && !authorsInput.value) {
         const aliasMatch = remaining.match(/author:"([^"]+)"/i);
         if (aliasMatch) {
@@ -211,24 +194,23 @@ export function openAdvancedSearch() {
         }
     }
 
-    const topicInput = document.getElementById('adv-topic');
+    const topicInput = document.getElementById('adv-topic') as HTMLInputElement | null;
     if (topicInput) {
         topicInput.value = remaining.replace(/\s+/g, ' ').trim();
     }
 
-    const modal = document.getElementById('advanced-search-modal');
+    const modal = document.getElementById('advanced-search-modal') as HTMLElement;
     modal.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
 
-    // Focus the topic field
     if (topicInput) topicInput.focus();
 }
 
 /**
  * Close the advanced search modal without applying changes.
  */
-export function closeAdvancedSearch() {
-    const modal = document.getElementById('advanced-search-modal');
+export function closeAdvancedSearch(): void {
+    const modal = document.getElementById('advanced-search-modal') as HTMLElement;
     modal.classList.add('hidden');
     document.body.style.overflow = '';
 }
@@ -236,25 +218,23 @@ export function closeAdvancedSearch() {
 /**
  * Build the search query from advanced search fields and trigger a search.
  */
-export function applyAdvancedSearch() {
-    const parts = [];
+export function applyAdvancedSearch(): void {
+    const parts: string[] = [];
 
-    // Collect field filters
     for (const { id, field } of ADVANCED_FIELDS) {
-        const input = document.getElementById(id);
+        const input = document.getElementById(id) as HTMLInputElement | null;
         if (input && input.value.trim()) {
             parts.push(`${field}:"${input.value.trim()}"`);
         }
     }
 
-    // Append the free-text topic at the end
-    const topicInput = document.getElementById('adv-topic');
+    const topicInput = document.getElementById('adv-topic') as HTMLInputElement | null;
     if (topicInput && topicInput.value.trim()) {
         parts.push(topicInput.value.trim());
     }
 
     const query = parts.join(' ');
-    const searchInput = document.getElementById('search-input');
+    const searchInput = document.getElementById('search-input') as HTMLInputElement | null;
     if (searchInput) {
         searchInput.value = query;
     }

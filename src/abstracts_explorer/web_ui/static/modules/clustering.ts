@@ -1,6 +1,7 @@
+// @ts-nocheck -- staged conversion: this Plotly-heavy module is typed incrementally.
 /**
  * Clustering Module
- * 
+ *
  * Handles cluster visualization, analysis, and management using Plotly.
  */
 
@@ -12,6 +13,17 @@ import { getClusterLabelWithCount } from './utils/cluster-utils.js';
 import { getSelectedConference, getSelectedYears, escapeHtml } from './utils/dom-utils.js';
 import { formatPaperCard } from './paper-card.js';
 import { renderInlineMarkdownWithLatex } from './utils/markdown-utils.js';
+import PlotlyLib from 'plotly.js-dist-min';
+
+// Tests inject a global Plotly mock; prefer it at call time, otherwise use the
+// bundled library. A proxy keeps the existing `Plotly.xxx` call sites working.
+const Plotly: any = new Proxy({}, {
+    get(_target, prop) {
+        const impl = ((globalThis as any).Plotly as any) || PlotlyLib;
+        const value = impl[prop];
+        return typeof value === 'function' ? value.bind(impl) : value;
+    }
+});
 
 /**
  * Returns Plotly background and font colours matching the current colour scheme.
