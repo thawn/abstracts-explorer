@@ -108,6 +108,8 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         desc: str,
         unit: str,
         show_progress: Optional[bool] = None,
+        initial: int = 0,
+        total: Optional[int] = None,
     ) -> List[Any]:
         """
         Run *worker* over *items* concurrently while preserving input order.
@@ -116,16 +118,34 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         need to be thread-safe. Results are stored by input index, so callers
         can merge them deterministically even though requests finish out of
         order.
+
+        Parameters
+        ----------
+        initial : int, optional
+            Number of entries already restored from a checkpoint. The progress
+            bar starts at this value while still using the full *total*.
+        total : int, optional
+            Total number of entries including checkpointed ones. Defaults to
+            ``len(items)``.
         """
         results: List[Any] = [None] * len(items)
+        disable = None if show_progress is None else not show_progress
+        bar_total = len(items) if total is None else total
         if not items:
+            if total is not None:
+                self._show_completed_progress(desc, unit, bar_total, show_progress, initial=initial)
             return results
 
         errors: List[Exception] = []
-        disable = None if show_progress is None else not show_progress
         with ThreadPoolExecutor(max_workers=max(1, max_workers)) as executor:
             futures = {executor.submit(worker, item): index for index, item in enumerate(items)}
-            with tqdm(total=len(items), desc=desc, unit=unit, disable=disable) as progress:
+            with tqdm(
+                total=bar_total,
+                initial=initial,
+                desc=desc,
+                unit=unit,
+                disable=disable,
+            ) as progress:
                 for future in as_completed(futures):
                     try:
                         results[futures[future]] = future.result()
@@ -141,6 +161,20 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
                 f"{len(errors)} of {len(items)} {desc.lower()} request(s) failed; " f"first error: {first_error}"
             ) from first_error
         return results
+
+    @staticmethod
+    def _show_completed_progress(
+        desc: str,
+        unit: str,
+        total: int,
+        show_progress: Optional[bool],
+        initial: Optional[int] = None,
+    ) -> None:
+        """Display a progress bar for work already satisfied by a checkpoint."""
+        disable = None if show_progress is None else not show_progress
+        progress = total if initial is None else initial
+        with tqdm(total=total, initial=progress, desc=desc, unit=unit, disable=disable):
+            pass
 
     @staticmethod
     def _checkpoint_dir(output_path: str) -> Path:
@@ -254,7 +288,7 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         verify_ssl = options.verify_ssl
         request_delay = options.request_delay
         max_workers = max(1, int(options.max_workers))
-        resume = options.resume and not force_download
+        resume = options.resume
         show_progress = options.progress
         meeting_url = self.get_url(year)
         api_url = meeting_url.replace("meetingapp.cgi", "meetingapi.cgi")
@@ -287,6 +321,13 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
             )
             if checkpoint_dir is not None:
                 self._save_json(checkpoint_dir / "sessions.json", sessions)
+        elif sessions:
+            self._show_completed_progress(
+                "Fetching AGU sessions",
+                "session",
+                len(sessions),
+                show_progress,
+            )
 
         existing_papers: Dict[str, Dict[str, Any]] = {}
         done_sessions: Set[str] = set()
@@ -400,6 +441,10 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         verify_ssl: bool,
         request_delay: float,
         show_progress: Optional[bool] = None,
+        max_workers: int = 1,
+        on_batch: Optional[Callable[[Dict[str, Dict[str, Any]]], None]] = None,
+        initial: int = 0,
+        total: Optional[int] = None,
     ) -> Dict[str, Dict[str, Any]]:
         """
         Fetch m-anage records in bounded BatchRead requests.
@@ -407,22 +452,43 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         m-anage may answer a BatchRead with only some of the requested records,
         listing the rest under ``unanswered`` or ``single``. As the m-anage web
         app does, records missing from the batch response are fetched
-        individually so throttling does not silently drop data.
+        individually (concurrently) so throttling does not silently drop data.
 
         Parameters
         ----------
         show_progress : bool, optional
             Whether to display a progress bar. ``None`` (default) shows the
             bar only when stderr is an interactive terminal.
+        max_workers : int, optional
+            Maximum concurrent individual fallback requests (default: 1).
+        on_batch : callable, optional
+            Called with each batch's newly fetched records as soon as they are
+            available, so callers can checkpoint partial progress.
+        initial : int, optional
+            Number of records already restored from a checkpoint.
+        total : int, optional
+            Total number of records including checkpointed ones. Defaults to
+            ``len(refs)``.
         """
         if not refs:
+            if total is not None:
+                self._show_completed_progress(
+                    "Fetching AGU records",
+                    "record",
+                    total,
+                    show_progress,
+                    initial=initial,
+                )
             return {}
 
         records: Dict[str, Dict[str, Any]] = {}
+        pending: List[str] = []
         single_fetches = 0
         disable = None if show_progress is None else not show_progress
+        bar_total = len(refs) if total is None else total
         with tqdm(
-            total=len(refs),
+            total=bar_total,
+            initial=initial,
             desc="Fetching AGU records",
             unit="record",
             disable=disable,
@@ -436,8 +502,15 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
                     {"ids": ",".join(batch)},
                 )
                 models = payload.get("models", {}) if isinstance(payload, dict) else {}
-                if isinstance(models, dict):
-                    records.update({ref: record for ref, record in models.items() if isinstance(record, dict)})
+                batch_records = (
+                    {ref: record for ref, record in models.items() if isinstance(record, dict)}
+                    if isinstance(models, dict)
+                    else {}
+                )
+                records.update(batch_records)
+                if on_batch is not None and batch_records:
+                    on_batch(batch_records)
+                progress.update(len(batch_records))
 
                 refused = payload.get("refused", {}) if isinstance(payload, dict) else {}
                 for ref in batch:
@@ -450,17 +523,28 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
                         status_code = None
                     if status_code is not None and status_code not in self._RETRYABLE_STATUSES:
                         logger.debug("Skipping unavailable AGU record %s (HTTP %s)", ref, status_code)
+                        progress.update(1)
                         continue
+                    pending.append(ref)
 
-                    record = self._fetch_json(f"{api_url}/{ref}", timeout, verify_ssl)
-                    if isinstance(record, dict):
-                        records[ref] = record
-                    single_fetches += 1
-                    self._wait_for_request_slot(request_delay)
-
-                progress.update(len(batch))
                 if start + self._BATCH_SIZE < len(refs):
                     self._wait_for_request_slot(request_delay)
+
+            for start in range(0, len(pending), self._BATCH_SIZE):
+                chunk = pending[start : start + self._BATCH_SIZE]
+                chunk_records = self._fetch_records_individually(
+                    api_url,
+                    chunk,
+                    timeout,
+                    verify_ssl,
+                    request_delay,
+                    max_workers,
+                )
+                records.update(chunk_records)
+                single_fetches += len(chunk_records)
+                if on_batch is not None and chunk_records:
+                    on_batch(chunk_records)
+                progress.update(len(chunk))
 
         if single_fetches:
             logger.info(
@@ -468,6 +552,56 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
                 single_fetches,
             )
         return records
+
+    def _fetch_records_individually(
+        self,
+        api_url: str,
+        refs: List[str],
+        timeout: float,
+        verify_ssl: bool,
+        request_delay: float,
+        max_workers: int,
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Fetch records that a BatchRead response omitted, concurrently.
+
+        Permanently unavailable records (HTTP 4xx other than 429) are skipped
+        instead of aborting the whole download.
+
+        Parameters
+        ----------
+        refs : list of str
+            Record refs to fetch individually.
+        max_workers : int
+            Maximum concurrent requests.
+        """
+
+        def fetch_one(ref: str) -> Any:
+            self._wait_for_request_slot(request_delay)
+            try:
+                record = self._fetch_json(f"{api_url}/{ref}", timeout, verify_ssl)
+            except RuntimeError as exc:
+                if self._is_unavailable_error(exc):
+                    logger.debug("Skipping unavailable AGU record %s: %s", ref, exc)
+                    return ref, None
+                raise
+            return ref, record if isinstance(record, dict) else None
+
+        results = self._run_parallel(
+            refs,
+            fetch_one,
+            max_workers=max_workers,
+            desc="Fetching AGU records",
+            unit="record",
+            show_progress=False,
+        )
+        return {ref: record for ref, record in results if isinstance(record, dict)}
+
+    @staticmethod
+    def _is_unavailable_error(error: Exception) -> bool:
+        """Return whether a fetch error is a permanent missing-record error."""
+        message = str(error)
+        return any(f"HTTP {status}" in message for status in (400, 403, 404, 410, 422))
 
     def _fetch_sessions(
         self,
@@ -533,6 +667,7 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
                     verify_ssl,
                     request_delay,
                     show_progress,
+                    max_workers=max_workers,
                 )
             )
         return sessions
@@ -578,6 +713,8 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
         slot_refs: Set[str] = set()
         params = {"date": datetime.now().isoformat(timespec="seconds")}
         session_list = list(sessions.values())
+        pending_sessions: List[Dict[str, Any]] = []
+        paper_session_count = 0
 
         for session in session_list:
             refs = session.get("ChildList_Paper") or []
@@ -585,22 +722,34 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
                 slot_refs.update(session.get("ChildList_PaperSlot") or [])
                 continue
             expected_refs.update(refs)
+            paper_session_count += 1
+            session_ref = str(session.get("_url") or f"Session/{session.get('id')}")
+            if session_ref not in done_sessions:
+                pending_sessions.append(session)
+
+        skipped_sessions = paper_session_count - len(pending_sessions)
+        if skipped_sessions:
+            logger.info(
+                "Resuming AGU papers: %d of %d paper session(s) already checkpointed",
+                skipped_sessions,
+                paper_session_count,
+            )
 
         def fetch(session: Dict[str, Any]) -> Any:
             session_ref = str(session.get("_url") or f"Session/{session.get('id')}")
-            if not session.get("ChildList_Paper") or session_ref in done_sessions:
-                return session_ref, None
             self._wait_for_request_slot(request_delay)
             data = self._fetch_json(f"{api_url}/{session_ref}/ChildList_Paper", timeout, verify_ssl, params)
             return session_ref, data
 
         results = self._run_parallel(
-            session_list,
+            pending_sessions,
             fetch,
             max_workers=max_workers,
             desc="Fetching AGU papers",
             unit="session",
             show_progress=show_progress,
+            initial=skipped_sessions,
+            total=paper_session_count,
         )
 
         new_papers: List[Dict[str, Any]] = []
@@ -631,12 +780,21 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
                 verify_ssl,
                 request_delay,
                 show_progress,
+                max_workers=max_workers,
             )
             for slot in slots.values():
                 expected_refs.update(slot.get("ChildList_Entry") or [])
 
         missing = sorted(ref for ref in expected_refs if ref not in papers)
         if missing:
+
+            def checkpoint_papers(records: Dict[str, Dict[str, Any]]) -> None:
+                if checkpoint_dir is not None:
+                    self._append_jsonl(
+                        checkpoint_dir / "papers.jsonl",
+                        [{"ref": ref, "data": paper} for ref, paper in records.items() if isinstance(paper, dict)],
+                    )
+
             fetched = self._fetch_batch_records(
                 api_url,
                 missing,
@@ -644,13 +802,12 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
                 verify_ssl,
                 request_delay,
                 show_progress,
+                max_workers=max_workers,
+                on_batch=checkpoint_papers,
+                initial=len(expected_refs) - len(missing),
+                total=len(expected_refs),
             )
             papers.update(fetched)
-            if checkpoint_dir is not None:
-                self._append_jsonl(
-                    checkpoint_dir / "papers.jsonl",
-                    [{"ref": ref, "data": paper} for ref, paper in fetched.items() if isinstance(paper, dict)],
-                )
         return papers
 
     def _fetch_people(
@@ -692,12 +849,12 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
             return {}
 
         people: Dict[str, Dict[str, Any]] = dict(existing_people or {})
-        if all(ref in people for ref in person_refs):
-            return people
-
         done_letters = set(done_letters or ())
         params = {"date": datetime.now().isoformat(timespec="seconds")}
-        letters = [letter for letter in self._PEOPLE_INDEX_LETTERS if letter not in done_letters]
+        if all(ref in people for ref in person_refs):
+            letters: List[str] = []
+        else:
+            letters = [letter for letter in self._PEOPLE_INDEX_LETTERS if letter not in done_letters]
 
         def fetch(letter: str) -> Any:
             self._wait_for_request_slot(request_delay)
@@ -722,6 +879,8 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
             desc="Fetching AGU people",
             unit="letter",
             show_progress=show_progress,
+            initial=len(self._PEOPLE_INDEX_LETTERS) - len(letters),
+            total=len(self._PEOPLE_INDEX_LETTERS),
         )
         for letter, records in results:
             new_people: List[Dict[str, Any]] = []
@@ -735,20 +894,28 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
 
         missing = sorted(ref for ref in person_refs if ref not in people)
         if missing:
-            fetched = self._fetch_batch_records(
+            cached_people = len(person_refs) - len(missing)
+
+            def checkpoint_people(records: Dict[str, Dict[str, Any]]) -> None:
+                people.update(records)
+                if checkpoint_dir is not None:
+                    self._append_jsonl(
+                        checkpoint_dir / "people.jsonl",
+                        [{"ref": ref, "data": person} for ref, person in records.items() if isinstance(person, dict)],
+                    )
+
+            self._fetch_batch_records(
                 api_url,
                 missing,
                 timeout,
                 verify_ssl,
                 request_delay,
                 show_progress,
+                max_workers=max_workers,
+                on_batch=checkpoint_people,
+                initial=cached_people,
+                total=len(person_refs),
             )
-            people.update(fetched)
-            if checkpoint_dir is not None:
-                self._append_jsonl(
-                    checkpoint_dir / "people.jsonl",
-                    [{"ref": ref, "data": person} for ref, person in fetched.items() if isinstance(person, dict)],
-                )
         return people
 
     @staticmethod

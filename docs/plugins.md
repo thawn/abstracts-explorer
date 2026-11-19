@@ -111,11 +111,14 @@ uv run abstracts-explorer download --conference agu --year 2026
   calling the plugin directly). Use `--request-delay` to add a per-request
   delay if m-anage starts rate-limiting.
 - **Resume**: Long downloads checkpoint completed phases next to the output
-  file. If a run is interrupted, rerun without `--force` to resume. Use
-  `--no-resume` to discard a checkpoint and start fresh.
+  file. If a run is interrupted, rerun to resume; `--force` still reuses a
+  matching checkpoint. Use `--no-resume` to discard a checkpoint and start
+  fresh.
 - **Progress**: The plugin shows progress bars for session discovery, paper fetching,
-  people indexing, and fallback batch reads in interactive terminals. Pass
-  `progress=True` or `progress=False` to force them on or off.
+  people indexing, and fallback batch reads in interactive terminals. Resumed
+  runs keep the full totals and count checkpointed entries as completed
+  progress instead of resetting the bars. Pass `progress=True` or
+  `progress=False` to force them on or off.
 
 ## Using Plugins via CLI
 

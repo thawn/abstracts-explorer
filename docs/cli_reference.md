@@ -53,7 +53,7 @@ usage: abstracts-explorer download [-h] [--output OUTPUT] [--conference CONFEREN
 | `--output OUTPUT` | Output path for intermediate JSON file (default: `data/abstracts.json`) |
 | `--conference CONFERENCE` | Conference to use (default: all conferences). Case-insensitive. |
 | `--year YEAR` | Year of conference/workshop (default: all available years). |
-| `--force` | Force re-download even if file exists |
+| `--force` | Force re-download even if file exists (matching checkpoints are still resumed) |
 | `--list-plugins` | List available downloader plugins and exit |
 | `--max-workers MAX_WORKERS` | Maximum parallel workers for fetching data (default: 20) |
 | `--request-delay REQUEST_DELAY` | Delay before each HTTP request (AGU plugin) |
