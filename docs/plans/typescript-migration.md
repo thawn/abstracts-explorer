@@ -95,7 +95,7 @@ esbuild configuration:
 
 ### `package.json` scripts
 
-```jsonc
+```json
 {
   "build:js": "node scripts/build.mjs",
   "watch:js": "node scripts/build.mjs --watch",
