@@ -21,6 +21,7 @@ import {
     editPaperSearchTerm,
     switchInterestingSession,
     changeInterestingPapersSortOrder,
+    switchInterestingConferenceFromMenu,
     donateInterestingPapersData,
     updateControlsVisibility
 } from './modules/interesting-papers.js';
@@ -185,6 +186,7 @@ function attachToWindow(): void {
     window.editPaperSearchTerm = editPaperSearchTerm;
     window.switchInterestingSession = switchInterestingSession;
     window.changeInterestingPapersSortOrder = changeInterestingPapersSortOrder;
+    window.switchInterestingConferenceFromMenu = switchInterestingConferenceFromMenu;
     window.donateInterestingPapersData = donateInterestingPapersData;
     window.updateControlsVisibility = updateControlsVisibility;
     window.loadPriorities = loadPriorities;

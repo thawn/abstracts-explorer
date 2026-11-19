@@ -22,6 +22,7 @@ import {
     saveInterestingPapersAsMarkdown,
     donateInterestingPapersData,
     switchInterestingSession,
+    switchInterestingConferenceFromMenu,
     changeInterestingPapersSortOrder
 } from '../static/modules/interesting-papers.js';
 
@@ -35,6 +36,11 @@ describe('Interesting Papers Module', () => {
             <div id="interesting-session-tabs"></div>
             <div id="interesting-session-tabs-nav"></div>
             <div id="interesting-count">0</div>
+            <div id="interesting-conference-menu" class="hidden">
+                <select id="interesting-conference-select">
+                    <option value="">Select conference/year…</option>
+                </select>
+            </div>
             <select id="year-selector">
                 <option value="2025">2025</option>
                 <option value="2024">2024</option>
@@ -264,6 +270,69 @@ describe('Interesting Papers Module', () => {
 
             const countElement = document.getElementById('interesting-count');
             expect(countElement.textContent).toBe('3');
+        });
+    });
+
+
+    describe('other conference menu', () => {
+        const setPriorities = (ids) => {
+            const priorities = {};
+            ids.forEach((id) => {
+                priorities[id] = { priority: 3 };
+            });
+            localStorage.setItem('paperPriorities', JSON.stringify(priorities));
+            loadPriorities();
+        };
+
+        const getMenu = () => document.getElementById('interesting-conference-menu');
+        const getSelect = () => document.getElementById('interesting-conference-select');
+
+        test('should hide the menu when only the current combo has papers', () => {
+            setPriorities(['paper1', 'paper2']);
+            document.getElementById('conference-selector').value = 'NeurIPS';
+            document.getElementById('year-selector').value = '2025';
+
+            displayInterestingPapers([
+                { uid: 'paper1', title: 'Paper 1', session: 'Session A', conference: 'NeurIPS', year: 2025, poster_position: 'A1' },
+                { uid: 'paper2', title: 'Paper 2', session: 'Session A', conference: 'NeurIPS', year: 2025, poster_position: 'A2' }
+            ]);
+
+            expect(getMenu().classList.contains('hidden')).toBe(true);
+            expect(getSelect().options).toHaveLength(1);
+        });
+
+        test('should list other conference/year combos with counts', () => {
+            setPriorities(['paper1', 'paper2', 'paper3', 'paper4', 'paper5']);
+            document.getElementById('conference-selector').value = 'NeurIPS';
+            document.getElementById('year-selector').value = '2025';
+
+            displayInterestingPapers([
+                { uid: 'paper1', title: 'Paper 1', session: 'Session A', conference: 'NeurIPS', year: 2025, poster_position: 'A1' },
+                { uid: 'paper2', title: 'Paper 2', session: 'Session A', conference: 'ICLR', year: 2025, poster_position: 'A2' },
+                { uid: 'paper3', title: 'Paper 3', session: 'Session A', conference: 'ICLR', year: 2025, poster_position: 'A3' },
+                { uid: 'paper4', title: 'Paper 4', session: 'Session A', conference: 'NeurIPS', year: 2024, poster_position: 'A4' },
+                { uid: 'paper5', title: 'Paper 5', session: 'Session A', year: 2024, poster_position: 'A5' }
+            ]);
+
+            expect(getMenu().classList.contains('hidden')).toBe(false);
+            const labels = Array.from(getSelect().options).map(option => option.textContent);
+            expect(labels).toContain('ICLR 2025 (2)');
+            expect(labels).toContain('NeurIPS 2024 (1)');
+            expect(labels).not.toContain('NeurIPS 2025 (1)');
+        });
+
+        test('should switch header selectors and refresh when a combo is chosen', () => {
+            window.conferenceYearsMap = { NeurIPS: [2025], ICLR: [2025, 2024] };
+            window.handleConferenceChange = jest.fn();
+
+            switchInterestingConferenceFromMenu(`${encodeURIComponent('ICLR')}|2024`);
+
+            expect(document.getElementById('conference-selector').value).toBe('ICLR');
+            expect(document.getElementById('year-selector').value).toBe('2024');
+            expect(window.handleConferenceChange).toHaveBeenCalled();
+
+            delete window.conferenceYearsMap;
+            delete window.handleConferenceChange;
         });
     });
 
