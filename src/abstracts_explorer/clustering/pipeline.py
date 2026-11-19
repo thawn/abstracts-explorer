@@ -68,6 +68,7 @@ def _run_pipeline(
     years: Optional[List[int]] = None,
     clustering_kwargs: Optional[Dict[str, Any]] = None,
     use_llm_labels: bool = True,
+    show_progress: bool = False,
 ) -> None:
     """
     Run the shared clustering pipeline on *cm* in place.
@@ -97,6 +98,9 @@ def _run_pipeline(
     use_llm_labels : bool, optional
         Whether flat cluster labels should be generated with the LLM, by
         default ``True``.
+    show_progress : bool, optional
+        Show progress bars while generating cluster labels, by default
+        ``False``.
     """
     kwargs = dict(clustering_kwargs or {})
 
@@ -112,7 +116,7 @@ def _run_pipeline(
     logger.info("Generating cluster labels...")
     try:
         cm.extract_cluster_keywords(n_keywords=10)
-        cm.generate_cluster_labels(use_llm=use_llm_labels, max_keywords=5)
+        cm.generate_cluster_labels(use_llm=use_llm_labels, max_keywords=5, show_progress=show_progress)
     except Exception as e:
         logger.warning(f"Failed to generate cluster labels: {e}")
 
@@ -124,7 +128,8 @@ def perform_clustering(
     output_path: Optional[Union[str, Path]] = None,
     random_state: int = 42,
     limit: Optional[int] = None,
-    **kwargs,
+    show_progress: bool = False,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """
     Perform complete clustering pipeline and optionally export results.
@@ -149,6 +154,9 @@ def perform_clustering(
         Random state for reproducibility, by default 42
     limit : int, optional
         Maximum number of embeddings to process. If None, process all.
+    show_progress : bool, optional
+        Show progress bars while generating cluster labels, by default
+        ``False``.
     **kwargs
         Additional arguments passed to the clustering algorithm
         (e.g. distance_threshold, linkage)
@@ -181,6 +189,7 @@ def perform_clustering(
                 random_state=random_state,
                 limit=limit,
                 clustering_kwargs=kwargs,
+                show_progress=show_progress,
             )
             results = cm.get_clustering_results()
             if output_path:
@@ -203,6 +212,7 @@ def compute_clusters_with_cache(
     years: Optional[List[int]] = None,
     repair_default_labels: bool = False,
     use_llm_labels: bool = True,
+    show_progress: bool = False,
     **clustering_kwargs: Any,
 ) -> Dict[str, Any]:
     """
@@ -241,6 +251,9 @@ def compute_clusters_with_cache(
     use_llm_labels : bool, optional
         Whether cluster labels should be generated with the LLM, by default
         ``True``.
+    show_progress : bool, optional
+        Show progress bars while generating cluster labels, by default
+        ``False``.
     **clustering_kwargs
         Additional clustering parameters (e.g., distance_threshold, linkage)
 
@@ -302,6 +315,7 @@ def compute_clusters_with_cache(
         years=years,
         clustering_kwargs=clustering_kwargs,
         use_llm_labels=use_llm_labels,
+        show_progress=show_progress,
     )
 
     if cm.cluster_hierarchy is not None:
@@ -337,7 +351,11 @@ def compute_clusters_with_cache(
         else:
             logger.info("Generating hierarchical labels for agglomerative clustering...")
             try:
-                hierarchical_labels = cm.generate_hierarchical_labels(use_llm=use_llm, max_keywords=5)
+                hierarchical_labels = cm.generate_hierarchical_labels(
+                    use_llm=use_llm,
+                    max_keywords=5,
+                    show_progress=show_progress,
+                )
                 if repair_default_labels:
                     default_nodes = find_default_hierarchy_labels(hierarchical_labels, cm.cluster_hierarchy)
                     if default_nodes:

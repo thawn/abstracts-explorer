@@ -4,9 +4,11 @@ Cluster labeling using TF-IDF keywords and LLM-generated labels.
 
 import logging
 import time
-from typing import Any, Dict, List
+from contextlib import contextmanager
+from typing import Any, Dict, Iterator, List, Optional
 
 import numpy as np
+from tqdm import tqdm
 
 from abstracts_explorer.clustering.errors import ClusteringError
 from abstracts_explorer.clustering.label_validation import join_child_labels
@@ -17,6 +19,35 @@ from abstracts_explorer.llm_utils import chat_completion_text
 logger = logging.getLogger(__name__)
 
 _RETRYABLE_LLM_STATUS_CODES = frozenset({408, 409, 429, 500, 502, 503, 504})
+
+
+@contextmanager
+def _progress_bar(total: int, desc: str, unit: str, enabled: bool) -> Iterator[Optional[Any]]:
+    """
+    Yield a tqdm progress bar when enabled, or ``None`` otherwise.
+
+    Parameters
+    ----------
+    total : int
+        Number of items to process.
+    desc : str
+        Progress bar description.
+    unit : str
+        Unit label for processed items.
+    enabled : bool
+        Whether progress reporting is enabled.
+
+    Yields
+    ------
+    tqdm or None
+        Configured progress bar, or ``None`` when disabled.
+    """
+    if not enabled or total <= 0:
+        yield None
+        return
+
+    with tqdm(total=total, desc=desc, unit=unit) as progress:
+        yield progress
 
 
 def _is_retryable_llm_error(error: Exception) -> bool:
@@ -61,7 +92,12 @@ class LabelingMixin:
     cluster_label_names: Any
     cluster_hierarchy: Any
 
-    def generate_hierarchical_labels(self, use_llm: bool = True, max_keywords: int = 5) -> Dict[int, str]:
+    def generate_hierarchical_labels(
+        self,
+        use_llm: bool = True,
+        max_keywords: int = 5,
+        show_progress: bool = False,
+    ) -> Dict[int, str]:
         """
         Generate labels for all levels of the hierarchy.
 
@@ -76,6 +112,9 @@ class LabelingMixin:
             Whether to use LLM for label generation, by default True
         max_keywords : int, optional
             Maximum number of keywords to use in label generation, by default 5
+        show_progress : bool, optional
+            Show a progress bar for the LLM-labeled hierarchy nodes, by
+            default False
 
         Returns
         -------
@@ -92,7 +131,11 @@ class LabelingMixin:
 
         # First generate labels for leaf clusters if not already done
         if self.cluster_label_names is None:
-            self.generate_cluster_labels(use_llm=use_llm, max_keywords=max_keywords)
+            self.generate_cluster_labels(
+                use_llm=use_llm,
+                max_keywords=max_keywords,
+                show_progress=show_progress,
+            )
 
         tree = self.cluster_hierarchy["tree"]
         hierarchical_labels = {}
@@ -113,58 +156,80 @@ class LabelingMixin:
             paper_id_to_idx = {pid: idx for idx, pid in enumerate(self.paper_ids)}
 
         # Generate labels for internal nodes bottom-up with tiered approach
-        for level in range(1, tree["max_level"] + 1):
-            for node_id, node_info in tree["nodes"].items():
-                if node_info["level"] == level:
-                    child_labels = [
-                        hierarchical_labels.get(child, f"Node {child}") for child in node_info["children"]
-                    ]
+        progress_total = 0
+        if show_progress and use_llm:
+            progress_total = sum(1 for node in tree["nodes"].values() if int(node["level"]) >= 4)
 
-                    if use_llm:
-                        # Tiered approach based on level
-                        if level <= 3:
-                            # Levels 0-3: Use simple fallback (fast)
-                            hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
-                            logger.debug(f"Level {level} node {node_id}: Using fallback")
-                        elif level == 4:
-                            # Level 4: Use full cluster label generation with keywords
-                            try:
-                                if self.embeddings_manager and self.metadatas:
-                                    keywords = self._extract_keywords_for_samples(node_info["samples"], max_keywords)
-                                    if keywords:
-                                        label = self._generate_llm_label_from_keywords(keywords)
-                                        hierarchical_labels[node_id] = label
-                                        logger.debug(
-                                            f"Level {level} node {node_id}: Generated LLM label from keywords {keywords}"
+        with _progress_bar(
+            progress_total,
+            "Labeling hierarchy",
+            "node",
+            show_progress and use_llm,
+        ) as progress:
+            for level in range(1, tree["max_level"] + 1):
+                for node_id, node_info in tree["nodes"].items():
+                    if node_info["level"] == level:
+                        child_labels = [
+                            hierarchical_labels.get(child, f"Node {child}") for child in node_info["children"]
+                        ]
+
+                        if use_llm:
+                            # Tiered approach based on level
+                            if level <= 3:
+                                # Levels 0-3: Use simple fallback (fast)
+                                hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
+                                logger.debug(f"Level {level} node {node_id}: Using fallback")
+                            elif level == 4:
+                                # Level 4: Use full cluster label generation with keywords
+                                try:
+                                    if self.embeddings_manager and self.metadatas:
+                                        keywords = self._extract_keywords_for_samples(
+                                            node_info["samples"], max_keywords
                                         )
+                                        if keywords:
+                                            label = self._generate_llm_label_from_keywords(keywords)
+                                            hierarchical_labels[node_id] = label
+                                            logger.debug(
+                                                f"Level {level} node {node_id}: "
+                                                f"Generated LLM label from keywords {keywords}"
+                                            )
+                                        else:
+                                            hierarchical_labels[node_id] = self._generate_parent_label_fallback(
+                                                child_labels
+                                            )
                                     else:
+                                        hierarchical_labels[node_id] = self._generate_parent_label_fallback(
+                                            child_labels
+                                        )
+                                except Exception as e:
+                                    logger.warning(f"Keyword-based label generation failed for node {node_id}: {e}")
+                                    hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
+                            else:
+                                # Levels 5+: Use LLM-based parent label generation
+                                if self.embeddings_manager:
+                                    try:
+                                        # Convert paper IDs to indices for metadata lookup
+                                        sample_indices = [
+                                            paper_id_to_idx[pid]
+                                            for pid in node_info["samples"]
+                                            if pid in paper_id_to_idx
+                                        ]
+                                        label = self._generate_parent_label_llm(child_labels, sample_indices)
+                                        hierarchical_labels[node_id] = label
+                                        logger.debug(f"Level {level} node {node_id}: Generated LLM parent label")
+                                    except Exception as e:
+                                        logger.warning(f"LLM label generation failed for node {node_id}: {e}")
                                         hierarchical_labels[node_id] = self._generate_parent_label_fallback(
                                             child_labels
                                         )
                                 else:
                                     hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
-                            except Exception as e:
-                                logger.warning(f"Keyword-based label generation failed for node {node_id}: {e}")
-                                hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
                         else:
-                            # Levels 5+: Use LLM-based parent label generation
-                            if self.embeddings_manager:
-                                try:
-                                    # Convert paper IDs to indices for metadata lookup
-                                    sample_indices = [
-                                        paper_id_to_idx[pid] for pid in node_info["samples"] if pid in paper_id_to_idx
-                                    ]
-                                    label = self._generate_parent_label_llm(child_labels, sample_indices)
-                                    hierarchical_labels[node_id] = label
-                                    logger.debug(f"Level {level} node {node_id}: Generated LLM parent label")
-                                except Exception as e:
-                                    logger.warning(f"LLM label generation failed for node {node_id}: {e}")
-                                    hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
-                            else:
-                                hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
-                    else:
-                        # LLM disabled: always use fallback
-                        hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
+                            # LLM disabled: always use fallback
+                            hierarchical_labels[node_id] = self._generate_parent_label_fallback(child_labels)
+
+                        if progress is not None and level >= 4:
+                            progress.update(1)
 
         return hierarchical_labels
 
@@ -483,6 +548,7 @@ Only respond with the label, nothing else. Do not add formatting."""
         self,
         use_llm: bool = True,
         max_keywords: int = 5,
+        show_progress: bool = False,
     ) -> Dict[int, str]:
         """
         Generate descriptive labels for clusters.
@@ -496,6 +562,8 @@ Only respond with the label, nothing else. Do not add formatting."""
             Whether to use LLM for label generation, by default True
         max_keywords : int, optional
             Maximum number of keywords to use in label generation, by default 5
+        show_progress : bool, optional
+            Show a progress bar while labeling clusters, by default False
 
         Returns
         -------
@@ -529,25 +597,32 @@ Only respond with the label, nothing else. Do not add formatting."""
             unique_labels = np.unique(self.cluster_labels)
             cluster_ids = [int(label) for label in unique_labels if label >= 0]
 
-            for cluster_id in cluster_ids:
-                keywords = (self.cluster_keywords or {}).get(cluster_id, [])[:max_keywords]
+            with _progress_bar(
+                len(cluster_ids),
+                "Labeling clusters",
+                "cluster",
+                show_progress,
+            ) as progress:
+                for cluster_id in cluster_ids:
+                    keywords = (self.cluster_keywords or {}).get(cluster_id, [])[:max_keywords]
 
-                if not keywords:
-                    self.cluster_label_names[cluster_id] = f"Cluster {cluster_id}"
-                    continue
-
-                if use_llm and self.embeddings_manager:
-                    try:
-                        # Generate label using LLM
-                        label = self._generate_llm_label(cluster_id, keywords)
-                        self.cluster_label_names[cluster_id] = label
-                    except Exception as e:
-                        logger.warning(f"LLM label generation failed for cluster {cluster_id}: {e}")
-                        # Fallback to keyword-based label
+                    if not keywords:
+                        self.cluster_label_names[cluster_id] = f"Cluster {cluster_id}"
+                    elif use_llm and self.embeddings_manager:
+                        try:
+                            # Generate label using LLM
+                            label = self._generate_llm_label(cluster_id, keywords)
+                            self.cluster_label_names[cluster_id] = label
+                        except Exception as e:
+                            logger.warning(f"LLM label generation failed for cluster {cluster_id}: {e}")
+                            # Fallback to keyword-based label
+                            self.cluster_label_names[cluster_id] = ", ".join(keywords[:3])
+                    else:
+                        # Use keyword-based label
                         self.cluster_label_names[cluster_id] = ", ".join(keywords[:3])
-                else:
-                    # Use keyword-based label
-                    self.cluster_label_names[cluster_id] = ", ".join(keywords[:3])
+
+                    if progress is not None:
+                        progress.update(1)
 
             logger.info(f"Generated labels for {len(self.cluster_label_names)} clusters")
             return self.cluster_label_names

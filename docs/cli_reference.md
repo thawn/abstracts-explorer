@@ -235,6 +235,8 @@ usage: abstracts-explorer clustering run [-h] [--collection COLLECTION]
 | `--output OUTPUT` | Path to export clustering results as JSON (optional) |
 | `--limit LIMIT` | Maximum number of embeddings to process (optional) |
 
+Labeling shows a `Labeling clusters` progress bar.
+
 ### clustering clear-cache
 
 Clear clustering cache from the database (useful when embeddings change or
@@ -276,6 +278,10 @@ hierarchy labels are fallback values from an earlier LLM failure (for example
 Healthy cached labels are reused without additional LLM calls. This repair
 only runs in the CLI pre-generation path; the web UI and MCP server continue
 to use the cache as-is.
+
+For each conference/year combination, labeling shows `Labeling clusters` and
+`Labeling hierarchy` progress bars. `pre-process` inherits the same progress
+output.
 
 ```text
 usage: abstracts-explorer clustering pre-generate [-h] [--collection COLLECTION]

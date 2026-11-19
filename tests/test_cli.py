@@ -2728,6 +2728,24 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Error clearing clustering cache" in captured.err
 
+    def test_cluster_embeddings_passes_show_progress(self, tmp_path, capsys, monkeypatch):
+        """Test clustering run enables label progress bars."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+
+        mock_results = {
+            "statistics": {"total_papers": 5, "n_clusters": 2, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        with patch("abstracts_explorer.cli.clustering.perform_clustering") as mock_perform:
+            mock_perform.return_value = mock_results
+            with patch.object(sys, "argv", ["abstracts-explorer", "clustering", "run"]):
+                exit_code = main()
+
+        assert exit_code == 0
+        assert mock_perform.call_args.kwargs["show_progress"] is True
+
     def test_pre_generate_clustering_missing_embeddings(self, tmp_path, capsys, monkeypatch):
         """Test pre-generate-clustering fails when embeddings DB doesn't exist."""
         patch_get_config_for_test(monkeypatch, tmp_path / "nonexistent")
@@ -2827,6 +2845,7 @@ class TestCLI:
             assert kw["distance_threshold"] == 150.0
             assert kw["n_clusters"] is None
             assert kw["repair_default_labels"] is True
+            assert kw["show_progress"] is True
         mock_em.close.assert_called_once()
 
     def test_pre_generate_clustering_no_conferences_in_db(self, tmp_path, capsys, monkeypatch):

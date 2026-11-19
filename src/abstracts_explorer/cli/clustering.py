@@ -75,6 +75,7 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
             n_clusters=None,
             output_path=args.output,
             limit=args.limit,
+            show_progress=True,
             **DEFAULT_CLUSTERING_PARAMS,
         )
 
@@ -267,6 +268,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
                             conferences=c_conferences,
                             years=c_years,
                             repair_default_labels=True,
+                            show_progress=True,
                             **DEFAULT_CLUSTERING_PARAMS,
                         )
 

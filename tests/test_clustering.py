@@ -1095,7 +1095,7 @@ class TestComputeClustersRepair:
         database.get_clustering_cache.return_value = None
         database.get_hierarchical_label_cache.return_value = {10: "Cluster 10"}
         cm_class = mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager")
-        mocker.patch("abstracts_explorer.clustering.pipeline._run_pipeline")
+        run_pipeline = mocker.patch("abstracts_explorer.clustering.pipeline._run_pipeline")
         cm = cm_class.return_value
         cm.cluster_hierarchy = hierarchy
         cm.paper_ids = []
@@ -1107,9 +1107,78 @@ class TestComputeClustersRepair:
             database,
             "model",
             repair_default_labels=True,
+            show_progress=True,
         )
 
+        assert run_pipeline.call_args.kwargs["show_progress"] is True
         cm.generate_hierarchical_labels.assert_called_once()
+        assert cm.generate_hierarchical_labels.call_args.kwargs["show_progress"] is True
         save_kwargs = database.save_hierarchical_label_cache.call_args.kwargs
         assert save_kwargs["replace_scope"] is True
         assert hierarchy["tree"]["nodes"][10]["label"] == "Deep Learning"
+
+
+class TestLabelingProgress:
+    """Tests for cluster-labeling progress bars."""
+
+    def test_generate_cluster_labels_shows_progress(
+        self, mock_embeddings_manager, mock_collection_with_data, mocker, mock_database
+    ):
+        """Flat cluster labeling creates a progress bar when requested."""
+        mock_tqdm = mocker.patch("abstracts_explorer.clustering.labeling.tqdm")
+        progress = mock_tqdm.return_value.__enter__.return_value
+        mock_embeddings_manager.collection = mock_collection_with_data
+
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
+        cm.load_embeddings()
+        cm.cluster(n_clusters=3)
+
+        labels = cm.generate_cluster_labels(use_llm=False, show_progress=True)
+
+        call_kwargs = mock_tqdm.call_args.kwargs
+        assert call_kwargs["total"] == len(labels)
+        assert call_kwargs["desc"] == "Labeling clusters"
+        assert call_kwargs["unit"] == "cluster"
+        assert progress.update.call_count == len(labels)
+
+    def test_generate_cluster_labels_no_progress_by_default(
+        self, mock_embeddings_manager, mock_collection_with_data, mocker, mock_database
+    ):
+        """Labeling stays silent unless progress is requested."""
+        mock_tqdm = mocker.patch("abstracts_explorer.clustering.labeling.tqdm")
+        mock_embeddings_manager.collection = mock_collection_with_data
+
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
+        cm.load_embeddings()
+        cm.cluster(n_clusters=3)
+
+        cm.generate_cluster_labels(use_llm=False)
+
+        mock_tqdm.assert_not_called()
+
+    def test_generate_hierarchical_labels_shows_progress(
+        self, mock_embeddings_manager, mock_collection_with_data, mocker, mock_database
+    ):
+        """Hierarchy labeling creates a progress bar for level-4+ nodes."""
+        mock_tqdm = mocker.patch("abstracts_explorer.clustering.labeling.tqdm")
+        progress = mock_tqdm.return_value.__enter__.return_value
+        mock_embeddings_manager.collection = mock_collection_with_data
+
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
+        cm.load_embeddings()
+        cm.cluster(n_clusters=3)
+        cm.cluster_label_names = {
+            int(label): f"Label {int(label)}" for label in np.unique(cm.cluster_labels) if label >= 0
+        }
+        mocker.patch.object(cm, "_extract_keywords_for_samples", return_value=["keyword"])
+        mocker.patch.object(cm, "_generate_llm_label_from_keywords", return_value="Keyword Label")
+        mocker.patch.object(cm, "_generate_parent_label_llm", return_value="Parent Label")
+
+        cm.generate_hierarchical_labels(use_llm=True, show_progress=True)
+
+        expected_total = sum(1 for node in cm.cluster_hierarchy["tree"]["nodes"].values() if int(node["level"]) >= 4)
+        call_kwargs = mock_tqdm.call_args.kwargs
+        assert call_kwargs["total"] == expected_total
+        assert call_kwargs["desc"] == "Labeling hierarchy"
+        assert call_kwargs["unit"] == "node"
+        assert progress.update.call_count == expected_total
