@@ -83,7 +83,7 @@ them with `--no-verify` unless explicitly asked.
 - DB: SQLAlchemy 2.0+, SQLite default / PostgreSQL supported. Models: `Paper`, `EmbeddingsMetadata`, `ClusteringCache`.
 - Clustering: the pipeline is fixed to Agglomerative (ward linkage, distance threshold 150) + t-SNE; the other algorithms (K-Means, DBSCAN, Spectral, Fuzzy C-Means) and PCA were removed. Shared pipeline constants live in `clustering.py` (`DEFAULT_CLUSTERING_*`). LLM auto-labeling + DB-backed cache.
 - MCP: `MCPServer` from the `mcp` package; RAG chat auto-invokes MCP tools.
-- Web UI: Flask 3.0+, 20+ API routes in `web_ui/app.py` (frontend calls from `web_ui/static/modules/`), TypeScript modules bundled by esbuild, Waitress in production.
+- Web UI: Flask 3.0+, 20+ API routes in `web_ui/app.py` (frontend calls from `web_ui/static/modules/`), TypeScript modules bundled by esbuild (basic Plotly build lazy-loaded on first chart), Waitress in production.
 
 ## Suggest commit message
 

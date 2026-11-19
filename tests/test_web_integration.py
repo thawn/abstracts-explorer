@@ -260,13 +260,7 @@ class TestWebUIIntegration:
 
         # Test compiled JavaScript bundle (only present when the frontend was built)
         bundle_path = (
-            Path(__file__).parent.parent
-            / "src"
-            / "abstracts_explorer"
-            / "web_ui"
-            / "static"
-            / "dist"
-            / "app.js"
+            Path(__file__).parent.parent / "src" / "abstracts_explorer" / "web_ui" / "static" / "dist" / "app.js"
         )
         if bundle_path.exists():
             response = requests.get(f"{base_url}/static/dist/app.js", timeout=5)
@@ -684,13 +678,7 @@ class TestWebUIIntegration:
 
         # JavaScript bundle (only present when the frontend was built)
         bundle_path = (
-            Path(__file__).parent.parent
-            / "src"
-            / "abstracts_explorer"
-            / "web_ui"
-            / "static"
-            / "dist"
-            / "app.js"
+            Path(__file__).parent.parent / "src" / "abstracts_explorer" / "web_ui" / "static" / "dist" / "app.js"
         )
         if bundle_path.exists():
             response = requests.get(f"{base_url}/static/dist/app.js", timeout=5)

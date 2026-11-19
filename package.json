@@ -37,7 +37,7 @@
             ".ts"
         ],
         "moduleNameMapper": {
-            "^plotly\\.js-dist-min$": "<rootDir>/src/abstracts_explorer/web_ui/tests/__mocks__/plotly.js",
+            "^plotly\\.js-(basic-)?dist-min$": "<rootDir>/src/abstracts_explorer/web_ui/tests/__mocks__/plotly.js",
             "^(\\.{1,2}/.*)\\.js$": "$1"
         },
         "transform": {

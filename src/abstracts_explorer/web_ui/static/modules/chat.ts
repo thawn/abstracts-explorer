@@ -5,7 +5,6 @@
  * and conversation management.
  */
 
-import PlotlyLib from 'plotly.js-dist-min';
 import { API_BASE } from './utils/constants.js';
 import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
 import { parseJsonResponse } from './utils/api-utils.js';
@@ -14,12 +13,13 @@ import { setCurrentSearchTerm, getAllPaperPriorities } from './state.js';
 import { formatPaperCard } from './paper-card.js';
 import { renderMarkdownWithLatex } from './utils/markdown-utils.js';
 import type { Paper, Visualization, ChatMetadata } from './types.js';
+import { ensurePlotly, getPlotly } from './plotly-loader.js';
 
-// Tests inject a global Plotly mock; prefer it at call time, otherwise use the
-// bundled library. A proxy keeps the existing `Plotly.xxx` call sites working.
+// Plotly is loaded lazily (and tests inject a global mock). The proxy defers
+// resolution to call time so the existing `Plotly.xxx` call sites keep working.
 const Plotly: any = new Proxy({}, {
     get(_target, prop) {
-        const impl = ((globalThis as any).Plotly as any) || PlotlyLib;
+        const impl = getPlotly();
         const value = impl[prop];
         return typeof value === 'function' ? value.bind(impl) : value;
     }
@@ -218,6 +218,7 @@ export async function sendChatMessage(): Promise<void> {
         addChatMessage(responseText, 'assistant');
 
         if (visualizations.length > 0) {
+            await ensurePlotly();
             renderChatVisualizations(visualizations);
         }
 

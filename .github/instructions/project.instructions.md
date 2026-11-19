@@ -177,8 +177,8 @@ them from `static/modules/`.
   conference topics, topic evolution, paper search, cluster visualization,
   paper details, interesting-paper summaries, and recommendations.
 - **Web UI**: Flask 3.0+, 20+ API routes, TypeScript modules bundled with
-  esbuild (`static/dist/`), Plotly/Marked/KaTeX/DOMPurify imported from npm,
-  Waitress in production.
+  esbuild (`static/dist/`), Plotly (basic build, lazy-loaded)/Marked/KaTeX/DOMPurify
+  imported from npm, Waitress in production.
 - **Registry/evaluation**: OCI artifacts via `oras`; automatic RAG evaluation.
 
 ## Common Tasks
