@@ -10,7 +10,7 @@ from pathlib import Path
 from abstracts_explorer.config import Config, get_config, load_env_file
 from abstracts_explorer import config as config_module
 
-from tests.conftest import get_env_test_path
+from tests.conftest import get_base_env_test_path
 
 
 def clean_config_env_vars():
@@ -19,8 +19,48 @@ def clean_config_env_vars():
     Uses an explicit list of supported environment variable names. This ensures that
     environment-only keys such as ``PAPER_DB`` are also removed.
     """
-    config = Config(env_path=get_env_test_path())
-    env_vars = config.get_supported_env_vars()
+    env_vars = {
+        "DATA_DIR",
+        "CHAT_MODEL",
+        "CHAT_TEMPERATURE",
+        "CHAT_MAX_TOKENS",
+        "CLUSTER_LABEL_MODEL",
+        "EMBEDDING_MODEL",
+        "EMBEDDING_MAX_INPUT_TOKENS",
+        "LLM_BACKEND_URL",
+        "LLM_BACKEND_AUTH_TOKEN",
+        "PAPER_DB",
+        "POSTGRES_USER",
+        "POSTGRES_HOST",
+        "POSTGRES_PORT",
+        "POSTGRES_DB",
+        "ABSTRACTS_DB_PASSWORD",
+        "EMBEDDING_DB",
+        "COLLECTION_NAME",
+        "MAX_CONTEXT_PAPERS",
+        "METADATA_CACHE_TTL",
+        "ENABLE_QUERY_REWRITING",
+        "QUERY_SIMILARITY_THRESHOLD",
+        "DEFAULT_CONFERENCE",
+        "DEFAULT_YEAR",
+        "LOG_LEVEL",
+        "PROXY_X_FOR",
+        "PROXY_X_PROTO",
+        "PROXY_X_HOST",
+        "PROXY_X_PREFIX",
+        "IMPRINT_LINK",
+        "REQUESTS_PER_MINUTE",
+        "WEB_RATE_LIMIT_PER_MINUTE",
+        "WEB_UI_THREADS",
+        "RAG_MAX_PARALLEL_TOOLS",
+        "RAG_REQUEST_LIMIT",
+        "RAG_QUERY_TIMEOUT",
+        "CHAT_HISTORY_TTL",
+        "LLM_CONNECT_TIMEOUT",
+        "LLM_REQUEST_TIMEOUT",
+        "GITHUB_TOKEN",
+        "REGISTRY_REPOSITORY",
+    }
     for var in env_vars:
         if var in os.environ:
             del os.environ[var]
@@ -93,6 +133,65 @@ LLM_BACKEND_URL=http://test
         assert isinstance(env_vars, dict)
 
 
+class TestEnvTestLocalOverride:
+    """Test .env.tests.local selection in the test setup."""
+
+    def setup_method(self):
+        """Clear environment variables before each test to ensure isolation."""
+        clean_config_env_vars()
+
+    def teardown_method(self):
+        """Clean up environment variables after each test."""
+        clean_config_env_vars()
+
+    def _patch_base_path(self, monkeypatch, tmp_path, base_content, local_content=None):
+        """Create base/local env files and point the helper at them."""
+        from tests import conftest as conftest_module
+
+        base_path = tmp_path / ".env.tests"
+        base_path.write_text(base_content)
+        if local_content is not None:
+            (tmp_path / ".env.tests.local").write_text(local_content)
+        monkeypatch.setattr(conftest_module, "get_base_env_test_path", lambda: base_path)
+        return conftest_module
+
+    def test_local_file_is_used_instead_of_base(self, monkeypatch, tmp_path):
+        """When .env.tests.local exists, it replaces the tracked base file."""
+        conftest_module = self._patch_base_path(
+            monkeypatch,
+            tmp_path,
+            "CHAT_MODEL=base-model\nEMBEDDING_MODEL=base-embedding\n",
+            "CHAT_MODEL=local-model\nEMBEDDING_MODEL=local-embedding\n",
+        )
+
+        env_path = conftest_module.get_env_test_path()
+        config = Config(env_path=env_path)
+
+        assert env_path == tmp_path / ".env.tests.local"
+        assert config.chat_model == "local-model"
+        assert config.embedding_model == "local-embedding"
+
+    def test_missing_local_file_returns_base_path(self, monkeypatch, tmp_path):
+        """Without a local file, the tracked base path is returned unchanged."""
+        conftest_module = self._patch_base_path(monkeypatch, tmp_path, "CHAT_MODEL=base-model\n")
+
+        assert conftest_module.get_env_test_path() == tmp_path / ".env.tests"
+
+    def test_process_env_overrides_local_file(self, monkeypatch, tmp_path):
+        """Real environment variables still beat the local env file."""
+        conftest_module = self._patch_base_path(
+            monkeypatch,
+            tmp_path,
+            "CHAT_MODEL=base-model\n",
+            "CHAT_MODEL=local-model\n",
+        )
+        monkeypatch.setenv("CHAT_MODEL", "env-model")
+
+        config = Config(env_path=conftest_module.get_env_test_path())
+
+        assert config.chat_model == "env-model"
+
+
 class TestConfig:
     """Test Config class."""
 
@@ -110,8 +209,8 @@ class TestConfig:
         """Test default configuration values."""
         # Clear all environment variables that might override defaults
 
-        # Use .env.test which has the default values
-        config = Config(env_path=get_env_test_path())
+        # Use .env.tests which has the default values, ignoring local overrides
+        config = Config(env_path=get_base_env_test_path())
 
         assert config.data_dir == "data"
         assert config.chat_model == "deepseek-v4.1-flash-at-hzdr"
@@ -122,10 +221,47 @@ class TestConfig:
         assert config.database_url == f"sqlite:///{(Path('data') / 'abstracts.db').absolute()}"
         assert config.collection_name == "papers"
         assert config.max_context_papers == 5
+        assert config.metadata_cache_ttl == 86400
         assert config.chat_temperature == 0.7
         assert config.chat_max_tokens == 2000
         assert config.cluster_label_model == "alias-fast"
         assert config.embedding_max_input_tokens == 8192
+        assert config.rag_max_parallel_tools == 8
+        assert config.rag_request_limit == 50
+        assert config.rag_query_timeout == 120
+        assert config.chat_history_ttl == 86400
+        assert config.llm_connect_timeout == 10
+        assert config.llm_request_timeout == 60
+        assert config.proxy_x_for == 0
+        assert config.proxy_x_proto == 0
+        assert config.proxy_x_host == 0
+        assert config.proxy_x_prefix == 0
+        assert config.web_rate_limit_per_minute == 30
+        assert config.web_ui_threads == 6
+
+    def test_web_ui_threads_from_env(self, tmp_path):
+        """WEB_UI_THREADS overrides the default Waitress thread count."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("WEB_UI_THREADS=12\n")
+
+        config = Config(env_path=env_file)
+        assert config.web_ui_threads == 12
+
+    def test_web_ui_threads_are_clamped(self, tmp_path):
+        """Invalid or non-positive WEB_UI_THREADS values fall back safely."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("WEB_UI_THREADS=0\n")
+
+        config = Config(env_path=env_file)
+        assert config.web_ui_threads == 1
+
+        env_file.write_text("WEB_UI_THREADS=-4\n")
+        config = Config(env_path=env_file)
+        assert config.web_ui_threads == 1
+
+        env_file.write_text("WEB_UI_THREADS=invalid\n")
+        config = Config(env_path=env_file)
+        assert config.web_ui_threads == 6
 
     def test_embedding_max_input_tokens_from_env(self, tmp_path):
         """Test parsing EMBEDDING_MAX_INPUT_TOKENS."""
@@ -142,6 +278,64 @@ class TestConfig:
 
         config = Config(env_path=env_file)
         assert config.embedding_max_input_tokens == 0
+
+    def test_rag_settings_from_env(self, tmp_path):
+        """RAG concurrency and budget settings are configurable."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("RAG_MAX_PARALLEL_TOOLS=3\nRAG_REQUEST_LIMIT=20\nRAG_QUERY_TIMEOUT=45\n")
+
+        config = Config(env_path=env_file)
+        assert config.rag_max_parallel_tools == 3
+        assert config.rag_request_limit == 20
+        assert config.rag_query_timeout == 45
+
+    def test_llm_timeouts_from_env(self, tmp_path):
+        """LLM connect and request timeouts are configurable."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("LLM_CONNECT_TIMEOUT=5\nLLM_REQUEST_TIMEOUT=45\n")
+
+        config = Config(env_path=env_file)
+        assert config.llm_connect_timeout == 5
+        assert config.llm_request_timeout == 45
+
+    def test_llm_request_timeout_clamped_to_query_timeout(self, tmp_path):
+        """LLM request timeout cannot exceed the overall RAG query timeout."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("RAG_QUERY_TIMEOUT=120\nLLM_REQUEST_TIMEOUT=240\n")
+
+        config = Config(env_path=env_file)
+        assert config.rag_query_timeout == 120
+        assert config.llm_request_timeout == 120
+
+    def test_rag_settings_are_clamped(self, tmp_path):
+        """Non-positive RAG settings fall back to safe minimums."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("RAG_MAX_PARALLEL_TOOLS=0\nRAG_REQUEST_LIMIT=-1\nRAG_QUERY_TIMEOUT=0\n")
+
+        config = Config(env_path=env_file)
+        assert config.rag_max_parallel_tools == 1
+        assert config.rag_request_limit == 1
+        assert config.rag_query_timeout == 1
+
+    def test_metadata_cache_ttl_from_env(self, tmp_path):
+        """METADATA_CACHE_TTL overrides the default."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("METADATA_CACHE_TTL=120\n")
+
+        config = Config(env_path=env_file)
+        assert config.metadata_cache_ttl == 120
+
+    def test_chat_history_ttl_from_env(self, tmp_path):
+        """CHAT_HISTORY_TTL overrides the default and accepts 0 to disable expiry."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("CHAT_HISTORY_TTL=3600\n")
+
+        config = Config(env_path=env_file)
+        assert config.chat_history_ttl == 3600
+
+        env_file.write_text("CHAT_HISTORY_TTL=0\n")
+        config = Config(env_path=env_file)
+        assert config.chat_history_ttl == 0
 
     def test_config_from_env_file(self, tmp_path):
         """Test loading configuration from .env file."""
@@ -236,6 +430,11 @@ CHAT_MAX_TOKENS=500
         assert "database_url" in config_dict
         assert "collection_name" in config_dict
         assert "max_context_papers" in config_dict
+        assert "metadata_cache_ttl" in config_dict
+        assert "chat_history_ttl" in config_dict
+        assert "llm_connect_timeout" in config_dict
+        assert "llm_request_timeout" in config_dict
+        assert "web_ui_threads" in config_dict
 
     def test_config_to_dict_hides_token(self, tmp_path):
         """Test that to_dict hides auth token."""

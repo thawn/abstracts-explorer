@@ -2,7 +2,7 @@
 Tests for MCP Tools Integration Module.
 
 Tests the integration between MCP clustering tools and RAG chat,
-including tool schema generation, execution, and result formatting.
+including tool execution, argument normalization, and result formatting.
 """
 
 import json
@@ -10,10 +10,9 @@ from typing import Any
 from unittest.mock import patch, Mock
 
 from abstracts_explorer.mcp_tools import (
-    get_mcp_tools_schema,
     execute_mcp_tool,
     format_tool_result_for_llm,
-    _abbreviate_result,
+    abbreviate_result,
     _format_conference_topics_result,
     _format_topic_evolution_result,
     _format_search_papers_result,
@@ -54,34 +53,6 @@ def _normalize_interesting_paper_tool_args(arguments, array_conference=True):
     """Test convenience wrapper for the interesting-paper rule sets."""
     rules = INTERESTING_PAPER_ARRAY_RULES if array_conference else INTERESTING_PAPER_SINGLE_RULES
     return _normalize_args(arguments, rules)
-
-
-def test_get_mcp_tools_schema():
-    """Test that MCP tools schema is in correct OpenAI format."""
-    schema = get_mcp_tools_schema()
-
-    # Should return a list of tool definitions
-    assert isinstance(schema, list)
-    assert len(schema) == 8  # 8 MCP tools (including interesting-paper tools)
-
-    # Check structure of first tool
-    tool = schema[0]
-    assert tool["type"] == "function"
-    assert "function" in tool
-    assert "name" in tool["function"]
-    assert "description" in tool["function"]
-    assert "parameters" in tool["function"]
-
-    # Verify all expected tools are present
-    tool_names = [t["function"]["name"] for t in schema]
-    assert "analyze_topic_relevance" in tool_names
-    assert "get_conference_topics" in tool_names
-    assert "get_topic_evolution" in tool_names
-    assert "search_papers" in tool_names
-    assert "get_cluster_visualization" in tool_names
-    assert "get_paper_details" in tool_names
-    assert "summarize_interesting_papers" in tool_names
-    assert "recommend_related_papers" in tool_names
 
 
 def test_execute_mcp_tool_cluster_topics():
@@ -291,104 +262,6 @@ def test_format_tool_result_unknown_tool():
     assert result == result_json
 
 
-def test_mcp_tools_schema_parameters():
-    """Test that tool schemas have correct parameter definitions."""
-    schema = get_mcp_tools_schema()
-
-    # Check get_conference_topics parameters
-    conference_topics = next(t for t in schema if t["function"]["name"] == "get_conference_topics")
-    params = conference_topics["function"]["parameters"]["properties"]
-    assert "collection_name" in params
-
-    # Check get_topic_evolution parameters
-    topic_evolution = next(t for t in schema if t["function"]["name"] == "get_topic_evolution")
-    params = topic_evolution["function"]["parameters"]
-    assert "topic_keywords" in params["properties"]
-    assert "conferences" in params["properties"]
-    assert "topic_keywords" in params["required"]
-    assert "conferences" in params["required"]
-
-    # Check search_papers parameters
-    recent_dev = next(t for t in schema if t["function"]["name"] == "search_papers")
-    params = recent_dev["function"]["parameters"]
-    assert "topic_keywords" in params["properties"]
-    assert "years" in params["properties"]
-    assert "topic_keywords" in params["required"]
-
-    # Check get_cluster_visualization parameters (simplified)
-    viz = next(t for t in schema if t["function"]["name"] == "get_cluster_visualization")
-    params = viz["function"]["parameters"]["properties"]
-    assert "output_path" in params
-    assert "collection_name" in params
-
-
-def test_get_mcp_tools_schema_with_conferences_enum():
-    """Test that passing conferences injects enum into the schema."""
-    conferences = ["NeurIPS", "ICLR", "ICML"]
-    schema = get_mcp_tools_schema(conferences=conferences)
-
-    # analyze_topic_relevance has an array 'conferences' field
-    atr = next(t for t in schema if t["function"]["name"] == "analyze_topic_relevance")
-    items = atr["function"]["parameters"]["properties"]["conferences"]["items"]
-    assert items["enum"] == conferences
-
-    # search_papers has a single-string 'conference' field
-    sp = next(t for t in schema if t["function"]["name"] == "search_papers")
-    assert sp["function"]["parameters"]["properties"]["conference"]["enum"] == conferences
-
-    # get_topic_evolution now has an array 'conferences' field
-    te = next(t for t in schema if t["function"]["name"] == "get_topic_evolution")
-    items = te["function"]["parameters"]["properties"]["conferences"]["items"]
-    assert items["enum"] == conferences
-
-
-def test_get_mcp_tools_schema_with_years_enum():
-    """Test that passing years injects enum into the schema."""
-    years = [2023, 2024, 2025]
-    schema = get_mcp_tools_schema(years=years)
-
-    # analyze_topic_relevance has array 'years' field
-    atr = next(t for t in schema if t["function"]["name"] == "analyze_topic_relevance")
-    items = atr["function"]["parameters"]["properties"]["years"]["items"]
-    assert items["enum"] == years
-
-    # search_papers has array 'years' field
-    sp = next(t for t in schema if t["function"]["name"] == "search_papers")
-    items = sp["function"]["parameters"]["properties"]["years"]["items"]
-    assert items["enum"] == years
-
-    # get_topic_evolution has start_year/end_year integer fields
-    te = next(t for t in schema if t["function"]["name"] == "get_topic_evolution")
-    props = te["function"]["parameters"]["properties"]
-    assert props["start_year"]["enum"] == years
-    assert props["end_year"]["enum"] == years
-
-
-def test_get_mcp_tools_schema_without_args_has_no_enum():
-    """Test that calling without arguments produces no enum constraints."""
-    schema = get_mcp_tools_schema()
-
-    atr = next(t for t in schema if t["function"]["name"] == "analyze_topic_relevance")
-    items = atr["function"]["parameters"]["properties"]["conferences"]["items"]
-    assert "enum" not in items
-
-    sp = next(t for t in schema if t["function"]["name"] == "search_papers")
-    assert "enum" not in sp["function"]["parameters"]["properties"]["conference"]
-
-
-def test_get_mcp_tools_schema_does_not_mutate_base():
-    """Test that dynamic schema generation does not mutate the base schema."""
-    # Call once with enums to verify it doesn't leak into a subsequent call
-    get_mcp_tools_schema(conferences=["NeurIPS"])
-    schema2 = get_mcp_tools_schema()
-
-    # schema2 should not have the enum from schema1
-    atr = next(t for t in schema2 if t["function"]["name"] == "analyze_topic_relevance")
-    items = atr["function"]["parameters"]["properties"]["conferences"]["items"]
-    assert "enum" not in items
-
-
-# ---------------------------------------------------------------------------
 # Argument normalization unit tests
 # ---------------------------------------------------------------------------
 
@@ -439,7 +312,7 @@ class TestNormalizeSearchPapersArgs:
 
     def test_valid_args_unchanged(self):
         """Already-valid args are passed through unchanged."""
-        args = {"topic_keywords": "deep learning", "years": [2024, 2025], "n_results": 5}
+        args = {"topic_keywords": "deep learning", "years": [2024, 2025], "limit": 5}
         result = _normalize_search_papers_args(args)
         assert result == args
 
@@ -455,32 +328,32 @@ class TestNormalizeSearchPapersArgs:
         assert result["topic_keywords"] == "reinforcement learning autoregressive image editing"
         assert result["conference"] == "NeurIPS"
         assert result["years"] == [2025]
-        assert result["n_results"] == 2
+        assert result["limit"] == 2
         assert "year" not in result
 
-    def test_limit_alias(self):
-        """'limit' alias is normalized to 'n_results'."""
-        result = _normalize_search_papers_args({"topic_keywords": "RL", "limit": 20})
-        assert result["n_results"] == 20
-        assert "limit" not in result
+    def test_n_results_alias(self):
+        """'n_results' alias is normalized to 'limit'."""
+        result = _normalize_search_papers_args({"topic_keywords": "RL", "n_results": 20})
+        assert result["limit"] == 20
+        assert "n_results" not in result
 
     def test_num_results_alias(self):
-        """'num_results' alias is normalized to 'n_results'."""
+        """'num_results' alias is normalized to 'limit'."""
         result = _normalize_search_papers_args({"topic_keywords": "RL", "num_results": 15})
-        assert result["n_results"] == 15
+        assert result["limit"] == 15
         assert "num_results" not in result
 
     def test_limit_and_n_results_coexist(self):
-        """When both 'n_results' and 'limit' are present, 'n_results' is kept and 'limit' dropped."""
+        """When both 'n_results' and 'limit' are present, 'limit' wins."""
         result = _normalize_search_papers_args({"topic_keywords": "RL", "n_results": 12, "limit": 25})
-        assert result["n_results"] == 12
-        assert "limit" not in result
+        assert result["limit"] == 25
+        assert "n_results" not in result
 
     def test_n_results_string_converted_to_int(self):
         """'n_results' as string is converted to int."""
         result = _normalize_search_papers_args({"topic_keywords": "RL", "n_results": "20"})
-        assert result["n_results"] == 20
-        assert isinstance(result["n_results"], int)
+        assert result["limit"] == 20
+        assert isinstance(result["limit"], int)
 
 
 class TestNormalizeGetTopicEvolutionArgs:
@@ -588,10 +461,10 @@ class TestFilterUnknownKwargs:
         from abstracts_explorer.mcp_server import search_papers
 
         with caplog.at_level("WARNING", logger="abstracts_explorer.mcp_tools"):
-            result = _filter_unknown_kwargs(search_papers, {"topic_keywords": "RL", "n_years": 5, "n_results": 3})
+            result = _filter_unknown_kwargs(search_papers, {"topic_keywords": "RL", "n_years": 5, "limit": 3})
 
         assert "topic_keywords" in result
-        assert "n_results" in result
+        assert "limit" in result
         assert "n_years" not in result
         assert "n_years" in caplog.text
 
@@ -622,7 +495,7 @@ class TestExecuteMCPToolE2E:
             result = execute_mcp_tool("search_papers", {"topic_keywords": "deep learning", "n_results": 3})
 
         assert json.loads(result)["topic"] == "deep learning"
-        mock_fn.assert_called_once_with(topic_keywords="deep learning", n_results=3)
+        mock_fn.assert_called_once_with(topic_keywords="deep learning", limit=3)
 
     def test_search_papers_year_singular_normalized(self):
         """search_papers normalizes 'year' (singular) to 'years'."""
@@ -661,7 +534,7 @@ class TestExecuteMCPToolE2E:
         assert kwargs["topic_keywords"] == "reinforcement learning autoregressive image editing"
         assert kwargs["conference"] == "NeurIPS"
         assert kwargs["years"] == [2025]
-        assert kwargs["n_results"] == 2
+        assert kwargs["limit"] == 2
 
     def test_search_papers_query_alias(self):
         """search_papers maps 'query' to 'topic_keywords' (legacy alias)."""
@@ -713,33 +586,36 @@ class TestExecuteMCPToolE2E:
         }
 
         mock_db = Mock()
-        mock_db.search_papers_semantic.return_value = [
-            {
-                "uid": "p1",
-                "title": "Paper 1",
-                "year": 2025,
-                "conference": "NeurIPS",
-                "session": "ML",
-                "authors": [],
-                "abstract": "Abstract 1",
-                "relevance_score": 0.9,
-            },
-            {
-                "uid": "p2",
-                "title": "Paper 2",
-                "year": 2025,
-                "conference": "NeurIPS",
-                "session": "DL",
-                "authors": [],
-                "abstract": "Abstract 2",
-                "relevance_score": 0.7,
-            },
-        ]
+        mock_db.search.return_value = (
+            [
+                {
+                    "uid": "p1",
+                    "title": "Paper 1",
+                    "year": 2025,
+                    "conference": "NeurIPS",
+                    "session": "ML",
+                    "authors": [],
+                    "abstract": "Abstract 1",
+                    "relevance_score": 0.9,
+                },
+                {
+                    "uid": "p2",
+                    "title": "Paper 2",
+                    "year": 2025,
+                    "conference": "NeurIPS",
+                    "session": "DL",
+                    "authors": [],
+                    "abstract": "Abstract 2",
+                    "relevance_score": 0.7,
+                },
+            ],
+            None,
+        )
 
         with (
-            patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
-            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),
-            patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
+            patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager", return_value=mock_em),
+            patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager", return_value=mock_db),
+            patch("abstracts_explorer.mcp.shared_dependencies.get_config") as mock_cfg,
         ):
             mock_cfg.return_value = Mock(collection_name="papers")
             result = execute_mcp_tool(
@@ -802,8 +678,8 @@ class TestExecuteMCPToolE2E:
         }
 
         with (
-            patch("abstracts_explorer.mcp_server.load_clustering_data", return_value=(mock_cm, mock_db)),
-            patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
+            patch("abstracts_explorer.mcp.resources.load_clustering_data", return_value=(mock_cm, mock_db)),
+            patch("abstracts_explorer.mcp.shared_dependencies.get_config") as mock_cfg,
         ):
             mock_cfg.return_value = Mock(collection_name="papers", embedding_model="test-model")
             result = execute_mcp_tool("get_conference_topics", {"conferences": ["NeurIPS"]})
@@ -830,26 +706,42 @@ class TestExecuteMCPToolE2E:
         """get_topic_evolution executes end-to-end with mocked EmbeddingsManager."""
         mock_em = Mock()
 
-        def _query_papers(query, distance_threshold, conferences=None, years=None, query_embedding=None):
-            return {
-                "count": 3,
-                "papers": [
-                    {"title": "Paper 2022", "session": "ML", "distance": 0.1, "year": 2022},
-                    {"title": "Paper 2023", "session": "ML", "distance": 0.2, "year": 2023},
-                    {"title": "Paper 2024", "session": "ML", "distance": 0.3, "year": 2024},
-                ],
-                "total_considered": 90,
-            }
-
-        mock_em.query_papers_within_distance.side_effect = _query_papers
+        mock_em.query_ids_within_distance.return_value = [("a1", 0.1), ("a2", 0.2), ("a3", 0.3)]
         mock_db = Mock()
         mock_db.get_years.return_value = [2022, 2023, 2024]
+        mock_db.resolve_paper_uids.return_value = ["a1", "a2", "a3"]
+        mock_db.get_paper_summaries_by_uids.return_value = [
+            {
+                "uid": "a1",
+                "title": "Paper 2022",
+                "session": "ML",
+                "year": 2022,
+                "conference": "NeurIPS",
+                "abstract": "",
+            },
+            {
+                "uid": "a2",
+                "title": "Paper 2023",
+                "session": "ML",
+                "year": 2023,
+                "conference": "NeurIPS",
+                "abstract": "",
+            },
+            {
+                "uid": "a3",
+                "title": "Paper 2024",
+                "session": "ML",
+                "year": 2024,
+                "conference": "NeurIPS",
+                "abstract": "",
+            },
+        ]
         mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 100}
 
         with (
-            patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
-            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),
-            patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
+            patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager", return_value=mock_em),
+            patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager", return_value=mock_db),
+            patch("abstracts_explorer.mcp.shared_dependencies.get_config") as mock_cfg,
         ):
             mock_cfg.return_value = Mock(collection_name="papers")
             result = execute_mcp_tool(
@@ -869,18 +761,18 @@ class TestExecuteMCPToolE2E:
     def test_analyze_topic_relevance_real_execution(self):
         """analyze_topic_relevance executes end-to-end with mocked EmbeddingsManager."""
         mock_em = Mock()
-        mock_em.query_papers_within_distance.return_value = {
-            "papers": [
-                {"title": "Paper 1", "year": 2025, "conference": "NeurIPS", "distance": 0.5},
-                {"title": "Paper 2", "year": 2025, "conference": "NeurIPS", "distance": 1.0},
-            ],
-            "total_considered": 100,
-        }
+        mock_em.query_ids_within_distance.return_value = [("p1", 0.5), ("p2", 1.0)]
+        mock_db = Mock()
+        mock_db.resolve_paper_uids.return_value = ["p1", "p2"]
+        mock_db.get_result_details.return_value = [
+            {"uid": "p1", "title": "Paper 1", "year": 2025, "conference": "NeurIPS"},
+            {"uid": "p2", "title": "Paper 2", "year": 2025, "conference": "NeurIPS"},
+        ]
 
         with (
-            patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
-            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=Mock()),
-            patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
+            patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager", return_value=mock_em),
+            patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager", return_value=mock_db),
+            patch("abstracts_explorer.mcp.shared_dependencies.get_config") as mock_cfg,
         ):
             mock_cfg.return_value = Mock(collection_name="papers")
             result = execute_mcp_tool(
@@ -897,15 +789,15 @@ class TestExecuteMCPToolE2E:
     def test_analyze_topic_relevance_conference_singular_normalized(self):
         """analyze_topic_relevance maps 'conference' (singular) to 'conferences'."""
         mock_em = Mock()
-        mock_em.query_papers_within_distance.return_value = {
-            "papers": [{"title": "P", "year": 2025, "conference": "NeurIPS", "distance": 0.5}],
-            "total_considered": 50,
-        }
+        mock_em.query_ids_within_distance.return_value = [("p1", 0.5)]
+        mock_db = Mock()
+        mock_db.resolve_paper_uids.return_value = ["p1"]
+        mock_db.get_result_details.return_value = [{"uid": "p1", "title": "P", "year": 2025, "conference": "NeurIPS"}]
 
         with (
-            patch("abstracts_explorer.mcp_server.EmbeddingsManager", return_value=mock_em),
-            patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=Mock()),
-            patch("abstracts_explorer.mcp_server.get_config") as mock_cfg,
+            patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager", return_value=mock_em),
+            patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager", return_value=mock_db),
+            patch("abstracts_explorer.mcp.shared_dependencies.get_config") as mock_cfg,
         ):
             mock_cfg.return_value = Mock(collection_name="papers")
             # 'conference' (singular) should not crash
@@ -993,7 +885,7 @@ class TestExecuteMCPToolE2E:
     def test_get_paper_details_real_execution_by_title(self):
         """get_paper_details executes end-to-end with mocked DatabaseManager."""
         mock_db = Mock()
-        mock_db.search_papers.return_value = [
+        mock_db.keyword_search.return_value = [
             {
                 "uid": "abc123",
                 "original_id": "neurips2023/abc",
@@ -1016,7 +908,7 @@ class TestExecuteMCPToolE2E:
             }
         ]
 
-        with (patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),):
+        with (patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager", return_value=mock_db),):
             result = execute_mcp_tool("get_paper_details", {"title": "Test Paper", "conference": "NeurIPS"})
 
         data = json.loads(result)
@@ -1052,7 +944,7 @@ class TestExecuteMCPToolE2E:
             "created_at": "2024-01-01",
         }
 
-        with (patch("abstracts_explorer.mcp_server.DatabaseManager", return_value=mock_db),):
+        with (patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager", return_value=mock_db),):
             result = execute_mcp_tool("get_paper_details", {"paper_id": "abc123"})
 
         data = json.loads(result)
@@ -1352,76 +1244,38 @@ def test_format_tool_result_for_llm_paper_details():
 
 
 # ---------------------------------------------------------------------------
-# get_mcp_tools_schema – get_paper_details entries
-# ---------------------------------------------------------------------------
-
-
-def test_get_mcp_tools_schema_paper_details_parameters():
-    """get_paper_details schema has expected parameter definitions."""
-    schema = get_mcp_tools_schema()
-    pd_tool = next(t for t in schema if t["function"]["name"] == "get_paper_details")
-    props = pd_tool["function"]["parameters"]["properties"]
-
-    assert "title" in props
-    assert props["title"]["type"] == "string"
-    assert "paper_id" in props
-    assert props["paper_id"]["type"] == "string"
-    assert "conference" in props
-    assert props["conference"]["type"] == "string"
-    assert "year" in props
-    assert props["year"]["type"] == "integer"
-    assert "limit" in props
-
-
-def test_get_mcp_tools_schema_paper_details_conference_enum():
-    """Conference enum is injected into get_paper_details conference field."""
-    conferences = ["NeurIPS", "ICLR"]
-    schema = get_mcp_tools_schema(conferences=conferences)
-    pd_tool = next(t for t in schema if t["function"]["name"] == "get_paper_details")
-    assert pd_tool["function"]["parameters"]["properties"]["conference"]["enum"] == conferences
-
-
-def test_get_mcp_tools_schema_paper_details_year_enum():
-    """Year enum is injected into get_paper_details year field."""
-    years = [2023, 2024, 2025]
-    schema = get_mcp_tools_schema(years=years)
-    pd_tool = next(t for t in schema if t["function"]["name"] == "get_paper_details")
-    assert pd_tool["function"]["parameters"]["properties"]["year"]["enum"] == years
-
-
-# ---------------------------------------------------------------------------
-# _abbreviate_result tests
+# abbreviate_result tests
 # ---------------------------------------------------------------------------
 
 
 class TestAbbreviateResult:
-    """Tests for the _abbreviate_result helper function."""
+    """Tests for the abbreviate_result helper function."""
 
     def test_short_text_unchanged(self):
         """Short text is returned unchanged."""
-        assert _abbreviate_result("short") == "short"
+        assert abbreviate_result("short") == "short"
 
     def test_exact_max_length_unchanged(self):
         """Text exactly at max_length is returned unchanged."""
         text = "a" * 200
-        assert _abbreviate_result(text) == text
+        assert abbreviate_result(text) == text
 
     def test_long_text_truncated(self):
         """Text exceeding max_length is truncated with ellipsis."""
         text = "a" * 300
-        result = _abbreviate_result(text)
+        result = abbreviate_result(text)
         assert len(result) == 201  # 200 chars + '…'
         assert result.endswith("…")
 
     def test_custom_max_length(self):
         """Custom max_length is respected."""
         text = "a" * 50
-        result = _abbreviate_result(text, max_length=10)
+        result = abbreviate_result(text, max_length=10)
         assert len(result) == 11  # 10 chars + '…'
 
     def test_empty_string(self):
         """Empty string is returned unchanged."""
-        assert _abbreviate_result("") == ""
+        assert abbreviate_result("") == ""
 
 
 # ---------------------------------------------------------------------------
@@ -1475,7 +1329,7 @@ def test_normalize_interesting_paper_tool_args():
     assert result["paper_ids"] == ["a", "b"]
     assert result["years"] == [2026]
     assert result["conferences"] == ["ICLR"]
-    assert result["n_results"] == 5
+    assert result["limit"] == 5
 
 
 def test_execute_mcp_tool_summarize_interesting_papers():
@@ -1521,7 +1375,7 @@ def test_execute_mcp_tool_recommend_related_papers():
         priorities={"a": {"priority": 5}},
         conferences=["ICLR"],
         years=[2026],
-        n_results=3,
+        limit=3,
     )
 
 
@@ -1577,3 +1431,72 @@ def test_format_recommend_related_papers_result():
     assert "Recommended Papers" in formatted
     assert "Paper B" in formatted
     assert "Shares keywords" in formatted
+
+
+def test_execute_mcp_tool_suggest_authors_to_meet():
+    """execute_mcp_tool dispatches suggest_authors_to_meet."""
+    mock_result = json.dumps({"authors": [], "authors_count": 0})
+    with patch(
+        "abstracts_explorer.mcp_tools.suggest_authors_to_meet",
+        return_value=mock_result,
+    ) as mock_tool:
+        result = execute_mcp_tool(
+            "suggest_authors_to_meet",
+            {
+                "priorities": {"a": {"priority": 5}},
+                "conferences": ["ICLR"],
+                "years": [2026],
+                "n_results": 3,
+                "paper_limit": 20,
+            },
+        )
+
+    assert result == mock_result
+    mock_tool.assert_called_once_with(
+        priorities={"a": {"priority": 5}},
+        conferences=["ICLR"],
+        years=[2026],
+        limit=3,
+        paper_limit=20,
+    )
+
+
+def test_format_suggest_authors_to_meet_result():
+    """Suggested authors are formatted with stars, counts, and locations."""
+    data = {
+        "authors": [
+            {
+                "name": "Alice Smith",
+                "score": 2.7,
+                "similar_paper_count": 2,
+                "starred_paper_count": 1,
+                "starred_author": True,
+                "why": ["Authored 2 similar papers", "Authored a paper you starred ⭐"],
+                "papers": [
+                    {
+                        "title": "Similar Paper",
+                        "conference": "ICLR",
+                        "year": 2026,
+                        "session": "Poster",
+                        "poster_position": "12",
+                    }
+                ],
+                "starred_papers": [
+                    {
+                        "title": "Starred Paper",
+                        "conference": "ICLR",
+                        "year": 2026,
+                    }
+                ],
+            }
+        ],
+        "filters": {"conferences": ["ICLR"], "years": [2026]},
+    }
+
+    formatted = format_tool_result_for_llm("suggest_authors_to_meet", json.dumps(data))
+
+    assert "Suggested Authors to Meet" in formatted
+    assert "Alice Smith ⭐" in formatted
+    assert "2 similar, 1 starred" in formatted
+    assert "Starred Paper" in formatted
+    assert "poster 12" in formatted

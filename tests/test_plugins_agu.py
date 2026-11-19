@@ -1,6 +1,7 @@
 """Tests for the AGU m-anage downloader plugin."""
 
 import json
+import threading
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -15,6 +16,8 @@ def agu_plugin():
     plugin = AGUDownloaderPlugin()
     plugin.supported_years = [2026]
     plugin._PEOPLE_INDEX_LETTERS = ("A",)
+    plugin._MAX_WORKERS = 1
+    plugin._REQUEST_DELAY = 0
     return plugin
 
 
@@ -213,7 +216,6 @@ class TestAGUDownload:
             patch.object(agu_plugin._session, "get", side_effect=mock_get),
             patch("abstracts_explorer.plugins.agu_downloader.tqdm") as mock_tqdm,
         ):
-            mock_tqdm.side_effect = lambda iterable, **kwargs: iterable
             sessions = agu_plugin._fetch_sessions(
                 "https://studio.m-anage.com/agu/agu26/meetingapi.cgi",
                 programs,
@@ -242,7 +244,6 @@ class TestAGUDownload:
             patch.object(agu_plugin._session, "get", side_effect=mock_get),
             patch("abstracts_explorer.plugins.agu_downloader.tqdm") as mock_tqdm,
         ):
-            mock_tqdm.side_effect = lambda iterable, **kwargs: iterable
             people = agu_plugin._fetch_people(
                 "https://studio.m-anage.com/agu/agu26/meetingapi.cgi",
                 refs,
@@ -311,7 +312,6 @@ class TestAGUDownload:
             patch.object(agu_plugin._session, "get", side_effect=mock_get),
             patch("abstracts_explorer.plugins.agu_downloader.tqdm") as mock_tqdm,
         ):
-            mock_tqdm.side_effect = lambda iterable, **kwargs: iterable
             papers = agu_plugin._fetch_papers(
                 "https://studio.m-anage.com/agu/agu26/meetingapi.cgi",
                 sessions,
@@ -336,7 +336,6 @@ class TestAGUDownload:
             patch.object(agu_plugin._session, "get", side_effect=mock_get),
             patch("abstracts_explorer.plugins.agu_downloader.tqdm") as mock_tqdm,
         ):
-            mock_tqdm.side_effect = lambda iterable, **kwargs: iterable
             agu_plugin._fetch_papers(
                 "https://studio.m-anage.com/agu/agu26/meetingapi.cgi",
                 sessions,
@@ -355,7 +354,6 @@ class TestAGUDownload:
             patch.object(agu_plugin._session, "get", side_effect=mock_get),
             patch("abstracts_explorer.plugins.agu_downloader.tqdm") as mock_tqdm,
         ):
-            mock_tqdm.side_effect = lambda iterable, **kwargs: iterable
             agu_plugin.download(year=2026, request_delay=0, progress=False)
 
         assert mock_tqdm.call_count == 3
@@ -412,6 +410,191 @@ class TestAGUDownload:
                 agu_plugin.download(year=2026)
 
 
+class TestAGUConcurrency:
+    def test_fetch_sessions_runs_requests_concurrently(self, agu_plugin):
+        programs = [{"_url": f"Program/{index}", "ChildList_Session": [f"Session/{index}"]} for index in range(4)]
+        barrier = threading.Barrier(4, timeout=5)
+
+        def mock_get(url, params=None, **kwargs):
+            barrier.wait()
+            program_id = url.split("/Program/", 1)[1].split("/", 1)[0]
+            return _response([{"_url": f"Session/{program_id}"}])
+
+        with patch.object(agu_plugin._session, "get", side_effect=mock_get):
+            sessions = agu_plugin._fetch_sessions(
+                "https://studio.m-anage.com/agu/agu26/meetingapi.cgi",
+                programs,
+                timeout=30,
+                verify_ssl=True,
+                request_delay=0,
+                max_workers=4,
+            )
+
+        assert sorted(sessions) == [f"Session/{index}" for index in range(4)]
+
+    def test_fetch_papers_runs_requests_concurrently(self, agu_plugin):
+        sessions = {
+            f"Session/{index}": {"_url": f"Session/{index}", "ChildList_Paper": [f"Paper/{index}"]}
+            for index in range(4)
+        }
+        barrier = threading.Barrier(4, timeout=5)
+
+        def mock_get(url, params=None, **kwargs):
+            barrier.wait()
+            session_id = url.split("/Session/", 1)[1].split("/", 1)[0]
+            return _response([{"_url": f"Paper/{session_id}"}])
+
+        with patch.object(agu_plugin._session, "get", side_effect=mock_get):
+            papers = agu_plugin._fetch_papers(
+                "https://studio.m-anage.com/agu/agu26/meetingapi.cgi",
+                sessions,
+                timeout=30,
+                verify_ssl=True,
+                request_delay=0,
+                max_workers=4,
+            )
+
+        assert sorted(papers) == [f"Paper/{index}" for index in range(4)]
+
+    def test_run_parallel_reports_worker_failures(self, agu_plugin):
+        """A failed worker aborts the batch with a clear error, not a None entry."""
+
+        def worker(item):
+            if item == 2:
+                raise RuntimeError("boom")
+            return item
+
+        with pytest.raises(RuntimeError, match="1 of 2 fetching test request"):
+            agu_plugin._run_parallel(
+                [1, 2],
+                worker,
+                max_workers=2,
+                desc="Fetching test",
+                unit="item",
+                show_progress=False,
+            )
+
+
+class TestAGUCheckpoint:
+    @staticmethod
+    def _paper() -> dict:
+        return {
+            "id": "10",
+            "Title": "A sample AGU abstract",
+            "Abstract": "<p>First sentence.</p><p>Second &amp; final sentence.</p>",
+            "ChildList_Person": ["Person/20"],
+            "SessionTitle": "Atmospheric Science",
+            "FinalNumber": "A1",
+        }
+
+    @staticmethod
+    def _person() -> dict:
+        return {
+            "_url": "Person/20",
+            "FirstName": "Ada",
+            "MiddleName": "Byron",
+            "LastName": "Lovelace",
+        }
+
+    def _checkpoint(self, agu_plugin, output_path, year=2026):
+        api_url = agu_plugin.get_url(year).replace("meetingapp.cgi", "meetingapi.cgi")
+        return agu_plugin._prepare_checkpoint(str(output_path), year, api_url, resume=True)
+
+    def test_download_resumes_from_complete_checkpoint(self, agu_plugin, tmp_path):
+        output_path = tmp_path / "agu.json"
+        checkpoint_dir = self._checkpoint(agu_plugin, output_path)
+        sessions = {
+            "Session/1": {
+                "_url": "Session/1",
+                "ChildList_Paper": ["Paper/10"],
+                "SessionTitle": "Atmospheric Science",
+            }
+        }
+        agu_plugin._save_json(checkpoint_dir / "sessions.json", sessions)
+        agu_plugin._append_jsonl(checkpoint_dir / "papers.jsonl", [{"ref": "Paper/10", "data": self._paper()}])
+        agu_plugin._append_jsonl(checkpoint_dir / "paper_sessions.jsonl", [{"ref": "Session/1"}])
+        agu_plugin._append_jsonl(checkpoint_dir / "people.jsonl", [{"ref": "Person/20", "data": self._person()}])
+        for letter in agu_plugin._PEOPLE_INDEX_LETTERS:
+            agu_plugin._append_jsonl(checkpoint_dir / "people_letters.jsonl", [{"letter": letter}])
+
+        with patch.object(agu_plugin._session, "get") as mock_request:
+            papers = agu_plugin.download(year=2026, output_path=str(output_path))
+
+        mock_request.assert_not_called()
+        assert len(papers) == 1
+        assert papers[0].title == "A sample AGU abstract"
+        assert not checkpoint_dir.exists()
+        assert output_path.exists()
+
+    def test_download_resumes_partial_paper_checkpoint(self, agu_plugin, tmp_path):
+        output_path = tmp_path / "agu.json"
+        checkpoint_dir = self._checkpoint(agu_plugin, output_path)
+        sessions = {
+            "Session/1": {"_url": "Session/1", "ChildList_Paper": ["Paper/10"]},
+            "Session/2": {"_url": "Session/2", "ChildList_Paper": ["Paper/11"]},
+        }
+        agu_plugin._save_json(checkpoint_dir / "sessions.json", sessions)
+        agu_plugin._append_jsonl(checkpoint_dir / "papers.jsonl", [{"ref": "Paper/10", "data": self._paper()}])
+        agu_plugin._append_jsonl(checkpoint_dir / "paper_sessions.jsonl", [{"ref": "Session/1"}])
+        agu_plugin._append_jsonl(checkpoint_dir / "people.jsonl", [{"ref": "Person/20", "data": self._person()}])
+        for letter in agu_plugin._PEOPLE_INDEX_LETTERS:
+            agu_plugin._append_jsonl(checkpoint_dir / "people_letters.jsonl", [{"letter": letter}])
+
+        second_paper = self._paper()
+        second_paper.update({"id": "11", "Title": "Second abstract"})
+
+        def mock_get(url, params=None, **kwargs):
+            assert url.endswith("/Session/2/ChildList_Paper")
+            return _response([second_paper])
+
+        with patch.object(agu_plugin._session, "get", side_effect=mock_get) as mock_request:
+            papers = agu_plugin.download(year=2026, output_path=str(output_path))
+
+        assert mock_request.call_count == 1
+        assert sorted(paper.title for paper in papers) == ["A sample AGU abstract", "Second abstract"]
+
+    def test_download_ignores_mismatched_checkpoint(self, agu_plugin, tmp_path):
+        output_path = tmp_path / "agu.json"
+        old_checkpoint = agu_plugin._prepare_checkpoint(
+            str(output_path),
+            2025,
+            "https://studio.m-anage.com/agu/agu25/meetingapi.cgi",
+            resume=True,
+        )
+        agu_plugin._save_json(old_checkpoint / "sessions.json", {"Session/old": {"_url": "Session/old"}})
+
+        def mock_get(url, params=None, **kwargs):
+            return _api_response(url, params or {})
+
+        with patch.object(agu_plugin._session, "get", side_effect=mock_get) as mock_request:
+            papers = agu_plugin.download(year=2026, output_path=str(output_path))
+
+        assert len(papers) == 1
+        assert mock_request.call_count == 6
+        assert not old_checkpoint.exists()
+
+    def test_force_download_discards_checkpoint(self, agu_plugin, tmp_path):
+        output_path = tmp_path / "agu.json"
+        checkpoint_dir = self._checkpoint(agu_plugin, output_path)
+        agu_plugin._save_json(checkpoint_dir / "sessions.json", {"Session/old": {"_url": "Session/old"}})
+
+        def mock_get(url, params=None, **kwargs):
+            return _api_response(url, params or {})
+
+        with patch.object(agu_plugin._session, "get", side_effect=mock_get) as mock_request:
+            papers = agu_plugin.download(year=2026, output_path=str(output_path), force_download=True)
+
+        assert len(papers) == 1
+        assert mock_request.call_count == 6
+        assert not checkpoint_dir.exists()
+
+    def test_load_jsonl_ignores_corrupt_tail(self, agu_plugin, tmp_path):
+        path = tmp_path / "records.jsonl"
+        path.write_text('{"ref": "a"}\n{"ref": "b"', encoding="utf-8")
+
+        assert agu_plugin._load_jsonl(path) == [{"ref": "a"}]
+
+
 class TestAGURetryHandling:
     @staticmethod
     def _http_error(status, headers=None):
@@ -428,7 +611,7 @@ class TestAGURetryHandling:
 
         with (
             patch.object(agu_plugin._session, "get", side_effect=[rate_limited, success]) as mock_get,
-            patch("abstracts_explorer.plugin.time.sleep") as mock_sleep,
+            patch("abstracts_explorer.plugin.base.time.sleep") as mock_sleep,
         ):
             result = agu_plugin._fetch_json("https://example.com/api", 30, True)
 
@@ -444,7 +627,7 @@ class TestAGURetryHandling:
 
         with (
             patch.object(agu_plugin._session, "get", return_value=rate_limited) as mock_get,
-            patch("abstracts_explorer.plugin.time.sleep"),
+            patch("abstracts_explorer.plugin.base.time.sleep"),
         ):
             with pytest.raises(RuntimeError, match="429"):
                 agu_plugin._fetch_json("https://example.com/api", 30, True)

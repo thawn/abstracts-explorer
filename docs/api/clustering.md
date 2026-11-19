@@ -32,9 +32,9 @@ cm = ClusteringManager(em, db)
 n_papers = cm.load_embeddings()
 print(f"Loaded {n_papers} papers")
 
-# Reduce dimensions and cluster
-cm.reduce_dimensions(method="pca", n_components=2)
-cm.cluster(method="kmeans", n_clusters=8)
+# Cluster on full embeddings, then reduce for visualization
+cm.cluster(distance_threshold=150.0, linkage="ward")
+cm.reduce_dimensions(n_components=2)
 
 # Generate labels and get results
 cm.extract_cluster_keywords()

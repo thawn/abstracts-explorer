@@ -23,7 +23,7 @@ from sqlalchemy import or_, select
 
 from abstracts_explorer.database import DatabaseError, DatabaseManager
 from abstracts_explorer.db_models import Paper
-from abstracts_explorer.embeddings import EmbeddingsError, EmbeddingsManager
+from abstracts_explorer.embeddings import EmbeddingsManager
 
 
 def parse_args() -> argparse.Namespace:
@@ -86,77 +86,21 @@ def find_papers_without_abstract(db: DatabaseManager) -> list[str]:
 
 
 def delete_papers_by_uids(db: DatabaseManager, uids: list[str]) -> int:
-    """Delete papers from the paper database by their UIDs.
-
-    Parameters
-    ----------
-    db : DatabaseManager
-        Open database connection.
-    uids : list[str]
-        UIDs of the papers to delete.
-
-    Returns
-    -------
-    int
-        Number of papers deleted.
-
-    Raises
-    ------
-    DatabaseError
-        If deletion fails.
-    """
-    if not uids:
-        return 0
-
-    try:
-        from sqlalchemy import delete as sa_delete
-
-        session = db.session
-        result = session.execute(sa_delete(Paper).where(Paper.uid.in_(uids)))
-        session.commit()
-        count = result.rowcount if result.rowcount is not None else 0
-        return count
-    except DatabaseError:
-        raise
-    except Exception as e:
-        db.session.rollback()
-        raise DatabaseError(f"Failed to delete papers: {e}") from e
+    """Delete papers by UID using the production database helper."""
+    return db.delete_papers_by_uids(uids)
 
 
 def delete_embeddings_by_uids(em: EmbeddingsManager, uids: list[str]) -> int:
-    """Delete embeddings from ChromaDB by their UIDs.
-
-    Parameters
-    ----------
-    em : EmbeddingsManager
-        Connected embeddings manager with an active collection.
-    uids : list[str]
-        UIDs of the embeddings to delete.
-
-    Returns
-    -------
-    int
-        Number of embeddings deleted.
-
-    Raises
-    ------
-    EmbeddingsError
-        If deletion fails.
-    """
+    """Delete existing embeddings by UID using the production bulk helper."""
     if not uids:
         return 0
 
-    try:
-        # Only delete IDs that actually exist in the collection
-        existing = em.collection.get(ids=uids)
-        ids_present = existing.get("ids", [])
-        if ids_present:
-            em.collection.delete(ids=ids_present)
-        return len(ids_present)
-    except EmbeddingsError:
-        raise
-    except Exception as e:
-        raise EmbeddingsError(f"Failed to delete embeddings: {e}") from e
+    existing = em.collection.get(ids=uids)
+    ids_present = existing.get("ids", [])
+    if not ids_present:
+        return 0
+    return em.delete_embeddings_by_ids(list(ids_present))
+
 
 
 def main() -> int:

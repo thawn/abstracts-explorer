@@ -100,10 +100,19 @@ export function resetClusters() {
     customQueryClusters = [];
     customClusterMode = false;
     customClusterVisibility = {};
+    selectedClusters.clear();
+    hierarchyMode = false;
+    currentHierarchyLevel = 0;
+    maxHierarchyLevel = 0;
+    currentParentId = null;
     // Reset topic evolution state
     topicEvolutionTraces = [];
     topicEvolutionColorIdx = 0;
     topicEvolutionTopics = [];
+    const topicContainer = document.getElementById('topic-evolution-container');
+    if (topicContainer) {
+        topicContainer.innerHTML = '';
+    }
 }
 
 /**
@@ -128,12 +137,7 @@ export async function loadClusters() {
             body: JSON.stringify(computeBody)
         });
         
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-        }
-        
-        clusterData = await response.json();
+        clusterData = await parseJsonResponse(response);
         
         if (clusterData.error) {
             showErrorInElement('cluster-plot', clusterData.error);
@@ -148,7 +152,7 @@ export async function loadClusters() {
         
     } catch (error) {
         console.error('Error loading clusters:', error);
-        showErrorInElement('cluster-plot', `Failed to load clusters: ${error.message}`);
+        showErrorInElement('cluster-plot', error.message || 'Could not load clusters. Please try again.');
     }
 }
 
@@ -644,6 +648,7 @@ export function visualizeClusters() {
     document.getElementById('cluster-plot').on('plotly_click', function(data) {
         const point = data.points[0];
         const customdata = point.customdata;
+        if (!customdata || !customdata.id) return;
         showClusterPaperDetails(customdata.id, customdata);
     });
 }
@@ -1211,6 +1216,7 @@ function updateClusterVisualization() {
     document.getElementById('cluster-plot').on('plotly_click', function(data) {
         const point = data.points[0];
         const customdata = point.customdata;
+        if (!customdata || !customdata.id) return;
         showClusterPaperDetails(customdata.id, customdata);
     });
     
@@ -1270,31 +1276,32 @@ export async function showClusterPaperDetails(paperId, basicInfo) {
     // Fetch full paper details
     try {
         const response = await fetch(`${API_BASE}/api/paper/${paperId}`);
-        if (response.ok) {
-            const paper = await response.json();
-            
-            const formattedPaper = {
-                uid: paperId,
-                title: paper.title,
-                authors: paper.authors || [],
-                year: paper.year,
-                conference: paper.conference,
-                session: paper.session,
-                poster_position: paper.poster_position,
-                abstract: paper.abstract,
-                paper_url: paper.url,
-                keywords: paper.keywords
-            };
-            
-            contentDiv.innerHTML = formatPaperCard(formattedPaper, { 
-                compact: false,
-                idPrefix: 'cluster-paper-detail'
-            });
-        } else {
-            console.error('Failed to fetch paper details:', response.status);
-        }
+        const paper = await parseJsonResponse(response);
+        
+        const formattedPaper = {
+            uid: paperId,
+            title: paper.title,
+            authors: paper.authors || [],
+            year: paper.year,
+            conference: paper.conference,
+            session: paper.session,
+            poster_position: paper.poster_position,
+            abstract: paper.abstract,
+            paper_url: paper.url,
+            keywords: paper.keywords
+        };
+        
+        contentDiv.innerHTML = formatPaperCard(formattedPaper, { 
+            compact: false,
+            idPrefix: 'cluster-paper-detail'
+        });
     } catch (error) {
         console.error('Error fetching paper details:', error);
+        contentDiv.innerHTML = `
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+                <p class="text-sm text-red-500">${escapeHtml(error.message || 'Could not load paper details. Please try again.')}</p>
+            </div>
+        `;
     }
 }
 
@@ -1308,14 +1315,16 @@ export function exportClusters() {
     }
     
     const dataStr = JSON.stringify(clusterData, null, 2);
-    const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
-    
+    const blob = new Blob([dataStr], { type: 'application/json;charset=utf-8' });
+    const objectUrl = URL.createObjectURL(blob);
+
     const exportFileDefaultName = 'clusters.json';
-    
+
     const linkElement = document.createElement('a');
-    linkElement.setAttribute('href', dataUri);
+    linkElement.setAttribute('href', objectUrl);
     linkElement.setAttribute('download', exportFileDefaultName);
     linkElement.click();
+    URL.revokeObjectURL(objectUrl);
 }
 
 /**
@@ -1385,12 +1394,7 @@ export async function searchCustomCluster() {
             body: JSON.stringify(requestBody)
         });
         
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-        }
-        
-        const data = await response.json();
+        const data = await parseJsonResponse(response);
         
         // Generate unique ID using timestamp and random component
         const uniqueId = `custom_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -1421,7 +1425,7 @@ export async function searchCustomCluster() {
         
     } catch (error) {
         console.error('Error searching custom cluster:', error);
-        alert(`Failed to search: ${error.message}`);
+        alert(error.message || 'Could not run that search. Please try again.');
     } finally {
         // Re-enable button
         searchBtn.disabled = false;
@@ -1858,12 +1862,12 @@ async function fetchAndDisplayTopicEvolution(topic, distance, conference) {
                 loadingEl.innerHTML = `
                     <div class="text-center text-red-500 py-8">
                         <i class="fas fa-exclamation-triangle text-4xl mb-4 opacity-50"></i>
-                        <p class="text-sm">Failed to load topic evolution: ${escapeHtml(error.message)}</p>
+                        <p class="text-sm">${escapeHtml(error.message)}</p>
                     </div>
                 `;
             } else {
                 loadingEl.className = 'mt-3 text-sm text-red-500';
-                loadingEl.innerHTML = `<i class="fas fa-exclamation-triangle mr-1"></i>Failed to load topic evolution for "${escapeHtml(topic)}": ${escapeHtml(error.message)}`;
+                loadingEl.innerHTML = `<i class="fas fa-exclamation-triangle mr-1"></i>${escapeHtml(error.message)}`;
             }
         }
     }
@@ -1971,11 +1975,7 @@ export async function loadPapersPerYear() {
 
     try {
         const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
+        const data = await parseJsonResponse(response);
         if (data.error) {
             throw new Error(data.error);
         }

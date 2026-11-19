@@ -32,10 +32,9 @@ dependencies = [
     "numpy>=1.24.0",
     "mcp>=2.0.0,<3",
     "sqlalchemy>=2.0.0",
-    "scikit-fuzzy>=0.4.2",
     "argcomplete>=3.1.0",
     "oras>=0.2.42",
-    "pydantic-ai-slim[openai]>=2.32.0",
+    "pydantic-ai-slim[openai]>=2.66.0",
     "httpx2>=2.7",
     "psycopg[binary]>=3.2",
     "tqdm>=4.66.0",
@@ -47,13 +46,12 @@ dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
     "pytest-mock>=3.11.0",
-    "selenium>=4.0.0",
-    "webdriver-manager>=4.0.0",
     "black>=26.3.1",
     "ruff>=0.15.16",
     "mypy>=1.10.0",
     "types-requests>=2.31.0",
-  ]
+    "pytest-playwright>=0.10.0",
+]
 docs = [
     "sphinx>=7.0.0",
     "sphinx-rtd-theme>=1.3.0",
@@ -69,10 +67,10 @@ web = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/thawn/neurips-abstracts"
-Documentation = "https://neurips-abstracts.readthedocs.io"
-Repository = "https://github.com/thawn/neurips-abstracts.git"
-Issues = "https://github.com/thawn/neurips-abstracts/issues"
+Homepage = "https://github.com/thawn/abstracts-explorer"
+Documentation = "https://thawn.github.io/abstracts-explorer"
+Repository = "https://github.com/thawn/abstracts-explorer.git"
+Issues = "https://github.com/thawn/abstracts-explorer/issues"
 
 [project.scripts]
 abstracts-explorer = "abstracts_explorer.cli:main"
@@ -96,11 +94,12 @@ markers = [
     "integration: marks tests as integration tests (require real data)",
     "e2e: marks tests as end-to-end tests (require browser automation)",
     "staging: marks tests as staging end-to-end tests (run against a live deployment)",
+    "stress: marks stress tests that send waves of concurrent requests to a live server",
     "requires_lm_studio: test requires a reachable OpenAI-compatible backend",
 ]
 addopts = [
     "--verbose",
-    "-m not slow",
+    "-m not slow and not stress",
 ]
 
 [tool.coverage.run]

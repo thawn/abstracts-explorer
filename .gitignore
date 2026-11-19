@@ -57,6 +57,7 @@ coverage.xml
 # Environments
 .env
 .env.local
+.env.tests.local
 .env.blablador
 .env.hzdr
 .venv

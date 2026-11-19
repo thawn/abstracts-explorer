@@ -77,6 +77,10 @@ export function buildMcpToolsHintHtml() {
                     <i class="fas fa-wand-magic-sparkles text-pink-400 mt-0.5 flex-shrink-0"></i>
                     <span><em>"Based on my interesting papers, suggest other papers that may interest me."</em></span>
                 </li>
+                <li class="flex items-start gap-2">
+                    <i class="fas fa-users text-teal-400 mt-0.5 flex-shrink-0"></i>
+                    <span><em>"Who should I meet based on my interesting papers?"</em></span>
+                </li>
             </ul>
         </div>`;
 }
@@ -188,10 +192,10 @@ export async function sendChatMessage() {
         const data = await parseJsonResponse(response);
 
         // Remove loading message
-        document.getElementById(loadingId).remove();
+        document.getElementById(loadingId)?.remove();
 
         if (data.error) {
-            addChatMessage(`Error: ${data.error}`, 'assistant');
+            addChatMessage(data.error, 'assistant');
             return;
         }
 
@@ -230,10 +234,10 @@ export async function sendChatMessage() {
         displayChatPapers(papers, metadata);
     } catch (error) {
         console.error('Chat error:', error);
-        document.getElementById(loadingId).remove();
+        document.getElementById(loadingId)?.remove();
         const message = error && error.message
-            ? `Sorry, an error occurred: ${error.message}`
-            : 'Sorry, an error occurred. Please try again.';
+            ? `Sorry, I couldn't complete that request. ${error.message}`
+            : "Sorry, I couldn't complete that request. Please try again.";
         addChatMessage(message, 'assistant');
     }
 }
@@ -401,9 +405,12 @@ export function addChatMessage(text, role, isLoading = false) {
  */
 export async function resetChat() {
     try {
-        await fetch(`${API_BASE}/api/chat/reset`, {
+        const response = await fetch(`${API_BASE}/api/chat/reset`, {
             method: 'POST'
         });
+        if (!response.ok) {
+            throw new Error(`Reset failed (HTTP ${response.status})`);
+        }
 
         const messagesDiv = document.getElementById('chat-messages');
         messagesDiv.innerHTML = '';
@@ -709,11 +716,7 @@ export async function handleChatFeedback(messageId, rating) {
             body: JSON.stringify({ rating, transcript })
         });
 
-        const result = await response.json();
-
-        if (!response.ok) {
-            throw new Error(result.error || 'Failed to send feedback');
-        }
+        const result = await parseJsonResponse(response);
 
         // Show a brief "thank you" in place of the buttons
         if (messageDiv) {
@@ -724,12 +727,16 @@ export async function handleChatFeedback(messageId, rating) {
         }
     } catch (error) {
         console.error('Error sending chat feedback:', error);
-        // Re-enable buttons on error
+        // Re-enable buttons on error and show a short failure message.
         if (messageDiv) {
             const feedbackDiv = messageDiv.querySelector('.chat-feedback-buttons');
             if (feedbackDiv) {
                 const buttons = feedbackDiv.querySelectorAll('.chat-feedback-btn');
                 buttons.forEach(btn => { btn.disabled = false; });
+                const errorSpan = document.createElement('span');
+                errorSpan.className = 'text-s text-red-500';
+                errorSpan.textContent = error.message || 'Could not send feedback. Please try again.';
+                feedbackDiv.appendChild(errorSpan);
             }
         }
     }

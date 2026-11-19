@@ -14,7 +14,6 @@ import requests
 
 from abstracts_explorer.plugins.haicon_downloader import HAICONDownloaderPlugin
 from abstracts_explorer.plugins import (
-    LightweightDownloaderPlugin,
     DownloaderPlugin,
     get_plugin,
     list_plugin_names,
@@ -186,8 +185,8 @@ class TestHAICONPluginProperties:
         assert isinstance(haicon_plugin, HAICONDownloaderPlugin)
 
     def test_plugin_inherits_lightweight(self, haicon_plugin):
-        """Test that the plugin inherits from LightweightDownloaderPlugin."""
-        assert isinstance(haicon_plugin, LightweightDownloaderPlugin)
+        """Test that the plugin inherits from DownloaderPlugin."""
+        assert isinstance(haicon_plugin, DownloaderPlugin)
         assert isinstance(haicon_plugin, DownloaderPlugin)
 
     def test_plugin_name(self, haicon_plugin):

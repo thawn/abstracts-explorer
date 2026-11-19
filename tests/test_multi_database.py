@@ -125,7 +125,7 @@ class TestMultiDatabaseBackend:
             assert count >= 1  # Might have papers from previous tests
 
             # Test search
-            results = db.search_papers(keyword="PostgreSQL", limit=10)
+            results = db.keyword_search(keyword="PostgreSQL", limit=10)
             assert len(results) > 0
             assert any("PostgreSQL" in r["title"] for r in results)
 

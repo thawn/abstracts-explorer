@@ -1,6 +1,6 @@
 """Tests for interesting-paper summaries and recommendations."""
 
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -8,6 +8,7 @@ from abstracts_explorer.interesting_papers import (
     load_interesting_papers,
     normalize_priorities,
     recommend_related_papers,
+    suggest_authors_to_meet,
     summarize_interesting_papers,
 )
 
@@ -38,7 +39,8 @@ def _mock_db(papers):
     db = Mock()
     by_uid = {paper["uid"]: paper for paper in papers}
     db.get_papers_by_uids.side_effect = lambda uids: [by_uid[uid] for uid in uids if uid in by_uid]
-    db.search_papers.return_value = [paper for paper in papers if paper["uid"] not in {"p1", "p2"}]
+    db.keyword_search.return_value = [paper for paper in papers if paper["uid"] not in {"p1", "p2"}]
+    db.resolve_paper_uids.return_value = [paper["uid"] for paper in papers]
     return db
 
 
@@ -129,37 +131,20 @@ class TestRecommendRelatedPapers:
         }
         em.collection.count.return_value = 4
         em.collection.query.return_value = query_result
-        em.parse_chromadb_metadata.side_effect = lambda metadata: {
-            **metadata,
-            "year": int(metadata.get("year", 0)),
-            "authors": metadata.get("authors", []),
-            "keywords": metadata.get("keywords", []),
-        }
         return em
 
     def test_recommends_nearest_unrated_papers(self):
-        papers = [_paper("p1"), _paper("p2")]
+        papers = [
+            _paper("p1"),
+            _paper("p2"),
+            _paper("p3", title="Recommended", keywords=["alignment"], authors=["Alice"]),
+            _paper("p4", title="Other"),
+        ]
         db = _mock_db(papers)
         em = self._mock_embeddings(
             {
                 "ids": [["p1", "p3", "p4"]],
                 "distances": [[0.0, 0.2, 0.4]],
-                "metadatas": [
-                    [
-                        {"uid": "p1", "year": "2026", "conference": "ICLR"},
-                        {
-                            "uid": "p3",
-                            "title": "Recommended",
-                            "year": "2026",
-                            "conference": "ICLR",
-                            "keywords": ["alignment"],
-                            "authors": ["Alice"],
-                            "session": "Oral",
-                        },
-                        {"uid": "p4", "title": "Other", "year": "2026", "conference": "ICLR"},
-                    ]
-                ],
-                "documents": [["", "abstract three", "abstract four"]],
             }
         )
 
@@ -169,7 +154,7 @@ class TestRecommendRelatedPapers:
             priorities={"p1": {"priority": 5}, "p2": {"priority": 1}},
             conferences=["ICLR"],
             years=[2026],
-            n_results=2,
+            limit=2,
         )
 
         assert result["seed_count"] == 2
@@ -182,22 +167,20 @@ class TestRecommendRelatedPapers:
     def test_infers_scope_from_seed_papers(self):
         papers = [_paper("p1"), _paper("p2")]
         db = _mock_db(papers)
-        em = self._mock_embeddings({"ids": [[]], "distances": [[]], "metadatas": [[]], "documents": [[]]})
+        em = self._mock_embeddings({"ids": [[]], "distances": [[]]})
 
-        recommend_related_papers(db, em, priorities={"p1": {"priority": 5}, "p2": {"priority": 1}}, n_results=5)
+        recommend_related_papers(db, em, priorities={"p1": {"priority": 5}, "p2": {"priority": 1}}, limit=5)
 
-        where = em.collection.query.call_args.kwargs["where"]
-        assert {"conference": {"$in": ["ICLR"]}} in where["$and"]
-        assert {"year": {"$in": ["2026"]}} in where["$and"]
+        assert em.collection.query.call_args.kwargs["ids"] == ["p1", "p2"]
 
     def test_falls_back_to_metadata_when_embeddings_missing(self):
         papers = [_paper("p1")]
         db = _mock_db(papers)
-        db.search_papers.return_value = [_paper("p3", title="Keyword Match")]
+        db.keyword_search.return_value = [_paper("p3", title="Keyword Match")]
         em = Mock()
         em.collection.get.return_value = {"ids": ["p1"], "embeddings": None}
 
-        result = recommend_related_papers(db, em, priorities={"p1": {"priority": 5}}, n_results=5)
+        result = recommend_related_papers(db, em, priorities={"p1": {"priority": 5}}, limit=5)
 
         assert result["papers"]
         assert result["papers"][0]["uid"] == "p3"
@@ -213,3 +196,96 @@ class TestConferenceYearParsing:
 
         assert loaded["filters"] == {"conferences": ["ICLR"], "years": [2026]}
         assert [paper["uid"] for paper in loaded["papers"]] == ["p1"]
+
+
+class TestSuggestAuthorsToMeet:
+    def _recommendations(self, papers):
+        return {
+            "papers": papers,
+            "recommendations_count": len(papers),
+            "filters": {"conferences": ["ICLR"], "years": [2026]},
+            "warning": None,
+        }
+
+    def test_ranks_by_similarity_weighted_frequency(self):
+        seed = _paper("p1", authors=["Alice", "Bob"])
+        db = _mock_db([seed])
+        recommendations = self._recommendations(
+            [
+                _paper("r1", authors=["Alice", "Carol"], session="Poster"),
+                _paper("r2", authors=["Alice", "Carol"]),
+                _paper("r3", authors=["Bob"]),
+            ]
+        )
+        for paper, score in zip(recommendations["papers"], [0.9, 0.8, 0.5]):
+            paper["recommendation_score"] = score
+        recommendations["papers"][0]["poster_position"] = "12"
+
+        with patch(
+            "abstracts_explorer.interesting_papers.authors.recommend_related_papers",
+            return_value=recommendations,
+        ) as mock_recommend:
+            result = suggest_authors_to_meet(
+                db,
+                Mock(),
+                priorities={"p1": {"priority": 5}},
+                limit=10,
+                paper_limit=20,
+            )
+
+        mock_recommend.assert_called_once()
+        assert mock_recommend.call_args.kwargs["limit"] == 20
+        assert [author["name"] for author in result["authors"]] == ["Alice", "Carol", "Bob"]
+        assert [author["score"] for author in result["authors"]] == [2.7, 1.7, 1.5]
+        assert result["authors"][0]["starred_author"] is True
+        assert result["authors"][1]["starred_author"] is False
+        assert result["authors"][2]["starred_author"] is True
+        assert result["authors"][0]["similar_paper_count"] == 2
+        assert result["authors"][0]["starred_paper_count"] == 1
+        assert result["authors"][0]["papers"][0]["poster_position"] == "12"
+        assert result["authors"][2]["starred_papers"][0]["priority"] == 5
+        assert result["papers_considered"] == 3
+        assert result["seed_count"] == 1
+
+    def test_dedupes_author_names_case_insensitively(self):
+        seed = _paper("p1", authors=["Alice  Smith"])
+        db = _mock_db([seed])
+        recommended = _paper("r1", authors=["alice smith"])
+        recommended["recommendation_score"] = 0.7
+        recommendations = self._recommendations([recommended])
+
+        with patch(
+            "abstracts_explorer.interesting_papers.authors.recommend_related_papers",
+            return_value=recommendations,
+        ):
+            result = suggest_authors_to_meet(db, Mock(), priorities={"p1": {"priority": 5}})
+
+        assert result["authors_count"] == 1
+        assert result["authors"][0]["similar_paper_count"] == 1
+        assert result["authors"][0]["starred_paper_count"] == 1
+
+    def test_respects_author_limit(self):
+        seed = _paper("p1", authors=["Alice"])
+        db = _mock_db([seed])
+        recommendations = self._recommendations(
+            [_paper(f"r{index}", authors=[f"Author {index}"]) for index in range(5)]
+        )
+        for index, paper in enumerate(recommendations["papers"]):
+            paper["recommendation_score"] = 1.0 - index / 10
+
+        with patch(
+            "abstracts_explorer.interesting_papers.authors.recommend_related_papers",
+            return_value=recommendations,
+        ):
+            result = suggest_authors_to_meet(db, Mock(), priorities={"p1": {"priority": 5}}, limit=2)
+
+        assert result["authors_count"] == 2
+
+    def test_empty_when_no_interesting_papers(self):
+        db = _mock_db([])
+
+        result = suggest_authors_to_meet(db, Mock(), priorities={})
+
+        assert result["authors"] == []
+        assert result["authors_count"] == 0
+        assert "No interesting papers" in result["warning"]

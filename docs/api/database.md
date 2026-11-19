@@ -19,7 +19,7 @@ The `DatabaseManager` class handles all database operations including:
    :undoc-members:
    :show-inheritance:
    :special-members: __init__
-   :exclude-members: datetime, timezone, Path, Any, Dict, List, Optional, Union, create_engine, select, delete, func, or_, and_, text, sessionmaker, Session, Engine, OperationalError, ProgrammingError, IntegrityError, logger
+   :exclude-members: datetime, timezone, Path, Any, Dict, List, Optional, Union, create_engine, select, delete, func, or_, and_, text, sessionmaker, Session, Engine, OperationalError, ProgrammingError, IntegrityError, logger, metadata
 ```
 
 ## Usage Examples
@@ -54,15 +54,15 @@ with db:
 
 ```python
 # Keyword search across title, abstract, and keywords
-results = db.search_papers(keyword="transformer")
+results = db.keyword_search(keyword="transformer")
 
 # Field-specific substring search
-results = db.search_papers(field_filters={"title": "attention"})
-results = db.search_papers(field_filters={"authors": "John Doe"})
+results = db.keyword_search(field_filters={"title": "attention"})
+results = db.keyword_search(field_filters={"authors": "John Doe"})
 
 # Filter by year and/or conference
-papers_2025 = db.search_papers(years=[2025])
-neurips_2025 = db.search_papers(conferences=["NeurIPS"], years=[2025])
+papers_2025 = db.keyword_search(years=[2025])
+neurips_2025 = db.keyword_search(conferences=["NeurIPS"], years=[2025])
 
 # Structured filters with get_paper, the single paper-search authority
 results = db.get_paper(
@@ -72,6 +72,36 @@ results = db.get_paper(
             {"conference": "NeurIPS"},
         ]
     }
+)
+```
+
+### Semantic Search
+
+```python
+from abstracts_explorer.embeddings import EmbeddingsManager, QueryEmbedding
+
+embeddings_manager = EmbeddingsManager()
+query = QueryEmbedding("graph neural networks", embeddings_manager)
+
+# Low-level matches: ordered (paper_uid, distance) tuples
+matches = db.find_paper_ids_within_distance(
+    query,
+    distance_threshold=1.1,
+    conferences=["NeurIPS"],
+    years=[2025],
+)
+
+# Hydrate a page of matches
+papers = db.get_result_details(matches, slice(0, 10))
+total_matches = len(matches)
+
+# High-level unified search: (papers, total_similar)
+papers, total_similar = db.search(
+    "graph neural networks",
+    limit=10,
+    use_embeddings=True,
+    include_total=True,
+    embeddings_manager=embeddings_manager,
 )
 ```
 

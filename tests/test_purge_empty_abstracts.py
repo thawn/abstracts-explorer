@@ -198,11 +198,12 @@ class TestDeleteEmbeddingsByUids:
 
         em = MagicMock()
         em.collection = mock_collection
+        em.delete_embeddings_by_ids.return_value = 2
 
         count = delete_embeddings_by_uids(em, ["uid1", "uid2", "uid3"])
 
         mock_collection.get.assert_called_once_with(ids=["uid1", "uid2", "uid3"])
-        mock_collection.delete.assert_called_once_with(ids=["uid1", "uid2"])
+        em.delete_embeddings_by_ids.assert_called_once_with(["uid1", "uid2"])
         assert count == 2
 
     def test_returns_zero_when_none_present(self):
@@ -215,7 +216,7 @@ class TestDeleteEmbeddingsByUids:
 
         count = delete_embeddings_by_uids(em, ["ghost-uid"])
 
-        mock_collection.delete.assert_not_called()
+        em.delete_embeddings_by_ids.assert_not_called()
         assert count == 0
 
     def test_returns_zero_for_empty_input(self):

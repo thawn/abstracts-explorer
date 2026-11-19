@@ -461,6 +461,31 @@ class TestDatabaseExportImport:
         finally:
             db.close()
 
+    def test_resolve_conference_name_db_error_still_uses_plugin_fallback(self, tmp_path):
+        """A failing DB lookup is logged but does not block plugin fallback."""
+        set_test_db(tmp_path / "empty.db")
+        db = DatabaseManager()
+        db.create_tables()
+        try:
+            with patch.object(db, "get_conferences", side_effect=DatabaseError("boom")):
+                assert db.resolve_conference_name("neurips") == "NeurIPS"
+        finally:
+            db.close()
+
+    def test_resolve_conference_name_chains_db_error(self, tmp_path):
+        """The underlying DB error is attached as the cause of the resolution failure."""
+        set_test_db(tmp_path / "empty.db")
+        db = DatabaseManager()
+        db.create_tables()
+        try:
+            original = DatabaseError("database unavailable")
+            with patch.object(db, "get_conferences", side_effect=original):
+                with pytest.raises(DatabaseError, match="Failed to resolve conference name") as excinfo:
+                    db.resolve_conference_name("unknown-conf-xyz-999")
+            assert excinfo.value.__cause__ is original
+        finally:
+            db.close()
+
     def test_import_with_resolved_conference_name(self, tmp_path):
         """Import works correctly when conference name is resolved before calling import."""
         from abstracts_explorer.db_models import Paper
@@ -565,6 +590,24 @@ class TestDatabaseExportImport:
         try:
             assert db.export_papers_to_sqlite(export_path, "neurips", 2024) == 0
             assert export_path.exists()
+        finally:
+            db.close()
+
+    def test_import_rejects_empty_source_without_deleting_local_data(self, tmp_path):
+        """An empty export must not wipe the destination conference/year."""
+        target_path = tmp_path / "target.db"
+        db = _populate_test_db(target_path)
+        before = db.get_paper_count()
+        try:
+            empty_source_path = tmp_path / "empty-source.db"
+            other_db = _populate_test_db(tmp_path / "other-source.db")
+            assert other_db.export_papers_to_sqlite(empty_source_path, "neurips", 1999) == 0
+            other_db.close()
+
+            with pytest.raises(DatabaseError, match="contains no papers"):
+                db.import_papers_from_sqlite(empty_source_path, "neurips", 2024)
+
+            assert db.get_paper_count() == before
         finally:
             db.close()
 
@@ -1100,132 +1143,83 @@ class TestEmbeddingsExportImport:
     """Tests for EmbeddingsManager.export_embeddings and import_embeddings."""
 
     def test_export_embeddings(self):
-        """Embeddings for a conference+year are exported correctly."""
+        """Embeddings are exported by ID in the v1 format."""
+        from abstracts_explorer.embeddings import EmbeddingsManager, hash_text
+
         mock_collection = MagicMock()
         mock_collection.get.return_value = {
             "ids": ["id1", "id2"],
-            "documents": ["doc1", "doc2"],
-            "metadatas": [
-                {
-                    "title": "Paper 1",
-                    "authors": "Author A;Author B",
-                    "abstract": "Abstract 1",
-                    "session": "Session 1",
-                    "poster_position": "1",
-                    "conference": "neurips",
-                    "year": "2024",
-                },
-                {
-                    "title": "Paper 2",
-                    "authors": "Author C",
-                    "abstract": "Abstract 2",
-                    "session": "Session 2",
-                    "poster_position": "2",
-                    "conference": "neurips",
-                    "year": "2024",
-                },
-            ],
+            "documents": [hash_text("doc1"), hash_text("doc2")],
             "embeddings": [[0.1, 0.2], [0.3, 0.4]],
         }
-
-        mock_em = MagicMock()
-        mock_em.collection = mock_collection
-        mock_em.export_embeddings = MagicMock()
-
-        # Test the actual method by calling it on a real-ish object
-        from abstracts_explorer.embeddings import EmbeddingsManager
 
         em = EmbeddingsManager.__new__(EmbeddingsManager)
         em._collection = mock_collection
 
-        result = em.export_embeddings("neurips", 2024)
+        result = em.export_embeddings(["id1", "id2"])
+
+        assert result["format_version"] == 1
         assert result["ids"] == ["id1", "id2"]
         assert result["embeddings"] == [[0.1, 0.2], [0.3, 0.4]]
-
-        # Verify the filter was used
-        call_kwargs = mock_collection.get.call_args[1]
-        assert call_kwargs["where"] == {
-            "$and": [
-                {"conference": {"$in": ["neurips"]}},
-                {"year": {"$in": ["2024"]}},
-            ]
-        }
+        assert "metadatas" not in result
+        assert mock_collection.get.call_args.kwargs["ids"] == ["id1", "id2"]
 
     def test_export_embeddings_converts_ndarray(self):
-        """Numpy ndarrays in embeddings are converted to plain lists (JSON-serializable)."""
+        """Numpy ndarrays in embeddings are converted to plain lists."""
         import json
 
         import numpy as np
 
+        from abstracts_explorer.embeddings import EmbeddingsManager, hash_text
+
         mock_collection = MagicMock()
         mock_collection.get.return_value = {
             "ids": ["id1"],
-            "documents": ["doc1"],
-            "metadatas": [
-                {
-                    "title": "Paper 1",
-                    "authors": "Author A",
-                    "abstract": "Abstract 1",
-                    "session": "Session 1",
-                    "poster_position": "1",
-                    "conference": "neurips",
-                    "year": "2024",
-                }
-            ],
+            "documents": [hash_text("doc1")],
             "embeddings": [np.array([0.1, 0.2, 0.3])],
         }
-
-        from abstracts_explorer.embeddings import EmbeddingsManager
 
         em = EmbeddingsManager.__new__(EmbeddingsManager)
         em._collection = mock_collection
 
-        result = em.export_embeddings("neurips", 2024)
+        result = em.export_embeddings(["id1"])
 
-        # Must be JSON-serializable (no ndarray objects)
-        serialized = json.dumps(result)
-        assert serialized is not None
-        # Values should match
+        assert json.dumps(result)
         assert result["embeddings"] == [[0.1, 0.2, 0.3]]
 
     def test_import_embeddings(self):
-        """Embeddings are imported with replace semantics."""
-        mock_collection = MagicMock()
-        # Existing embeddings to delete
-        mock_collection.get.return_value = {"ids": ["old1"]}
+        """Embeddings are imported and replace IDs are deleted first."""
+        from abstracts_explorer.embeddings import EmbeddingsManager, hash_text
 
-        from abstracts_explorer.embeddings import EmbeddingsManager
+        mock_collection = MagicMock()
 
         em = EmbeddingsManager.__new__(EmbeddingsManager)
         em._collection = mock_collection
 
         data = {
+            "format_version": 1,
             "ids": ["id1", "id2"],
-            "documents": ["doc1", "doc2"],
-            "metadatas": [{"conference": "neurips", "year": "2024"}, {"conference": "neurips", "year": "2024"}],
+            "documents": [hash_text("doc1"), hash_text("doc2")],
             "embeddings": [[0.1, 0.2], [0.3, 0.4]],
         }
 
-        count = em.import_embeddings(data, "neurips", 2024)
+        count = em.import_embeddings(data, replace_ids=["old1"])
         assert count == 2
 
-        # Verify old embeddings were deleted
         mock_collection.delete.assert_called_once_with(ids=["old1"])
-        # Verify new embeddings were added
-        mock_collection.add.assert_called_once()
+        mock_collection.upsert.assert_called_once()
 
     def test_import_embeddings_empty(self):
         """Empty import returns 0."""
-        mock_collection = MagicMock()
-        mock_collection.get.return_value = {"ids": []}
-
         from abstracts_explorer.embeddings import EmbeddingsManager
+
+        mock_collection = MagicMock()
 
         em = EmbeddingsManager.__new__(EmbeddingsManager)
         em._collection = mock_collection
 
-        data = {"ids": [], "documents": [], "metadatas": [], "embeddings": []}
-        count = em.import_embeddings(data, "neurips", 2024)
+        data = {"format_version": 1, "ids": [], "documents": [], "embeddings": []}
+        count = em.import_embeddings(data)
         assert count == 0
 
 
@@ -2419,7 +2413,7 @@ class TestCLICommands:
         """A failed local data check returns True so the caller still confirms."""
         from abstracts_explorer.cli import _registry_download_has_existing_data
 
-        with patch("abstracts_explorer.cli.DatabaseManager") as MockDatabase:
+        with patch("abstracts_explorer.cli.registry.DatabaseManager") as MockDatabase:
             MockDatabase.return_value.__enter__.return_value.create_tables.side_effect = DatabaseError("boom")
 
             assert _registry_download_has_existing_data("neurips", 2024) is True
@@ -2558,11 +2552,11 @@ class TestCLICommands:
                 "tok",
                 "-c",
                 "n",
-                "-y",
+                "--year",
                 "24",
             ],
         ):
-            with patch("abstracts_explorer.cli.registry_upload_command", return_value=0) as mock_cmd:
+            with patch("abstracts_explorer.cli.main.registry_upload_command", return_value=0) as mock_cmd:
                 result = main()
 
         assert result == 0
@@ -2584,11 +2578,11 @@ class TestCLICommands:
                 "tok",
                 "-c",
                 "n",
-                "-y",
+                "--year",
                 "24",
             ],
         ):
-            with patch("abstracts_explorer.cli.registry_download_command", return_value=0) as mock_cmd:
+            with patch("abstracts_explorer.cli.main.registry_download_command", return_value=0) as mock_cmd:
                 result = main()
 
         assert result == 0
@@ -2599,7 +2593,7 @@ class TestCLICommands:
         from abstracts_explorer.cli import main
 
         with patch("sys.argv", ["abstracts-explorer", "registry", "list", "-r", "ghcr.io/o/r"]):
-            with patch("abstracts_explorer.cli.registry_list_command", return_value=0) as mock_cmd:
+            with patch("abstracts_explorer.cli.main.registry_list_command", return_value=0) as mock_cmd:
                 result = main()
 
         assert result == 0
@@ -3565,7 +3559,7 @@ class TestRegistryDeleteCommand:
             dry_run=False,
             yes=True,
         )
-        with patch("abstracts_explorer.cli.get_config", return_value=mock_cfg):
+        with patch("abstracts_explorer.cli._common.get_config", return_value=mock_cfg):
             # Override repository to None (mock_cfg.registry_repository is None)
             args.repository = None
             mock_cfg.registry_repository = None
@@ -3589,7 +3583,7 @@ class TestRegistryDeleteCommand:
             dry_run=False,
             yes=True,
         )
-        with patch("abstracts_explorer.cli.get_config", return_value=mock_cfg):
+        with patch("abstracts_explorer.cli._common.get_config", return_value=mock_cfg):
             result = registry_delete_command(args)
         assert result == 1
         assert "Authentication token" in capsys.readouterr().err
@@ -3653,7 +3647,7 @@ class TestRegistryDeleteCommand:
                 "--yes",
             ],
         ):
-            with patch("abstracts_explorer.cli.registry_delete_command", return_value=0) as mock_cmd:
+            with patch("abstracts_explorer.cli.main.registry_delete_command", return_value=0) as mock_cmd:
                 result = main()
 
         assert result == 0

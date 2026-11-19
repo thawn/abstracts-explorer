@@ -19,30 +19,75 @@ from abstracts_explorer.config import get_config
 def _reset_global_rate_limiter():
     """Reset the global rate limiter between tests to avoid test pollution."""
     from abstracts_explorer.rate_limiter import set_global_rate_limiter
+    from abstracts_explorer.web_ui.rate_limit import reset_client_rate_limiter
 
     set_global_rate_limiter(None)
+    reset_client_rate_limiter()
     yield
+    reset_client_rate_limiter()
 
 
-def get_env_test_path() -> Path:
+@pytest.fixture(autouse=True)
+def _reset_process_caches():
+    """Reset process-level schema and metadata caches between tests."""
+    from abstracts_explorer.database import reset_metadata_cache, reset_schema_cache
+
+    reset_schema_cache()
+    reset_metadata_cache()
+    yield
+    reset_schema_cache()
+    reset_metadata_cache()
+
+
+@pytest.fixture(autouse=True)
+def _reset_mcp_resources():
+    """Close cached MCP database/embeddings resources between tests."""
+    from abstracts_explorer.mcp import close_mcp_resources
+
+    close_mcp_resources()
+    yield
+    close_mcp_resources()
+
+
+def get_base_env_test_path() -> Path:
     """
-    Get the path to the .env.tests file.
-
-    This helper function centralizes the logic for finding .env.tests,
-    reducing code duplication across test files.
+    Get the path to the tracked .env.tests file.
 
     Returns
     -------
     Path
-        Path to the .env.tests file in the repository root.
+        Path to the tracked .env.tests file in the repository root.
+    """
+    repo_root = Path(__file__).parent.parent
+    return repo_root / ".env.tests"
+
+
+def get_env_test_path() -> Path:
+    """
+    Get the path to the test env file.
+
+    If a ``.env.tests.local`` file exists next to the tracked ``.env.tests``,
+    it is used instead.  Copy ``.env.tests`` to ``.env.tests.local`` and edit
+    the copy to point slow tests at a local LM Studio backend or to use a
+    personal Blablador token.  Process environment variables still take
+    precedence over the file.
+
+    Returns
+    -------
+    Path
+        Path to ``.env.tests.local`` when it exists, otherwise the tracked
+        ``.env.tests`` file.
 
     Examples
     --------
     >>> env_test = get_env_test_path()
     >>> config = get_config(reload=True, env_path=env_test)
     """
-    repo_root = Path(__file__).parent.parent
-    return repo_root / ".env.tests"
+    base_path = get_base_env_test_path()
+    local_path = base_path.with_name(f"{base_path.name}.local")
+    if local_path.exists():
+        return local_path
+    return base_path
 
 
 def pytest_addoption(parser):
@@ -59,6 +104,18 @@ def pytest_addoption(parser):
         action="store",
         default=None,
         help="Base URL of the staging deployment to run staging e2e tests against (e.g. http://localhost:5000)",
+    )
+    parser.addoption(
+        "--server-url",
+        action="store",
+        default=None,
+        help="Base URL of the deployment to run stress tests against (e.g. http://localhost:5000)",
+    )
+    parser.addoption(
+        "--stress-mcp-tool",
+        action="store",
+        default=None,
+        help="MCP tool to target with stress-test prompts (default: search_papers)",
     )
 
 
@@ -131,30 +188,139 @@ def staging_url(request):
     return url.rstrip("/")
 
 
-@pytest.fixture(scope="module")
-def browser():
+@pytest.fixture(scope="session")
+def server_url(request):
     """
-    Create a module-scoped Selenium WebDriver instance for staging e2e tests.
+    Resolve the stress-test deployment URL from CLI option or environment variable.
 
-    A single browser instance is shared across all tests in a module to avoid
-    the overhead of launching a new browser for every test.  The fixture is
-    defined here (``conftest.py``) so it is available to any test module; test
-    files that need a *function*-scoped browser (e.g. ``test_web_e2e.py``) can
-    override it with a local fixture of the same name.
+    The URL is taken from ``--server-url`` first, falling back to the
+    ``SERVER_URL`` environment variable.  Tests that depend on this fixture
+    are skipped when neither source provides a value.
 
-    Browser selection follows the ``E2E_BROWSER`` environment variable
-    (``chrome``, ``firefox``, or ``auto``).
+    Parameters
+    ----------
+    request : FixtureRequest
+        Pytest request object (provides access to CLI options).
+
+    Returns
+    -------
+    str
+        The base URL of the deployment (without trailing slash).
+    """
+    import os
+
+    url = request.config.getoption("--server-url") or os.environ.get("SERVER_URL")
+    if not url:
+        pytest.skip("Server URL not provided. Use --server-url or set SERVER_URL env var.")
+    return url.rstrip("/")
+
+
+@pytest.fixture(scope="session")
+def stress_mcp_tool(request):
+    """
+    Resolve the MCP tool targeted by stress-test prompts.
+
+    The tool is taken from ``--stress-mcp-tool`` first, falling back to the
+    ``STRESS_MCP_TOOL`` environment variable and finally to
+    ``search_papers``.
+
+    Parameters
+    ----------
+    request : FixtureRequest
+        Pytest request object (provides access to CLI options).
+
+    Returns
+    -------
+    str
+        Name of the MCP tool to target.
+    """
+    import os
+
+    return request.config.getoption("--stress-mcp-tool") or os.environ.get("STRESS_MCP_TOOL") or "search_papers"
+
+
+@pytest.fixture(scope="module")
+def staging_page(browser):
+    """
+    Create a module-scoped Playwright page for staging e2e tests.
+
+    A single browser context and page are shared across all tests in a module
+    to avoid the overhead of launching a new browser for every test.  The
+    fixture relies on the session-scoped ``browser`` fixture provided by
+    ``pytest-playwright``.
 
     Yields
     ------
-    webdriver.Chrome or webdriver.Firefox
-        A headless WebDriver instance.  Automatically quit after the module.
+    playwright.sync_api.Page
+        A page using a fresh browser context.  The context is closed after the
+        module finishes.
     """
-    from tests.helpers import create_webdriver
+    context = browser.new_context()
+    page = context.new_page()
+    yield page
+    context.close()
 
-    driver = create_webdriver()
-    yield driver
-    driver.quit()
+
+def _collect_console_errors(page) -> list[str]:
+    """
+    Attach console and page-error listeners to *page* and return the collector.
+
+    Parameters
+    ----------
+    page : playwright.sync_api.Page
+        Page whose console output should be collected.
+
+    Returns
+    -------
+    list[str]
+        Messages for console entries of type ``error`` and uncaught page
+        exceptions.  The list is populated as the page runs.
+    """
+    errors: list[str] = []
+    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+    page.on("pageerror", lambda exc: errors.append(str(exc)))
+    return errors
+
+
+@pytest.fixture
+def console_errors(page):
+    """
+    Collect browser console errors and uncaught page errors.
+
+    The listeners are attached before the test body runs, so errors emitted
+    during navigation and asynchronous rendering are captured.
+
+    Parameters
+    ----------
+    page : playwright.sync_api.Page
+        Playwright page fixture.
+
+    Returns
+    -------
+    list[str]
+        Messages for console entries of type ``error`` and uncaught page
+        exceptions.  The list is populated as the test runs.
+    """
+    return _collect_console_errors(page)
+
+
+@pytest.fixture
+def staging_console_errors(staging_page):
+    """
+    Collect console errors for the module-scoped staging page.
+
+    Parameters
+    ----------
+    staging_page : playwright.sync_api.Page
+        Module-scoped Playwright page used by staging tests.
+
+    Returns
+    -------
+    list[str]
+        Messages for console entries of type ``error`` and uncaught page
+        exceptions.  The list is populated as the test runs.
+    """
+    return _collect_console_errors(staging_page)
 
 
 @pytest.fixture(scope="session")
@@ -479,7 +645,7 @@ def mock_lm_studio():
     """
     from unittest.mock import patch, Mock
 
-    with patch("abstracts_explorer.embeddings.OpenAI") as mock_openai_class:
+    with patch("abstracts_explorer.embeddings.models.OpenAI") as mock_openai_class:
         # Create mock OpenAI client instance
         mock_client = Mock()
         mock_openai_class.return_value = mock_client
@@ -488,47 +654,20 @@ def mock_lm_studio():
         mock_models = Mock()
         mock_client.models.list.return_value = mock_models
 
-        # Mock embeddings.create() for embedding generation
-        mock_embedding_response = Mock()
-        mock_embedding_data = Mock()
-        mock_embedding_data.embedding = [0.1] * 4096
-        mock_embedding_response.data = [mock_embedding_data]
-        mock_client.embeddings.create.return_value = mock_embedding_response
+        # Mock embeddings.create() for single and batched embedding generation
+        def _create_embeddings(*args, **kwargs):
+            inputs = kwargs.get("input")
+            texts = [inputs] if isinstance(inputs, str) else list(inputs or [])
+            response = Mock()
+            response.data = []
+            for index in range(len(texts)):
+                item = Mock()
+                item.embedding = [0.1] * 4096
+                item.index = index
+                response.data.append(item)
+            return response
 
-        yield mock_client
-
-
-@pytest.fixture
-def mock_rag_openai():
-    """
-    Mock OpenAI client for RAG testing.
-
-    Yields
-    ------
-    Mock
-        Mock OpenAI client with configured chat completion responses
-
-    Notes
-    -----
-    Mocks chat.completions.create() for RAG query testing.
-    """
-    from unittest.mock import patch, Mock
-
-    with patch("abstracts_explorer.rag.OpenAI") as mock_openai_class:
-        # Create mock OpenAI client instance
-        mock_client = Mock()
-        mock_openai_class.return_value = mock_client
-
-        # Mock chat.completions.create() for chat generation
-        mock_chat_response = Mock()
-        mock_choice = Mock()
-        mock_message = Mock()
-        mock_message.content = (
-            "Based on Paper 1 and Paper 2, attention mechanisms allow models to focus on relevant parts of the input."
-        )
-        mock_choice.message = mock_message
-        mock_chat_response.choices = [mock_choice]
-        mock_client.chat.completions.create.return_value = mock_chat_response
+        mock_client.embeddings.create.side_effect = _create_embeddings
 
         yield mock_client
 
@@ -573,19 +712,27 @@ def embeddings_manager(tmp_path, monkeypatch):
 
     # Create the manager
     em = EmbeddingsManager(
-        lm_studio_url="http://localhost:1234",
+        backend_url="http://localhost:1234",
         collection_name="test_collection",
     )
 
     # Replace the OpenAI client with a mock
     mock_client = Mock()
 
-    # Mock embeddings.create()
-    mock_embedding_response = Mock()
-    mock_embedding_data = Mock()
-    mock_embedding_data.embedding = [0.1] * 4096
-    mock_embedding_response.data = [mock_embedding_data]
-    mock_client.embeddings.create.return_value = mock_embedding_response
+    # Mock embeddings.create() for single and batched embedding generation
+    def _create_embeddings(*args, **kwargs):
+        inputs = kwargs.get("input")
+        texts = [inputs] if isinstance(inputs, str) else list(inputs or [])
+        response = Mock()
+        response.data = []
+        for index in range(len(texts)):
+            item = Mock()
+            item.embedding = [0.1] * 4096
+            item.index = index
+            response.data.append(item)
+        return response
+
+    mock_client.embeddings.create.side_effect = _create_embeddings
 
     # Mock models.list()
     mock_client.models.list.return_value = Mock()
@@ -614,43 +761,9 @@ def mock_embeddings_manager():
     mock_em = Mock(spec=EmbeddingsManager)
 
     # Mock successful search results with STRING UIDs (lightweight schema)
-    # Metadata is already parsed (search_similar returns LightweightPaper-parsed metadata):
-    # authors as list, keywords as list, year as int
     mock_em.search_similar.return_value = {
-        "ids": [["1", "2", "3"]],  # Use string UIDs (lightweight schema)
+        "ids": [["1", "2", "3"]],
         "distances": [[0.1, 0.2, 0.3]],
-        "metadatas": [
-            [
-                {
-                    "title": "Attention Is All You Need",
-                    "authors": ["Vaswani et al."],
-                    "topic": "Deep Learning",
-                    "decision": "Accept (oral)",
-                    "keywords": ["transformers", "attention"],
-                },
-                {
-                    "title": "BERT: Pre-training of Deep Bidirectional Transformers",
-                    "authors": ["Devlin et al."],
-                    "topic": "Natural Language Processing",
-                    "decision": "Accept (poster)",
-                    "keywords": ["language models", "pretraining"],
-                },
-                {
-                    "title": "GPT-3: Language Models are Few-Shot Learners",
-                    "authors": ["Brown et al."],
-                    "topic": "Language Models",
-                    "decision": "Accept (oral)",
-                    "keywords": ["large language models", "in-context learning"],
-                },
-            ]
-        ],
-        "documents": [
-            [
-                "We propose the Transformer, a model architecture...",
-                "We introduce BERT, a new language representation model...",
-                "We train GPT-3, an autoregressive language model with 175B parameters...",
-            ]
-        ],
     }
 
     return mock_em

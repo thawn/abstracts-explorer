@@ -7,13 +7,12 @@ including natural sorting, web scraping, and file generation.
 
 import zipfile
 from io import BytesIO
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 
 from abstracts_explorer.export_utils import (
     natural_sort_key,
-    fetch_conference_info,
     get_poster_url,
     generate_all_papers_markdown,
     generate_search_term_markdown,
@@ -21,14 +20,6 @@ from abstracts_explorer.export_utils import (
     generate_folder_structure_export,
     export_papers_to_zip,
 )
-
-
-@pytest.fixture(autouse=True)
-def _mock_conference_info(monkeypatch, request):
-    """Avoid live neurips.cc requests in tests that do not target fetching."""
-    if getattr(request.node.cls, "__name__", "") == "TestFetchConferenceInfo":
-        return
-    monkeypatch.setattr("abstracts_explorer.export_utils.fetch_conference_info", lambda: None)
 
 
 class TestNaturalSortKey:
@@ -69,130 +60,6 @@ class TestNaturalSortKey:
         items = ["100", "20", "3", "1"]
         sorted_items = sorted(items, key=natural_sort_key)
         assert sorted_items == ["1", "3", "20", "100"]
-
-
-class TestFetchConferenceInfo:
-    """Tests for fetch_conference_info function."""
-
-    @patch("abstracts_explorer.export_utils.requests.get")
-    def test_fetch_conference_info_success(self, mock_get):
-        """Test successful conference info fetching."""
-        # Mock successful HTML response
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.content = b"""
-        <html>
-            <head><title>NeurIPS 2025 - Neural Information Processing Systems</title></head>
-            <body>
-                <h1>38th Conference on Neural Information Processing Systems (NeurIPS 2025)</h1>
-                <p>December 9-15, 2025</p>
-                <p>Vancouver Convention Centre, Vancouver, Canada</p>
-                <div class="about">Leading conference in machine learning and AI</div>
-            </body>
-        </html>
-        """
-        mock_response.raise_for_status = Mock()
-        mock_get.return_value = mock_response
-
-        conf_info = fetch_conference_info()
-
-        assert conf_info is not None
-        assert "NeurIPS" in conf_info["name"]
-        assert "December 9-15, 2025" in conf_info["dates"]
-        assert "Vancouver" in conf_info["location"]
-        mock_get.assert_called_once()
-
-    @patch("abstracts_explorer.export_utils.requests.get")
-    def test_fetch_conference_info_network_error(self, mock_get):
-        """Test conference info fetching with network error."""
-        mock_get.side_effect = Exception("Network error")
-
-        conf_info = fetch_conference_info()
-
-        assert conf_info is None
-
-    @patch("abstracts_explorer.export_utils.requests.get")
-    def test_fetch_conference_info_timeout(self, mock_get):
-        """Test conference info fetching with timeout."""
-        import requests
-
-        mock_get.side_effect = requests.Timeout()
-
-        conf_info = fetch_conference_info()
-
-        assert conf_info is None
-
-    @patch("abstracts_explorer.export_utils.requests.get")
-    def test_fetch_conference_info_http_error(self, mock_get):
-        """Test conference info fetching with HTTP error."""
-        import requests
-
-        mock_response = Mock()
-        mock_response.raise_for_status.side_effect = requests.HTTPError()
-        mock_get.return_value = mock_response
-
-        conf_info = fetch_conference_info()
-
-        assert conf_info is None
-
-    @patch("abstracts_explorer.export_utils.requests.get")
-    def test_fetch_conference_info_missing_beautifulsoup(self, mock_get):
-        """Test conference info fetching when BeautifulSoup is not available."""
-        with patch.dict("sys.modules", {"bs4": None}):
-            # This will cause ImportError when trying to import BeautifulSoup
-            conf_info = fetch_conference_info()
-
-            # Should return None when BeautifulSoup is not available
-            # The function catches ImportError and returns None
-            assert conf_info is None
-
-    @patch("abstracts_explorer.export_utils.requests.get")
-    def test_fetch_conference_info_partial_data(self, mock_get):
-        """Test conference info with minimal HTML."""
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.content = b"""
-        <html>
-            <head><title>NeurIPS 2025</title></head>
-            <body><p>Some content</p></body>
-        </html>
-        """
-        mock_response.raise_for_status = Mock()
-        mock_get.return_value = mock_response
-
-        conf_info = fetch_conference_info()
-
-        assert conf_info is not None
-        assert "name" in conf_info
-        # dates and location might be None with minimal HTML
-        assert "dates" in conf_info
-        assert "location" in conf_info
-
-    @patch("abstracts_explorer.export_utils.requests.get")
-    def test_fetch_conference_info_with_description(self, mock_get):
-        """Test conference info with description section."""
-        mock_response = Mock()
-        mock_response.status_code = 200
-        # Create a very long description to test truncation
-        long_desc = "A" * 600  # Over 500 chars
-        mock_response.content = f"""
-        <html>
-            <head><title>NeurIPS 2025</title></head>
-            <body>
-                <div class="about-section">{long_desc}</div>
-            </body>
-        </html>
-        """.encode()
-        mock_response.raise_for_status = Mock()
-        mock_get.return_value = mock_response
-
-        conf_info = fetch_conference_info()
-
-        assert conf_info is not None
-        assert conf_info["description"] is not None
-        # Description should be truncated to 500 chars + "..."
-        assert len(conf_info["description"]) == 503
-        assert conf_info["description"].endswith("...")
 
 
 class TestGetPosterUrl:
@@ -383,7 +250,7 @@ class TestGenerateAllPapersMarkdown:
 
         assert "**Authors:** Alice; Bob; Charlie" in markdown
 
-    @patch("abstracts_explorer.export_utils.get_poster_url")
+    @patch("abstracts_explorer.export.markdown.get_poster_url")
     def test_generate_all_papers_with_poster_image(self, mock_get_poster_url):
         """Test markdown generation with poster image."""
         mock_get_poster_url.return_value = "https://example.com/poster.png"
@@ -480,7 +347,7 @@ class TestGenerateSearchTermMarkdown:
         # PDF URL should be generated by replacing forum with pdf
         assert "[View on OpenReview](https://openreview.net/pdf?id=abc123)" in markdown
 
-    @patch("abstracts_explorer.export_utils.get_poster_url")
+    @patch("abstracts_explorer.export.markdown.get_poster_url")
     def test_generate_search_term_with_poster_image(self, mock_get_poster_url):
         """Test search term markdown with poster image."""
         mock_get_poster_url.return_value = "https://example.com/poster.png"
@@ -507,9 +374,11 @@ class TestGenerateMainReadme:
                 "searchTerm": "AI",
                 "priority": 5,
                 "session": "Oral",
+                "conference": "NeurIPS",
+                "year": 2025,
             }
         ]
-        readme = generate_main_readme(papers, "AI search", "search-rating-poster")
+        readme = generate_main_readme(papers, "search-rating-poster")
 
         assert "# NeurIPS 2025 - Interesting Papers" in readme
         assert "## Conference Information" in readme
@@ -517,33 +386,42 @@ class TestGenerateMainReadme:
         assert "**Total Papers:** 1" in readme
         assert "## Papers by Search Term" in readme
 
-    @patch("abstracts_explorer.export_utils.fetch_conference_info")
-    def test_generate_main_readme_with_conference_info(self, mock_fetch):
-        """Test README with fetched conference info."""
-        mock_fetch.return_value = {
-            "name": "NeurIPS 2025",
-            "dates": "December 9-15, 2025",
-            "location": "Vancouver, Canada",
-            "description": "Leading ML conference",
-        }
-        papers = [{"title": "Paper 1", "searchTerm": "AI", "priority": 5, "session": "Oral"}]
-        readme = generate_main_readme(papers, "search", "search-rating-poster")
+    def test_generate_main_readme_uses_paper_metadata(self):
+        """Test README conference information comes from paper metadata."""
+        papers = [
+            {
+                "title": "Paper 1",
+                "searchTerm": "AI",
+                "priority": 5,
+                "session": "Oral",
+                "conference": "NeurIPS",
+                "year": 2025,
+            }
+        ]
+        readme = generate_main_readme(papers, "search-rating-poster")
 
-        assert "**Conference:** NeurIPS 2025" in readme
-        assert "**Dates:** December 9-15, 2025" in readme
-        assert "**Location:** Vancouver, Canada" in readme
-        assert "**About:** Leading ML conference" in readme
+        assert "**Conference:** NeurIPS" in readme
+        assert "**Year:** 2025" in readme
 
-    @patch("abstracts_explorer.export_utils.fetch_conference_info")
-    def test_generate_main_readme_fallback_conference_info(self, mock_fetch):
-        """Test README with fallback conference info."""
-        mock_fetch.return_value = None
-        papers = [{"title": "Paper 1", "searchTerm": "AI", "priority": 5, "session": "Oral"}]
-        readme = generate_main_readme(papers, "search", "search-rating-poster")
+    def test_generate_main_readme_does_not_fetch_conference_website(self):
+        """Test README generation never performs live conference lookups."""
+        papers = [
+            {
+                "title": "Paper 1",
+                "searchTerm": "AI",
+                "priority": 5,
+                "session": "Oral",
+                "conference": "NeurIPS",
+                "year": 2025,
+            }
+        ]
+        with patch("requests.get") as mock_get:
+            readme = generate_main_readme(papers, "search-rating-poster")
 
-        assert "**Conference:** 38th Conference on Neural Information Processing Systems (NeurIPS 2025)" in readme
-        assert "**Dates:** December 9-15, 2025" in readme
-        assert "**Location:** Vancouver Convention Centre" in readme
+        mock_get.assert_not_called()
+        assert "**Dates:**" not in readme
+        assert "**Location:**" not in readme
+        assert "**About:**" not in readme
 
     def test_generate_main_readme_sort_order_search_rating_poster(self):
         """Test README with search-rating-poster sort order."""
@@ -551,7 +429,7 @@ class TestGenerateMainReadme:
             {"title": "P1", "searchTerm": "AI", "priority": 5, "session": "Oral"},
             {"title": "P2", "searchTerm": "ML", "priority": 4, "session": "Poster"},
         ]
-        readme = generate_main_readme(papers, "search", "search-rating-poster")
+        readme = generate_main_readme(papers, "search-rating-poster")
 
         assert "**Sort Order:** Search Term → Rating → Poster #" in readme
         assert "## Papers by Search Term" in readme
@@ -563,7 +441,7 @@ class TestGenerateMainReadme:
             {"title": "P1", "searchTerm": "AI", "priority": 5, "session": "Oral"},
             {"title": "P2", "searchTerm": "AI", "priority": 3, "session": "Poster"},
         ]
-        readme = generate_main_readme(papers, "search", "rating-poster-search")
+        readme = generate_main_readme(papers, "rating-poster-search")
 
         assert "**Sort Order:** Rating → Poster # → Search Term" in readme
         assert "## Papers by Rating" in readme
@@ -574,7 +452,7 @@ class TestGenerateMainReadme:
         papers = [
             {"title": "P1", "searchTerm": "AI", "priority": 5, "session": "Oral"},
         ]
-        readme = generate_main_readme(papers, "search", "poster-search-rating")
+        readme = generate_main_readme(papers, "poster-search-rating")
 
         assert "**Sort Order:** Poster # → Search Term → Rating" in readme
         assert "## Papers" in readme
@@ -587,7 +465,7 @@ class TestGenerateMainReadme:
             {"title": "P2", "searchTerm": "ML", "priority": 4, "session": "Oral"},
             {"title": "P3", "searchTerm": "CV", "priority": 3, "session": "Poster"},
         ]
-        readme = generate_main_readme(papers, "search", "search-rating-poster")
+        readme = generate_main_readme(papers, "search-rating-poster")
 
         assert "## Sessions Overview" in readme
         assert "### Oral" in readme
@@ -601,7 +479,7 @@ class TestGenerateMainReadme:
             {"title": "P2", "searchTerm": "AI", "priority": 3, "session": "Poster"},
             {"title": "P3", "searchTerm": "ML", "priority": 4, "session": "Oral"},
         ]
-        readme = generate_main_readme(papers, "search", "search-rating-poster")
+        readme = generate_main_readme(papers, "search-rating-poster")
 
         # Search terms appear as links in the table
         assert "| [AI](AI.md) |" in readme
@@ -614,7 +492,7 @@ class TestGenerateMainReadme:
         papers = [
             {"title": "P1", "priority": 5, "session": "Oral"},
         ]
-        readme = generate_main_readme(papers, "search", "search-rating-poster")
+        readme = generate_main_readme(papers, "search-rating-poster")
 
         assert "Unknown" in readme
 
@@ -631,7 +509,7 @@ class TestGenerateMainReadme:
                     "session": "Oral",
                 }
             )
-        readme = generate_main_readme(papers, "search", "rating-poster-search")
+        readme = generate_main_readme(papers, "rating-poster-search")
 
         assert "## Papers by Rating" in readme
         # The search terms list should be truncated with "..."
@@ -642,7 +520,7 @@ class TestGenerateMainReadme:
         papers = [
             {"title": "P1", "searchTerm": "", "priority": 5, "session": "Oral"},
         ]
-        readme = generate_main_readme(papers, "search", "search-rating-poster")
+        readme = generate_main_readme(papers, "search-rating-poster")
 
         # Empty search term becomes "Unknown" and gets sanitized to "unknown"
         assert "unknown.md" in readme or "Unknown.md" in readme
@@ -657,7 +535,7 @@ class TestGenerateFolderStructureExport:
             {"title": "P1", "searchTerm": "AI", "priority": 5, "session": "Oral"},
             {"title": "P2", "searchTerm": "ML", "priority": 4, "session": "Poster"},
         ]
-        zip_buffer = generate_folder_structure_export(papers, "test", "search-rating-poster")
+        zip_buffer = generate_folder_structure_export(papers, "search-rating-poster")
 
         assert isinstance(zip_buffer, BytesIO)
         zip_buffer.seek(0)
@@ -674,7 +552,7 @@ class TestGenerateFolderStructureExport:
             {"title": "P1", "searchTerm": "AI", "priority": 5, "session": "Oral"},
             {"title": "P2", "searchTerm": "ML", "priority": 3, "session": "Poster"},
         ]
-        zip_buffer = generate_folder_structure_export(papers, "test", "rating-poster-search")
+        zip_buffer = generate_folder_structure_export(papers, "rating-poster-search")
 
         zip_buffer.seek(0)
         with zipfile.ZipFile(zip_buffer, "r") as zipf:
@@ -688,7 +566,7 @@ class TestGenerateFolderStructureExport:
         papers = [
             {"title": "P1", "searchTerm": "AI", "priority": 5, "session": "Oral"},
         ]
-        zip_buffer = generate_folder_structure_export(papers, "test", "poster-search-rating")
+        zip_buffer = generate_folder_structure_export(papers, "poster-search-rating")
 
         zip_buffer.seek(0)
         with zipfile.ZipFile(zip_buffer, "r") as zipf:
@@ -701,7 +579,7 @@ class TestGenerateFolderStructureExport:
         papers = [
             {"title": "P1", "searchTerm": "AI/ML & DL!", "priority": 5, "session": "Oral"},
         ]
-        zip_buffer = generate_folder_structure_export(papers, "test", "search-rating-poster")
+        zip_buffer = generate_folder_structure_export(papers, "search-rating-poster")
 
         zip_buffer.seek(0)
         with zipfile.ZipFile(zip_buffer, "r") as zipf:
@@ -715,7 +593,7 @@ class TestGenerateFolderStructureExport:
         papers = [
             {"title": "P1", "searchTerm": "", "priority": 5, "session": "Oral"},
         ]
-        zip_buffer = generate_folder_structure_export(papers, "test", "search-rating-poster")
+        zip_buffer = generate_folder_structure_export(papers, "search-rating-poster")
 
         zip_buffer.seek(0)
         with zipfile.ZipFile(zip_buffer, "r") as zipf:
@@ -729,7 +607,7 @@ class TestGenerateFolderStructureExport:
         papers = [
             {"title": "P1", "searchTerm": "AI", "priority": 0, "session": "Oral"},
         ]
-        zip_buffer = generate_folder_structure_export(papers, "test", "rating-poster-search")
+        zip_buffer = generate_folder_structure_export(papers, "rating-poster-search")
 
         zip_buffer.seek(0)
         with zipfile.ZipFile(zip_buffer, "r") as zipf:
@@ -741,7 +619,7 @@ class TestGenerateFolderStructureExport:
         papers = [
             {"title": "P1", "searchTerm": "a" * 100, "priority": 5, "session": "Oral"},
         ]
-        zip_buffer = generate_folder_structure_export(papers, "test", "search-rating-poster")
+        zip_buffer = generate_folder_structure_export(papers, "search-rating-poster")
 
         zip_buffer.seek(0)
         with zipfile.ZipFile(zip_buffer, "r") as zipf:
@@ -756,7 +634,7 @@ class TestGenerateFolderStructureExport:
         papers = [
             {"title": "P1", "searchTerm": "!!!", "priority": 5, "session": "Oral"},
         ]
-        zip_buffer = generate_folder_structure_export(papers, "test", "search-rating-poster")
+        zip_buffer = generate_folder_structure_export(papers, "search-rating-poster")
 
         zip_buffer.seek(0)
         with zipfile.ZipFile(zip_buffer, "r") as zipf:
@@ -768,6 +646,12 @@ class TestGenerateFolderStructureExport:
 class TestExportPapersToZip:
     """Tests for export_papers_to_zip function."""
 
+    @staticmethod
+    def _member(zip_buffer, name):
+        zip_buffer.seek(0)
+        with zipfile.ZipFile(zip_buffer, "r") as zipf:
+            return zipf.read(name).decode("utf-8")
+
     def test_export_papers_to_zip_search_rating_poster(self):
         """Test export with search-rating-poster sorting."""
         papers = [
@@ -775,16 +659,13 @@ class TestExportPapersToZip:
             {"title": "P2", "searchTerm": "A", "priority": 4, "poster_position": "A2"},
             {"title": "P3", "searchTerm": "A", "priority": 5, "poster_position": "A1"},
         ]
-        zip_buffer = export_papers_to_zip(papers, "test", "search-rating-poster")
+        original = [dict(paper) for paper in papers]
+        zip_buffer = export_papers_to_zip(papers, "search-rating-poster")
 
         assert isinstance(zip_buffer, BytesIO)
-        # Papers should be sorted by searchTerm, then priority (desc), then poster
-        # Expected order: A-P3(5-A1), A-P2(4-A2), B-P1(5-A10)
-        assert papers[0]["searchTerm"] == "A"
-        assert papers[0]["priority"] == 5
-        assert papers[1]["searchTerm"] == "A"
-        assert papers[1]["priority"] == 4
-        assert papers[2]["searchTerm"] == "B"
+        assert papers == original
+        content = self._member(zip_buffer, "A.md")
+        assert content.index("### P3") < content.index("### P2")
 
     def test_export_papers_to_zip_rating_poster_search(self):
         """Test export with rating-poster-search sorting."""
@@ -793,16 +674,13 @@ class TestExportPapersToZip:
             {"title": "P2", "searchTerm": "A", "priority": 5, "poster_position": "A2"},
             {"title": "P3", "searchTerm": "C", "priority": 5, "poster_position": "A1"},
         ]
-        zip_buffer = export_papers_to_zip(papers, "test", "rating-poster-search")
+        original = [dict(paper) for paper in papers]
+        zip_buffer = export_papers_to_zip(papers, "rating-poster-search")
 
         assert isinstance(zip_buffer, BytesIO)
-        # Papers should be sorted by priority (desc), then poster, then searchTerm
-        # Expected: P3(5-A1-C), P2(5-A2-A), P1(3-A10-B)
-        assert papers[0]["priority"] == 5
-        assert papers[0]["poster_position"] == "A1"
-        assert papers[1]["priority"] == 5
-        assert papers[1]["poster_position"] == "A2"
-        assert papers[2]["priority"] == 3
+        assert papers == original
+        five_stars = self._member(zip_buffer, "5_stars.md")
+        assert five_stars.index("### P3") < five_stars.index("### P2")
 
     def test_export_papers_to_zip_poster_search_rating(self):
         """Test export with poster-search-rating sorting."""
@@ -811,15 +689,13 @@ class TestExportPapersToZip:
             {"title": "P2", "searchTerm": "A", "priority": 5, "poster_position": "A2"},
             {"title": "P3", "searchTerm": "C", "priority": 4, "poster_position": "A2"},
         ]
-        zip_buffer = export_papers_to_zip(papers, "test", "poster-search-rating")
+        original = [dict(paper) for paper in papers]
+        zip_buffer = export_papers_to_zip(papers, "poster-search-rating")
 
         assert isinstance(zip_buffer, BytesIO)
-        # Papers should be sorted by poster, then searchTerm, then priority (desc)
-        # Expected: P2(A2-A-5), P3(A2-C-4), P1(B10-B-3)
-        assert papers[0]["poster_position"] == "A2"
-        assert papers[0]["searchTerm"] == "A"
-        assert papers[1]["poster_position"] == "A2"
-        assert papers[1]["searchTerm"] == "C"
+        assert papers == original
+        content = self._member(zip_buffer, "all_papers.md")
+        assert content.index("### P2") < content.index("### P3") < content.index("### P1")
 
     def test_export_papers_to_zip_default_sort_order(self):
         """Test export with invalid sort order falls back to default."""
@@ -827,12 +703,14 @@ class TestExportPapersToZip:
             {"title": "P1", "searchTerm": "B", "priority": 5},
             {"title": "P2", "searchTerm": "A", "priority": 4},
         ]
-        zip_buffer = export_papers_to_zip(papers, "test", "invalid-order")
+        original = [dict(paper) for paper in papers]
+        zip_buffer = export_papers_to_zip(papers, "invalid-order")
 
         assert isinstance(zip_buffer, BytesIO)
-        # Should fall back to search-rating-poster
-        assert papers[0]["searchTerm"] == "A"
-        assert papers[1]["searchTerm"] == "B"
+        assert papers == original
+        zip_buffer.seek(0)
+        with zipfile.ZipFile(zip_buffer, "r") as zipf:
+            assert {"A.md", "B.md"}.issubset(set(zipf.namelist()))
 
     def test_export_papers_to_zip_empty_poster_position(self):
         """Test export with missing poster positions."""
@@ -840,12 +718,13 @@ class TestExportPapersToZip:
             {"title": "P1", "searchTerm": "A", "priority": 5, "poster_position": ""},
             {"title": "P2", "searchTerm": "A", "priority": 5, "poster_position": "A1"},
         ]
-        zip_buffer = export_papers_to_zip(papers, "test", "search-rating-poster")
+        original = [dict(paper) for paper in papers]
+        zip_buffer = export_papers_to_zip(papers, "search-rating-poster")
 
         assert isinstance(zip_buffer, BytesIO)
-        # Paper with empty poster_position should come before A1
-        assert papers[0]["poster_position"] == ""
-        assert papers[1]["poster_position"] == "A1"
+        assert papers == original
+        content = self._member(zip_buffer, "A.md")
+        assert content.index("### P1") < content.index("### P2")
 
     def test_export_papers_to_zip_missing_fields(self):
         """Test export with papers missing optional fields."""
@@ -853,7 +732,7 @@ class TestExportPapersToZip:
             {"title": "P1"},  # Missing searchTerm, priority, poster_position
             {"title": "P2", "searchTerm": "A"},
         ]
-        zip_buffer = export_papers_to_zip(papers, "test", "search-rating-poster")
+        zip_buffer = export_papers_to_zip(papers, "search-rating-poster")
 
         assert isinstance(zip_buffer, BytesIO)
         zip_buffer.seek(0)
@@ -867,10 +746,109 @@ class TestExportPapersToZip:
             {"title": "P2", "searchTerm": "A", "priority": 5, "poster_position": "A2"},
             {"title": "P3", "searchTerm": "A", "priority": 5, "poster_position": "A1"},
         ]
-        zip_buffer = export_papers_to_zip(papers, "test", "search-rating-poster")
+        original = [dict(paper) for paper in papers]
+        zip_buffer = export_papers_to_zip(papers, "search-rating-poster")
 
         assert isinstance(zip_buffer, BytesIO)
-        # Natural sort: A1, A2, A10 (not A1, A10, A2)
-        assert papers[0]["poster_position"] == "A1"
-        assert papers[1]["poster_position"] == "A2"
-        assert papers[2]["poster_position"] == "A10"
+        assert papers == original
+        content = self._member(zip_buffer, "A.md")
+        assert content.index("### P3") < content.index("### P2") < content.index("### P1")
+
+
+class TestExportHardening:
+    """Tests for filename collisions, escaping, and priority validation."""
+
+    def test_filename_collisions_and_reserved_names(self):
+        """Colliding and reserved search terms produce unique linked filenames."""
+        papers = [
+            {"title": "P1", "searchTerm": "AI/ML", "priority": 5},
+            {"title": "P2", "searchTerm": "AIML", "priority": 5},
+            {"title": "P3", "searchTerm": "README", "priority": 5},
+            {"title": "P4", "searchTerm": "All Papers", "priority": 5},
+        ]
+        zip_buffer = export_papers_to_zip(papers, "search-rating-poster")
+
+        zip_buffer.seek(0)
+        with zipfile.ZipFile(zip_buffer, "r") as zipf:
+            names = set(zipf.namelist())
+            readme = zipf.read("README.md").decode("utf-8")
+
+        assert {"AIML.md", "AIML_2.md", "README_2.md", "All_Papers_2.md"}.issubset(names)
+        assert "(AIML.md)" in readme
+        assert "(AIML_2.md)" in readme
+        assert "(README_2.md)" in readme
+        assert "(All_Papers_2.md)" in readme
+
+    def test_filename_collision_after_truncation(self):
+        """Terms that collide after truncation still get unique filenames."""
+        papers = [
+            {"title": "P1", "searchTerm": "a" * 60, "priority": 5},
+            {"title": "P2", "searchTerm": "a" * 60 + "b", "priority": 5},
+        ]
+        zip_buffer = export_papers_to_zip(papers, "search-rating-poster")
+
+        zip_buffer.seek(0)
+        with zipfile.ZipFile(zip_buffer, "r") as zipf:
+            markdown_names = [name for name in zipf.namelist() if name != "README.md"]
+
+        assert len(markdown_names) == 2
+        assert len(set(markdown_names)) == 2
+        assert all(len(name) <= 53 for name in markdown_names)
+
+    def test_markdown_escaping_neutralizes_html_and_bad_urls(self):
+        """User-provided text and URLs cannot inject HTML or dangerous links."""
+        papers = [
+            {
+                "title": "Bad | Title\n<script>alert(1)</script>",
+                "searchTerm": "AI | ML\nnext",
+                "session": "S | 1\nnext",
+                "authors": "A <b>B</b>",
+                "priority": 3,
+                "abstract": "Line1\n<script>x</script>\nLine2",
+                "paper_url": "javascript:alert(1)",
+                "poster_image_url": "javascript:alert(2)",
+            }
+        ]
+        markdown = generate_search_term_markdown("AI | ML\nnext", papers)
+
+        assert "<script>" not in markdown
+        assert "javascript:" not in markdown
+        assert "&lt;script&gt;" in markdown
+        assert "Bad \\| Title" in markdown
+        assert "AI \\| ML next" in markdown
+        assert "S \\| 1 next" in markdown
+        assert "A &lt;b&gt;B&lt;/b&gt;" in markdown
+        assert "Line1\n&lt;script&gt;x&lt;/script&gt;\nLine2" in markdown
+
+    def test_readme_table_escapes_pipes_and_newlines(self):
+        """README table cells stay intact for search terms containing pipes."""
+        papers = [{"title": "P1", "searchTerm": "A | B\nC", "priority": 5, "session": "Oral"}]
+        readme = generate_main_readme(papers, "search-rating-poster")
+
+        assert "| [A \\| B C](A__B_C.md) |" in readme
+
+    @pytest.mark.parametrize(
+        ("priority", "expected"),
+        [("3", "3/5"), ("abc", "0/5"), (10, "5/5"), (-2, "0/5")],
+    )
+    def test_priority_values_are_coerced(self, priority, expected):
+        """Direct export calls accept invalid/non-integer priorities safely."""
+        papers = [{"title": "P1", "priority": priority}]
+        markdown = generate_all_papers_markdown(papers, "Papers")
+
+        assert expected in markdown
+
+    def test_export_papers_to_zip_coerces_priority(self):
+        """ZIP grouping uses a clamped integer priority."""
+        papers = [
+            {"title": "P1", "searchTerm": "A", "priority": "3"},
+            {"title": "P2", "searchTerm": "A", "priority": "not-a-number"},
+            {"title": "P3", "searchTerm": "A", "priority": 10},
+        ]
+        zip_buffer = export_papers_to_zip(papers, "rating-poster-search")
+
+        zip_buffer.seek(0)
+        with zipfile.ZipFile(zip_buffer, "r") as zipf:
+            names = set(zipf.namelist())
+
+        assert {"3_stars.md", "0_stars.md", "5_stars.md"}.issubset(names)

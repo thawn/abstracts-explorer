@@ -90,15 +90,16 @@ See `docs/plugins.md` for adding one.
 - JavaScript: Jest + jsdom; target **>80%** coverage.
 - One test file per source module (`database.py` → `tests/test_database.py`).
   Test-type exceptions: `test_integration.py`, `test_web_integration.py`,
-  `test_web_e2e.py`, `test_staging_e2e.py`.
+  `test_web_e2e.py`, `test_staging_e2e.py`, `test_stress.py`.
 - Reuse the central test infrastructure instead of duplicating setup:
   `tests/conftest.py` fixtures (`db_manager`, `connected_db`, `test_database`,
   `mock_lm_studio`, `embeddings_manager`, `web_test_papers`, ...) and
   `tests/helpers.py` (`requires_lm_studio`, `create_test_db_with_paper`,
-  `find_free_port`, `create_webdriver`, ...).
+  `find_free_port`, Playwright fixtures, ...).
 - Mock external services (APIs, LLM backends, databases). Tests must skip
   gracefully when optional services are unavailable.
-- Markers: `slow` (deselected by default), `integration`, `e2e`, `staging`.
+- Markers: `slow` (deselected by default), `integration`, `e2e`, `staging`,
+  `stress` (deselected by default).
 
 ```bash
 uv run pytest                                  # fast suite
@@ -132,6 +133,7 @@ to `.env`. Full reference: `docs/configuration.md`.
 | `ENABLE_QUERY_REWRITING`, `QUERY_SIMILARITY_THRESHOLD` | RAG query behavior |
 | `DEFAULT_CONFERENCE`, `DEFAULT_YEAR` | Web UI initial filters |
 | `LOG_LEVEL`, `PROXY_X_*`, `IMPRINT_LINK` | Web/deployment settings |
+| `WEB_UI_THREADS` | Waitress worker threads (default `6`) |
 | `REQUESTS_PER_MINUTE` | API rate limit |
 | `GITHUB_TOKEN`, `REGISTRY_REPOSITORY` | OCI registry access |
 
@@ -160,7 +162,9 @@ them from `static/modules/`.
 - **Database**: SQLAlchemy 2.0+, SQLite default / PostgreSQL supported. Models:
   `Paper` (indexed title/year/openreview id), `EmbeddingsMetadata`,
   `ClusteringCache`. Schema via `metadata.create_all()`.
-- **Embeddings**: ChromaDB; metadata records embedding model and parameters.
+- **Embeddings**: ChromaDB stores paper UIDs, vectors, and SHA-256 content
+  hashes only. The SQL database is the single source of truth for paper
+  metadata; filters resolve to UIDs in SQL and are passed to ChromaDB as IDs.
 - **Clustering**: CLI/web/MCP pipeline is fixed to Agglomerative (ward, distance
   threshold 150) + t-SNE. `clustering.py` still exposes K-Means, DBSCAN,
   Agglomerative, Spectral, Fuzzy C-Means and PCA/t-SNE; UMAP was removed.
@@ -179,9 +183,10 @@ them from `static/modules/`.
 - **Feature**: branch → implement (types + NumPy docstrings) → unit and
   integration tests → update docs → run tests → PR.
 - **Bugfix**: branch → failing regression test → fix → verify → PR.
-- **New plugin**: implement in `plugins/`, inherit `DownloaderPlugin` or
-  `LightweightDownloaderPlugin`, register in `plugins/__init__.py`, add
-  `tests/test_plugins_<name>.py`, update `docs/plugins.md`.
+- **New plugin**: implement in `plugins/`, inherit `DownloaderPlugin` (or
+  `HTTPDownloaderPlugin`/`JSONConferenceDownloaderPlugin`), register in
+  `plugins/__init__.py`, add `tests/test_plugins_<name>.py`, update
+  `docs/plugins.md`.
 - **Docs**: edit `docs/*.md` and docstrings, then `cd docs && uv run make html`.
 
 CLI groups: `download`, `create-embeddings`, `pre-process`, `search`, `chat`,

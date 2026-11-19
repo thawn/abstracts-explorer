@@ -26,7 +26,6 @@ class PaperFormattingError(Exception):
 def format_search_results(
     search_results: Dict[str, Any],
     database,
-    include_documents: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Format ChromaDB search results into complete paper records.
@@ -38,11 +37,9 @@ def format_search_results(
     Parameters
     ----------
     search_results : dict
-        Search results from ChromaDB with 'ids', 'distances', 'metadatas', 'documents'.
+        Search results from ChromaDB with ``ids`` and ``distances``.
     database : DatabaseManager
         Database instance for fetching complete paper details.
-    include_documents : bool, optional
-        Whether to include document text (abstract) from search results, by default True.
 
     Returns
     -------
@@ -56,7 +53,7 @@ def format_search_results(
 
     Examples
     --------
-    >>> results = embeddings_manager.search_similar("transformers", n_results=5)
+    >>> results = embeddings_manager.search_similar(QueryEmbedding("transformers", embeddings_manager), limit=5)
     >>> papers = format_search_results(results, database)
     >>> for paper in papers:
     ...     print(paper['title'], paper['similarity'])
@@ -80,44 +77,39 @@ def format_search_results(
     if "distances" in search_results and search_results["distances"][0]:
         if len(search_results["distances"][0]) != result_count:
             raise PaperFormattingError("Inconsistent result lengths in search_results.")
-    if "documents" in search_results and search_results["documents"][0]:
-        if len(search_results["documents"][0]) != result_count:
-            raise PaperFormattingError("Inconsistent result lengths in search_results.")
+
+    ids = search_results["ids"][0]
+    valid_uids: List[str] = []
+    for paper_uid in ids:
+        if isinstance(paper_uid, str):
+            valid_uids.append(paper_uid)
+        else:
+            logger.warning(f"Invalid paper_uid format: {paper_uid} ({type(paper_uid)})")
+
+    papers_by_uid: Dict[str, Dict[str, Any]] = {}
+    if valid_uids:
+        unique_uids = list(dict.fromkeys(valid_uids))
+        papers_by_uid = {paper["uid"]: paper for paper in database.get_papers_by_uids(unique_uids)}
 
     papers = []
-    for i in range(result_count):
-        paper_uid = search_results["ids"][0][i]
-
-        try:
-            # ChromaDB stores UIDs as strings - use them directly
-            if not isinstance(paper_uid, str):
-                logger.warning(f"Invalid paper_uid format: {paper_uid} ({type(paper_uid)})")
-                continue
-
-            # Get complete paper from database (this validates paper exists)
-            paper = database.get_paper_by_uid(paper_uid)
-            if paper is None:
-                raise PaperFormattingError(f"Paper with uid={paper_uid} not found in database.")
-
-            # Add similarity/distance scores if available
-            if "distances" in search_results and search_results["distances"][0]:
-                distance = search_results["distances"][0][i]
-                paper["distance"] = distance
-                # Convert distance to similarity (0-1 range where 1 is most similar)
-                paper["similarity"] = max(0.0, 1.0 - distance)
-
-            # Add abstract from search results if needed and available
-            if include_documents and "documents" in search_results and search_results["documents"][0]:
-                # Only override if database abstract is missing
-                if not paper.get("abstract"):
-                    paper["abstract"] = search_results["documents"][0][i]
-
-            papers.append(paper)
-
-        except PaperFormattingError as e:
-            # Log the error but continue with other papers
-            logger.warning(f"Skipping paper {paper_uid}: {str(e)}")
+    for i, paper_uid in enumerate(ids):
+        if not isinstance(paper_uid, str):
             continue
+
+        fetched_paper = papers_by_uid.get(paper_uid)
+        if fetched_paper is None:
+            logger.warning(f"Skipping paper {paper_uid}: Paper with uid={paper_uid} not found in database.")
+            continue
+
+        paper = dict(fetched_paper)
+
+        # Add similarity/distance scores if available
+        if "distances" in search_results and search_results["distances"][0]:
+            distance = search_results["distances"][0][i]
+            paper["distance"] = distance
+            paper["similarity"] = max(0.0, 1.0 - distance)
+
+        papers.append(paper)
 
     if not papers:
         raise PaperFormattingError(
@@ -126,76 +118,6 @@ def format_search_results(
         )
 
     return papers
-
-
-def build_context_from_papers(papers: List[Dict[str, Any]]) -> str:
-    """
-    Build a formatted context string from papers for RAG.
-
-    Parameters
-    ----------
-    papers : list
-        List of paper dictionaries with at minimum: title/name, authors, abstract.
-
-    Returns
-    -------
-    str
-        Formatted context string for LLM consumption.
-
-    Raises
-    ------
-    PaperFormattingError
-        If papers list is invalid or papers missing required fields.
-
-    Examples
-    --------
-    >>> papers = format_search_results(results, database)
-    >>> context = build_context_from_papers(papers)
-    >>> print(context)
-    """
-    if not isinstance(papers, list):
-        raise PaperFormattingError("papers must be a list.")
-
-    if not papers:
-        raise PaperFormattingError("papers list is empty. Cannot build context.")
-
-    context_parts = []
-    for i, paper in enumerate(papers, 1):
-        if not isinstance(paper, dict):
-            raise PaperFormattingError(f"Paper {i} is not a dictionary.")
-
-        # Validate required fields
-        title = paper.get("title")
-        if not title:
-            raise PaperFormattingError(f"Paper {i} missing required 'title' field.")
-
-        authors = paper.get("authors")
-        if not authors:
-            logger.warning(f"Paper {i} ({title}) has no authors.")
-            authors = "N/A"
-        elif isinstance(authors, list):
-            authors = ", ".join(authors) if authors else "N/A"
-
-        abstract = paper.get("abstract", "")
-        if not abstract:
-            logger.warning(f"Paper {i} ({title}) has no abstract.")
-            abstract = "N/A"
-
-        # Build context for this paper
-        context_parts.append(f"Paper {i}:")
-        context_parts.append(f"Title: {title}")
-        context_parts.append(f"Authors: {authors}")
-
-        # Optional fields
-        if paper.get("topic"):
-            context_parts.append(f"Topic: {paper['topic']}")
-        if paper.get("decision"):
-            context_parts.append(f"Decision: {paper['decision']}")
-
-        context_parts.append(f"Abstract: {abstract}")
-        context_parts.append("")  # Empty line between papers
-
-    return "\n".join(context_parts)
 
 
 def extract_top_keywords(papers: list, n_keywords: int = 5) -> list:

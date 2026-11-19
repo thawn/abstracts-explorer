@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Python 3.11 or higher
+- Python 3.12 or higher
 - [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
 - Node.js 14 or higher (for web UI)
 - npm package manager
@@ -69,12 +69,17 @@ This includes:
 - **pytest**: For running tests
 - **pytest-cov**: For test coverage reports
 - **pytest-mock**: For test mocking
-- **selenium**: For browser automation testing
-- **webdriver-manager**: For managing browser drivers
+- **pytest-playwright**: For Playwright browser automation testing
 - **black**: For code formatting
 - **ruff**: For linting
 - **mypy**: For type checking (required by the pre-commit hook)
 - **types-requests**: Type stubs for `requests`
+
+Install the Chromium browser used by the end-to-end tests:
+
+```bash
+uv run playwright install chromium
+```
 
 ### Web Interface Dependencies
 
@@ -187,7 +192,7 @@ If you don't have Node.js installed:
 
 ### Python Version Issues
 
-Ensure you're using Python 3.11 or higher:
+Ensure you're using Python 3.12 or higher:
 
 ```bash
 python --version

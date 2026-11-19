@@ -33,6 +33,7 @@ from abstracts_explorer.plugins import (
 from abstracts_explorer.plugins.neurips_downloader import NeurIPSDownloaderPlugin
 from abstracts_explorer.plugins.icml_downloader import ICMLDownloaderPlugin
 from abstracts_explorer.plugins.ml4ps_downloader import ML4PSDownloaderPlugin
+from tests.helpers import raw_query
 
 pytestmark = pytest.mark.usefixtures("mock_current_year_probe")
 
@@ -612,7 +613,7 @@ class TestFetchWithRetries:
     def test_successful_request(self, monkeypatch):
         """A successful request is returned without retrying."""
         sleep = Mock()
-        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", sleep)
         session = Mock()
         response = self._response()
         session.get.return_value = response
@@ -626,7 +627,7 @@ class TestFetchWithRetries:
     def test_transient_failure_retries(self, monkeypatch):
         """A dropped connection is retried and then succeeds."""
         sleep = Mock()
-        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", sleep)
         session = Mock()
         response = self._response()
         session.get.side_effect = [requests.ConnectionError("reset"), response]
@@ -640,7 +641,7 @@ class TestFetchWithRetries:
     def test_persistent_server_error_is_retried_then_raised(self, monkeypatch):
         """Persistent HTTP 503 responses are retried before raising."""
         sleep = Mock()
-        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", sleep)
         session = Mock()
         session.get.return_value = self._response(503)
 
@@ -652,7 +653,7 @@ class TestFetchWithRetries:
     def test_permanent_http_error_not_retried(self, monkeypatch):
         """Missing pages are not retried."""
         sleep = Mock()
-        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", sleep)
         session = Mock()
         session.get.return_value = self._response(404)
 
@@ -664,7 +665,7 @@ class TestFetchWithRetries:
     def test_retry_after_is_honored(self, monkeypatch):
         """Rate-limit responses respect the server's Retry-After header."""
         sleep = Mock()
-        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", sleep)
         session = Mock()
         session.get.return_value = self._response(429, {"Retry-After": "7"})
 
@@ -676,7 +677,7 @@ class TestFetchWithRetries:
     def test_params_are_forwarded(self, monkeypatch):
         """Query parameters are forwarded only when provided."""
         sleep = Mock()
-        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", sleep)
         session = Mock()
         session.get.return_value = self._response()
 
@@ -697,7 +698,7 @@ class TestFetchWithRetries:
     def test_custom_backoff_and_cap(self, monkeypatch):
         """Custom retry base delays and caps are applied."""
         sleep = Mock()
-        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", sleep)
         session = Mock()
         session.get.side_effect = [requests.ConnectionError("reset"), self._response()]
 
@@ -714,7 +715,7 @@ class TestFetchWithRetries:
     def test_http_date_retry_after_is_honored(self, monkeypatch):
         """HTTP-date Retry-After values are converted to a delay."""
         sleep = Mock()
-        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+        monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", sleep)
         session = Mock()
         session.get.return_value = self._response(
             429,
@@ -728,7 +729,7 @@ class TestFetchWithRetries:
 
     def test_cooldown_is_used_for_rate_limits(self, monkeypatch):
         """A shared cooldown defers and waits across retry attempts."""
-        monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", Mock())
+        monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", Mock())
         cooldown = Mock()
         session = Mock()
         success = self._response()
@@ -745,6 +746,38 @@ class TestFetchWithRetries:
         cooldown.defer.assert_called_once_with(7)
         assert cooldown.wait.call_count == 2
 
+    def test_post_is_not_retried_by_default(self, monkeypatch):
+        """POST is non-idempotent and is not retried unless opted in."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", sleep)
+        session = Mock()
+        session.post.return_value = self._response(503)
+
+        with pytest.raises(requests.HTTPError, match="503"):
+            fetch_with_retries(session, "https://example.com", timeout=7, method="POST", json_body={"q": "x"})
+
+        assert session.post.call_count == 1
+        sleep.assert_not_called()
+
+    def test_post_is_retried_when_opted_in(self, monkeypatch):
+        """Plugins with read-only POST requests can opt in to retries."""
+        sleep = Mock()
+        monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", sleep)
+        session = Mock()
+        session.post.return_value = self._response(503)
+
+        with pytest.raises(requests.HTTPError, match="503"):
+            fetch_with_retries(
+                session,
+                "https://example.com",
+                timeout=7,
+                method="POST",
+                json_body={"q": "x"},
+                retry_non_idempotent=True,
+            )
+
+        assert session.post.call_count == 3
+
 
 class TestRateLimitCooldown:
     """Tests for the shared rate-limit cooldown."""
@@ -752,9 +785,9 @@ class TestRateLimitCooldown:
     def test_wait_sleeps_until_deferred_time(self, monkeypatch):
         clock = {"now": 100.0}
         sleeps = []
-        monkeypatch.setattr("abstracts_explorer.plugin.time.monotonic", lambda: clock["now"])
+        monkeypatch.setattr("abstracts_explorer.plugin.base.time.monotonic", lambda: clock["now"])
         monkeypatch.setattr(
-            "abstracts_explorer.plugin.time.sleep",
+            "abstracts_explorer.plugin.base.time.sleep",
             lambda delay: (sleeps.append(delay), clock.__setitem__("now", clock["now"] + delay)),
         )
         cooldown = RateLimitCooldown()
@@ -767,14 +800,14 @@ class TestRateLimitCooldown:
 
     def test_defer_keeps_longest_window(self, monkeypatch):
         clock = {"now": 100.0}
-        monkeypatch.setattr("abstracts_explorer.plugin.time.monotonic", lambda: clock["now"])
+        monkeypatch.setattr("abstracts_explorer.plugin.base.time.monotonic", lambda: clock["now"])
         cooldown = RateLimitCooldown()
         cooldown.defer(10)
         cooldown.defer(3)
 
         sleeps = []
         monkeypatch.setattr(
-            "abstracts_explorer.plugin.time.sleep",
+            "abstracts_explorer.plugin.base.time.sleep",
             lambda delay: sleeps.append(delay),
         )
         cooldown.wait()
@@ -838,7 +871,7 @@ class TestHTTPDownloaderPlugin:
         response.raise_for_status.side_effect = requests.HTTPError("503", response=response)
         with (
             patch.object(plugin._session, "get", return_value=response),
-            patch("abstracts_explorer.plugin.time.sleep"),
+            patch("abstracts_explorer.plugin.base.time.sleep"),
         ):
             with pytest.raises(RuntimeError, match="Failed to fetch test data"):
                 plugin._fetch_json("https://example.com", 30, True)
@@ -875,12 +908,37 @@ class TestHTTPDownloaderPlugin:
         plugin = _TestHTTPDownloaderPlugin()
         with (
             patch.object(plugin._session, "get", side_effect=requests.ConnectionError("down")) as mock_get,
-            patch("abstracts_explorer.plugin.time.sleep"),
+            patch("abstracts_explorer.plugin.base.time.sleep"),
         ):
             with pytest.raises(RuntimeError, match="Failed to fetch test data"):
                 plugin._request("https://example.com", 30, True, max_attempts=2)
 
         assert mock_get.call_count == 2
+
+    def test_class_attr_controls_non_idempotent_retries(self):
+        """The base class retries POST only when the plugin opts in."""
+        plugin = _TestHTTPDownloaderPlugin()
+        response = Mock(status_code=503, headers={})
+        response.raise_for_status.side_effect = requests.HTTPError("503", response=response)
+
+        with (
+            patch.object(plugin._session, "post", return_value=response) as mock_post,
+            patch("abstracts_explorer.plugin.base.time.sleep"),
+        ):
+            with pytest.raises(RuntimeError, match="Failed to fetch test data"):
+                plugin._request("https://example.com", 30, True, method="POST", json_body={"q": "x"})
+
+        assert mock_post.call_count == 1
+
+        plugin._RETRY_NON_IDEMPOTENT = True
+        with (
+            patch.object(plugin._session, "post", return_value=response) as mock_post,
+            patch("abstracts_explorer.plugin.base.time.sleep"),
+        ):
+            with pytest.raises(RuntimeError, match="Failed to fetch test data"):
+                plugin._request("https://example.com", 30, True, method="POST", json_body={"q": "x"})
+
+        assert mock_post.call_count == 3
 
 
 # ============================================================
@@ -1116,7 +1174,7 @@ class TestML4PSPluginYearConference:
         assert paper["authors"] == ["Alice", "Bob", "Charlie"]
         assert paper["abstract"] == "This is an amazing abstract"
         assert paper["session"] == f"ML4PhysicalSciences {expected_year} Workshop - Spotlight"
-        assert paper["id"] == 42
+        assert paper["original_id"] == 42
         assert paper["year"] == expected_year
         assert paper["conference"] == "ML4PS"
         assert paper["award"] == "Best Paper, Outstanding Poster"
@@ -1169,7 +1227,7 @@ class TestDatabaseYearConferenceIntegration:
                 db.add_papers(data)
 
                 # Query papers and verify year and conference
-                papers = db._query("SELECT uid, title, year, conference FROM papers ORDER BY title")
+                papers = raw_query(db, "SELECT uid, title, year, conference FROM papers ORDER BY title")
                 assert len(papers) == 2
 
                 # Check first paper (Test Paper 1)
@@ -1183,11 +1241,11 @@ class TestDatabaseYearConferenceIntegration:
                 assert papers[1]["conference"] == "NeurIPS"
 
                 # Test filtering by year
-                papers_2024 = db._query("SELECT * FROM papers WHERE year = 2024")
+                papers_2024 = raw_query(db, "SELECT * FROM papers WHERE year = 2024")
                 assert len(papers_2024) == 2
 
                 # Test filtering by conference
-                papers = db._query("SELECT * FROM papers WHERE conference = 'NeurIPS'")
+                papers = raw_query(db, "SELECT * FROM papers WHERE conference = 'NeurIPS'")
                 assert len(papers) == 2
 
     def test_ml4ps_year_conference_in_database(self):
@@ -1232,7 +1290,7 @@ class TestDatabaseYearConferenceIntegration:
                 db.add_papers(papers_to_insert)
 
                 # Query papers and verify year and conference
-                papers = db._query("SELECT uid, title, year, conference FROM papers ORDER BY title")
+                papers = raw_query(db, "SELECT uid, title, year, conference FROM papers ORDER BY title")
                 assert len(papers) == 2
 
                 # Check first paper
@@ -1246,11 +1304,11 @@ class TestDatabaseYearConferenceIntegration:
                 assert papers[1]["conference"] == "ML4PS"
 
                 # Test filtering by year
-                papers_for_year = db._query(f"SELECT * FROM papers WHERE year = {expected_year}")
+                papers_for_year = raw_query(db, f"SELECT * FROM papers WHERE year = {expected_year}")
                 assert len(papers_for_year) == 2
 
                 # Test filtering by conference
-                ml4ps_papers = db._query("SELECT * FROM papers WHERE conference = 'ML4PS'")
+                ml4ps_papers = raw_query(db, "SELECT * FROM papers WHERE conference = 'ML4PS'")
                 assert len(ml4ps_papers) == 2
 
 
@@ -1734,7 +1792,7 @@ class TestPydanticValidation:
         assert count == 1
 
         # Verify data was inserted correctly
-        papers_result = connected_db.search_papers(keyword="Valid")
+        papers_result = connected_db.keyword_search(keyword="Valid")
         assert len(papers_result) == 1
         assert papers_result[0]["title"] == "Valid Paper Title"
 
@@ -1779,7 +1837,7 @@ class TestPydanticValidation:
         count = connected_db.add_papers(papers)
         assert count == 1
 
-        papers_result = connected_db.search_papers(keyword="Test")
+        papers_result = connected_db.keyword_search(keyword="Test")
         assert papers_result[0]["uid"] is not None  # Should have valid UID
 
     def test_authors_with_semicolons_rejected(self, connected_db):

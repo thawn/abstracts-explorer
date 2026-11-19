@@ -24,7 +24,6 @@ The plugin framework is provided by the abstracts_explorer.plugin module.
 from abstracts_explorer.plugin import (
     # Plugin base classes
     DownloaderPlugin,
-    LightweightDownloaderPlugin,
     HTTPDownloaderPlugin,
     # Registry
     PluginRegistry,
@@ -63,7 +62,6 @@ from abstracts_explorer.plugins.neurips_downloader import NeurIPSDownloaderPlugi
 __all__ = [
     # Plugin base classes
     "DownloaderPlugin",
-    "LightweightDownloaderPlugin",
     "HTTPDownloaderPlugin",
     # Registry
     "PluginRegistry",

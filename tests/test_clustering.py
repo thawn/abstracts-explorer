@@ -10,8 +10,8 @@ from abstracts_explorer.clustering import (
     ClusteringManager,
     ClusteringError,
     calculate_default_clusters,
-    _compute_tfidf_keywords,
 )
+from abstracts_explorer.clustering.tfidf import compute_tfidf_keywords as _compute_tfidf_keywords
 
 
 class TestCalculateDefaultClusters:
@@ -51,36 +51,36 @@ class TestCalculateDefaultClusters:
 class TestClusteringManager:
     """Test suite for ClusteringManager class."""
 
-    def test_init(self, mock_embeddings_manager):
+    def test_init(self, mock_embeddings_manager, mock_database):
         """Test ClusteringManager initialization."""
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
 
         assert cm.embeddings_manager is mock_embeddings_manager
-        assert cm.database is None
+        assert cm.database is mock_database
         assert cm.embeddings is None
         assert cm.paper_ids is None
         assert cm.metadatas is None
 
-    def test_load_embeddings_no_collection(self, mock_embeddings_manager):
+    def test_load_embeddings_no_collection(self, mock_embeddings_manager, mock_database):
         """Test loading embeddings fails without collection."""
         mock_embeddings_manager.collection = None
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
 
         with pytest.raises(ClusteringError, match="Collection not initialized"):
             cm.load_embeddings()
 
-    def test_load_embeddings_empty_collection(self, mock_embeddings_manager, mock_collection_empty):
+    def test_load_embeddings_empty_collection(self, mock_embeddings_manager, mock_collection_empty, mock_database):
         """Test loading embeddings from empty collection."""
         mock_embeddings_manager.collection = mock_collection_empty
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
 
         with pytest.raises(ClusteringError, match="No embeddings found"):
             cm.load_embeddings()
 
-    def test_load_embeddings_success(self, mock_embeddings_manager, mock_collection_with_data):
+    def test_load_embeddings_success(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
         """Test successfully loading embeddings."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
 
         count = cm.load_embeddings()
 
@@ -89,60 +89,41 @@ class TestClusteringManager:
         assert len(cm.paper_ids) == 10
         assert len(cm.metadatas) == 10
 
-    def test_reduce_dimensions_no_embeddings(self, mock_embeddings_manager):
+    def test_reduce_dimensions_no_embeddings(self, mock_embeddings_manager, mock_database):
         """Test dimensionality reduction fails without embeddings."""
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
 
         with pytest.raises(ClusteringError, match="No embeddings loaded"):
             cm.reduce_dimensions()
 
-    def test_reduce_dimensions_pca(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test PCA dimensionality reduction."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
-        cm.load_embeddings()
-
-        reduced = cm.reduce_dimensions(method="pca", n_components=2)
-
-        assert reduced.shape == (10, 2)
-        assert cm.reduced_embeddings is not None
-        assert cm.reduced_embeddings.shape == (10, 2)
-
-    def test_reduce_dimensions_tsne(self, mock_embeddings_manager, mock_collection_with_data):
+    def test_reduce_dimensions_tsne(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
         """Test t-SNE dimensionality reduction."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
 
-        reduced = cm.reduce_dimensions(method="tsne", n_components=2)
+        reduced = cm.reduce_dimensions(n_components=2)
 
         assert reduced.shape == (10, 2)
         assert cm.reduced_embeddings is not None
 
-    def test_reduce_dimensions_invalid_method(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test invalid dimensionality reduction method."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
-        cm.load_embeddings()
-
-        with pytest.raises(ClusteringError, match="Unknown reduction method"):
-            cm.reduce_dimensions(method="invalid")
-
-    def test_cluster_no_embeddings(self, mock_embeddings_manager):
+    def test_cluster_no_embeddings(self, mock_embeddings_manager, mock_database):
         """Test clustering fails without embeddings."""
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
 
         with pytest.raises(ClusteringError, match="No embeddings loaded"):
             cm.cluster()
 
-    def test_cluster_auto_calculate_n_clusters(self, mock_embeddings_manager, mock_collection_with_data):
+    def test_cluster_auto_calculate_n_clusters(
+        self, mock_embeddings_manager, mock_collection_with_data, mock_database
+    ):
         """Test automatic calculation of n_clusters when None is provided."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
 
         # Cluster with n_clusters=None should auto-calculate
-        labels = cm.cluster(method="kmeans", n_clusters=None, use_reduced=False)
+        labels = cm.cluster(n_clusters=None)
 
         assert labels.shape == (10,)
         assert cm.cluster_labels is not None
@@ -150,62 +131,25 @@ class TestClusteringManager:
         unique_labels = np.unique(labels)
         assert len(unique_labels) <= 2
 
-    def test_cluster_kmeans(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test K-Means clustering on full embeddings."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
-        cm.load_embeddings()
-
-        # Cluster on full embeddings (not reduced)
-        labels = cm.cluster(method="kmeans", n_clusters=3, use_reduced=False)
-
-        assert labels.shape == (10,)
-        assert cm.cluster_labels is not None
-        # Check that we have valid cluster labels
-        unique_labels = np.unique(labels)
-        assert len(unique_labels) <= 3
-        assert np.all(labels >= 0)
-
-    def test_cluster_dbscan(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test DBSCAN clustering on full embeddings."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
-        cm.load_embeddings()
-
-        # Cluster on full embeddings (not reduced)
-        labels = cm.cluster(method="dbscan", eps=0.5, min_samples=2, use_reduced=False)
-
-        assert labels.shape == (10,)
-        assert cm.cluster_labels is not None
-
-    def test_cluster_agglomerative(self, mock_embeddings_manager, mock_collection_with_data):
+    def test_cluster_agglomerative(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
         """Test Agglomerative clustering on full embeddings."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
 
         # Cluster on full embeddings (not reduced)
-        labels = cm.cluster(method="agglomerative", n_clusters=3, use_reduced=False)
+        labels = cm.cluster(n_clusters=3)
 
         assert labels.shape == (10,)
         assert cm.cluster_labels is not None
 
-    def test_cluster_invalid_method(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test invalid clustering method."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
-        cm.load_embeddings()
-
-        with pytest.raises(ClusteringError, match="Unknown clustering method"):
-            cm.cluster(method="invalid")
-
-    def test_get_cluster_statistics(self, mock_embeddings_manager, mock_collection_with_data):
+    def test_get_cluster_statistics(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
         """Test getting cluster statistics."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
         # Cluster first on full embeddings
-        cm.cluster(method="kmeans", n_clusters=3, use_reduced=False)
+        cm.cluster(n_clusters=3)
 
         stats = cm.get_cluster_statistics()
 
@@ -215,14 +159,14 @@ class TestClusteringManager:
         assert "total_papers" in stats
         assert stats["total_papers"] == 10
 
-    def test_get_clustering_results(self, mock_embeddings_manager, mock_collection_with_data):
+    def test_get_clustering_results(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
         """Test getting complete clustering results."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
         # Cluster first, then reduce for visualization
-        cm.cluster(method="kmeans", n_clusters=3, use_reduced=False)
-        cm.reduce_dimensions(method="pca", n_components=2)
+        cm.cluster(n_clusters=3)
+        cm.reduce_dimensions(n_components=2)
 
         results = cm.get_clustering_results()
 
@@ -246,14 +190,14 @@ class TestClusteringManager:
             assert isinstance(center["x"], (int, float))
             assert isinstance(center["y"], (int, float))
 
-    def test_export_to_json(self, mock_embeddings_manager, mock_collection_with_data, tmp_path):
+    def test_export_to_json(self, mock_embeddings_manager, mock_collection_with_data, tmp_path, mock_database):
         """Test exporting clustering results to JSON."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
         # Cluster first, then reduce for visualization
-        cm.cluster(method="kmeans", n_clusters=3, use_reduced=False)
-        cm.reduce_dimensions(method="pca", n_components=2)
+        cm.cluster(n_clusters=3)
+        cm.reduce_dimensions(n_components=2)
 
         output_path = tmp_path / "clusters.json"
         cm.export_to_json(output_path)
@@ -279,6 +223,29 @@ def mock_embeddings_manager(mocker):
     em = mocker.MagicMock()
     em.collection = None
     return em
+
+
+@pytest.fixture
+def mock_database(mocker, mock_collection_with_data):
+    """Create a mock DatabaseManager that hydrates the clustered papers."""
+    db = mocker.MagicMock()
+    data = mock_collection_with_data.get.return_value
+    summaries = []
+    for uid, metadata in zip(data["ids"], data["metadatas"]):
+        summaries.append(
+            {
+                "uid": uid,
+                "title": metadata["title"],
+                "abstract": metadata["abstract"],
+                "year": int(metadata["year"]),
+                "conference": metadata["conference"],
+                "session": metadata["session"],
+            }
+        )
+    by_uid = {summary["uid"]: summary for summary in summaries}
+    db.resolve_paper_uids.return_value = [summary["uid"] for summary in summaries]
+    db.get_paper_summaries_by_uids.side_effect = lambda uids: [by_uid[uid] for uid in uids if uid in by_uid]
+    return db
 
 
 @pytest.fixture
@@ -333,12 +300,12 @@ def mock_collection_with_data(mocker):
 class TestClusterLabeling:
     """Test suite for cluster labeling functionality."""
 
-    def test_extract_cluster_keywords(self, mock_embeddings_manager, mock_collection_with_data):
+    def test_extract_cluster_keywords(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
         """Test extracting keywords for each cluster."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
-        cm.cluster(method="kmeans", n_clusters=3, use_reduced=False)
+        cm.cluster(n_clusters=3)
 
         keywords = cm.extract_cluster_keywords(n_keywords=5)
 
@@ -349,19 +316,21 @@ class TestClusterLabeling:
             assert isinstance(kw_list, list)
             assert len(kw_list) <= 5
 
-    def test_extract_cluster_keywords_no_clustering(self, mock_embeddings_manager):
+    def test_extract_cluster_keywords_no_clustering(self, mock_embeddings_manager, mock_database):
         """Test that keyword extraction fails without clustering."""
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
 
         with pytest.raises(ClusteringError, match="No clustering performed"):
             cm.extract_cluster_keywords()
 
-    def test_generate_cluster_labels_keyword_based(self, mock_embeddings_manager, mock_collection_with_data):
+    def test_generate_cluster_labels_keyword_based(
+        self, mock_embeddings_manager, mock_collection_with_data, mock_database
+    ):
         """Test generating cluster labels without LLM."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
-        cm.cluster(method="kmeans", n_clusters=3, use_reduced=False)
+        cm.cluster(n_clusters=3)
 
         labels = cm.generate_cluster_labels(use_llm=False)
 
@@ -372,7 +341,9 @@ class TestClusterLabeling:
             assert isinstance(label, str)
             assert len(label) > 0
 
-    def test_generate_cluster_labels_with_llm(self, mock_embeddings_manager, mock_collection_with_data, mocker):
+    def test_generate_cluster_labels_with_llm(
+        self, mock_embeddings_manager, mock_collection_with_data, mocker, mock_database
+    ):
         """Test generating cluster labels with LLM."""
         mock_embeddings_manager.collection = mock_collection_with_data
 
@@ -385,9 +356,9 @@ class TestClusterLabeling:
         mock_openai_client.chat.completions.create.return_value = mock_response
         mock_embeddings_manager.openai_client = mock_openai_client
 
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
-        cm.cluster(method="kmeans", n_clusters=3, use_reduced=False)
+        cm.cluster(n_clusters=3)
 
         labels = cm.generate_cluster_labels(use_llm=True)
 
@@ -396,7 +367,7 @@ class TestClusterLabeling:
         # At least one cluster should have the LLM-generated label
         assert any("Machine Learning" in label for label in labels.values())
 
-    def test_llm_chat_label_returns_stripped_label(self, mock_embeddings_manager, mocker):
+    def test_llm_chat_label_returns_stripped_label(self, mock_embeddings_manager, mocker, mock_database):
         """_llm_chat_label strips whitespace and surrounding quotes."""
         mock_response = mocker.MagicMock()
         mock_response.choices = [mocker.MagicMock()]
@@ -406,7 +377,7 @@ class TestClusterLabeling:
         mock_openai_client.chat.completions.create.return_value = mock_response
         mock_embeddings_manager.openai_client = mock_openai_client
 
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         result = cm._llm_chat_label(
             "system prompt",
             "user prompt",
@@ -453,10 +424,10 @@ class TestClusterLabeling:
 
         assert keywords == ["alpha"]
 
-    def test_extract_keywords_for_samples(self, mock_embeddings_manager, mock_collection_with_data):
+    def test_extract_keywords_for_samples(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
         """_extract_keywords_for_samples delegates to the shared TF-IDF helper."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
 
         keywords = cm._extract_keywords_for_samples(["paper_0", "paper_1"], max_keywords=3)
@@ -464,15 +435,17 @@ class TestClusterLabeling:
         assert isinstance(keywords, list)
         assert len(keywords) <= 3
 
-    def test_extract_keywords_for_samples_unknown_ids(self, mock_embeddings_manager, mock_collection_with_data):
+    def test_extract_keywords_for_samples_unknown_ids(
+        self, mock_embeddings_manager, mock_collection_with_data, mock_database
+    ):
         """Unknown paper IDs produce no keywords."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
 
         assert cm._extract_keywords_for_samples(["missing-paper"], max_keywords=3) == []
 
-    def test_call_llm_for_label_returns_llm_label(self, mock_embeddings_manager, mocker):
+    def test_call_llm_for_label_returns_llm_label(self, mock_embeddings_manager, mocker, mock_database):
         """_call_llm_for_label returns the stripped LLM response."""
         mock_response = mocker.MagicMock()
         mock_response.choices = [mocker.MagicMock()]
@@ -482,25 +455,27 @@ class TestClusterLabeling:
         mock_openai_client.chat.completions.create.return_value = mock_response
         mock_embeddings_manager.openai_client = mock_openai_client
 
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         result = cm._call_llm_for_label("user prompt", "fallback label")
 
         assert result == "Generated Label"
 
-    def test_call_llm_for_label_returns_fallback_on_error(self, mock_embeddings_manager, mocker):
+    def test_call_llm_for_label_returns_fallback_on_error(self, mock_embeddings_manager, mocker, mock_database):
         """_call_llm_for_label returns the fallback when the LLM call fails."""
         mock_openai_client = mocker.MagicMock()
         mock_openai_client.chat.completions.create.side_effect = RuntimeError("API down")
         mock_embeddings_manager.openai_client = mock_openai_client
 
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         result = cm._call_llm_for_label("user prompt", "fallback label")
 
         assert result == "fallback label"
 
-    def test_generate_llm_label_from_keywords_uses_shared_helper(self, mock_embeddings_manager, mocker):
+    def test_generate_llm_label_from_keywords_uses_shared_helper(
+        self, mock_embeddings_manager, mocker, mock_database
+    ):
         """_generate_llm_label_from_keywords delegates to _call_llm_for_label."""
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         helper = mocker.patch.object(cm, "_call_llm_for_label", return_value="Keyword Label")
 
         result = cm._generate_llm_label_from_keywords(["machine", "learning", "neural"])
@@ -510,9 +485,9 @@ class TestClusterLabeling:
         assert "machine, learning, neural" in call_args[0]
         assert call_args[1] == "machine, learning, neural"
 
-    def test_generate_parent_label_llm_uses_shared_helper(self, mock_embeddings_manager, mocker):
+    def test_generate_parent_label_llm_uses_shared_helper(self, mock_embeddings_manager, mocker, mock_database):
         """_generate_parent_label_llm delegates to _call_llm_for_label."""
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         helper = mocker.patch.object(cm, "_call_llm_for_label", return_value="Parent Label")
         child_labels = ["Machine Learning", "Deep Learning"]
 
@@ -523,12 +498,14 @@ class TestClusterLabeling:
         assert call_args[0]
         assert call_args[1] == cm._generate_parent_label_fallback(child_labels)
 
-    def test_generate_llm_label_uses_shared_helper(self, mock_embeddings_manager, mock_collection_with_data, mocker):
+    def test_generate_llm_label_uses_shared_helper(
+        self, mock_embeddings_manager, mock_collection_with_data, mocker, mock_database
+    ):
         """_generate_llm_label delegates to _call_llm_for_label."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
-        cm.cluster(method="kmeans", n_clusters=3, use_reduced=False)
+        cm.cluster(n_clusters=3)
         helper = mocker.patch.object(cm, "_call_llm_for_label", return_value="Cluster Label")
 
         result = cm._generate_llm_label(0, ["machine", "learning"])
@@ -539,7 +516,7 @@ class TestClusterLabeling:
         assert call_args[1] == "machine, learning"
 
     def test_generate_cluster_labels_llm_truncated_content_falls_back(
-        self, mock_embeddings_manager, mock_collection_with_data, mocker
+        self, mock_embeddings_manager, mock_collection_with_data, mocker, mock_database
     ):
         """A reasoning model truncated at the token budget returns
         ``content=None`` (finish_reason='length'); each label must then fall
@@ -553,9 +530,9 @@ class TestClusterLabeling:
         mock_embeddings_manager.collection = mock_collection_with_data
         mock_embeddings_manager.openai_client = mock_openai_client
 
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
-        cm.cluster(method="kmeans", n_clusters=3, use_reduced=False)
+        cm.cluster(n_clusters=3)
 
         labels = cm.generate_cluster_labels(use_llm=True)
 
@@ -566,41 +543,13 @@ class TestClusterLabeling:
             assert isinstance(label, str)
             assert len(label) > 0
 
-    def test_get_cluster_representative_papers(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test finding representative papers for each cluster."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
-        cm.load_embeddings()
-        cm.cluster(method="kmeans", n_clusters=3, use_reduced=False)
-
-        representatives = cm.get_cluster_representative_papers(n_papers=3)
-
-        assert isinstance(representatives, dict)
-        assert len(representatives) > 0
-        # Check that each cluster has representative papers
-        for cluster_id, papers in representatives.items():
-            assert isinstance(papers, list)
-            assert len(papers) <= 3
-            # Check that each paper has required fields
-            for paper in papers:
-                assert "paper_id" in paper
-                assert "distance_to_centroid" in paper
-                assert "title" in paper
-
-    def test_get_cluster_representative_papers_no_clustering(self, mock_embeddings_manager):
-        """Test that finding representatives fails without clustering."""
-        cm = ClusteringManager(mock_embeddings_manager)
-
-        with pytest.raises(ClusteringError, match="No clustering performed"):
-            cm.get_cluster_representative_papers()
-
-    def test_clustering_results_with_labels(self, mock_embeddings_manager, mock_collection_with_data):
+    def test_clustering_results_with_labels(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
         """Test that clustering results include labels when available."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
-        cm.cluster(method="kmeans", n_clusters=3, use_reduced=False)
-        cm.reduce_dimensions(method="pca", n_components=2)
+        cm.cluster(n_clusters=3)
+        cm.reduce_dimensions(n_components=2)
         cm.extract_cluster_keywords(n_keywords=5)
         cm.generate_cluster_labels(use_llm=False)
 
@@ -612,92 +561,18 @@ class TestClusterLabeling:
         assert isinstance(results["cluster_keywords"], dict)
 
 
-class TestNewClusteringMethods:
-    """Test suite for new clustering methods: spectral, fuzzy c-means, and enhanced agglomerative."""
+class TestAgglomerativeVariants:
+    """Test suite for agglomerative clustering variants."""
 
-    def test_spectral_clustering_basic(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test basic spectral clustering."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
-        cm.load_embeddings()
-
-        labels = cm.cluster(method="spectral", n_clusters=3)
-
-        assert labels is not None
-        assert len(labels) == 10
-        assert len(np.unique(labels)) <= 3
-
-    def test_spectral_clustering_with_affinity(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test spectral clustering with different affinity parameters."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
-        cm.load_embeddings()
-
-        # Test with nearest_neighbors affinity
-        labels = cm.cluster(method="spectral", n_clusters=3, affinity="nearest_neighbors", n_neighbors=5)
-
-        assert labels is not None
-        assert len(labels) == 10
-
-    def test_spectral_clustering_requires_n_clusters(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test that spectral clustering requires n_clusters to be specified."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
-        cm.load_embeddings()
-
-        # Should use auto-calculated n_clusters when None is provided
-        labels = cm.cluster(method="spectral", n_clusters=None)
-
-        assert labels is not None
-        assert len(labels) == 10
-
-    def test_fuzzy_cmeans_basic(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test basic fuzzy c-means clustering."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
-        cm.load_embeddings()
-
-        labels = cm.cluster(method="fuzzy_cmeans", n_clusters=3)
-
-        assert labels is not None
-        assert len(labels) == 10
-        assert len(np.unique(labels)) <= 3
-        # Check that fuzzy memberships are stored
-        assert cm.fuzzy_memberships is not None
-        assert cm.fuzzy_memberships.shape == (3, 10)  # n_clusters x n_samples
-
-    def test_fuzzy_cmeans_with_parameters(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test fuzzy c-means with custom fuzziness parameter."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
-        cm.load_embeddings()
-
-        labels = cm.cluster(method="fuzzy_cmeans", n_clusters=3, m=2.5, maxiter=100)
-
-        assert labels is not None
-        assert len(labels) == 10
-        assert cm.fuzzy_memberships is not None
-
-    def test_fuzzy_cmeans_in_results(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test that fuzzy memberships are included in clustering results."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
-        cm.load_embeddings()
-        cm.cluster(method="fuzzy_cmeans", n_clusters=3)
-        cm.reduce_dimensions(method="pca", n_components=2)
-
-        results = cm.get_clustering_results()
-
-        assert "fuzzy_memberships" in results
-        assert isinstance(results["fuzzy_memberships"], list)
-
-    def test_agglomerative_with_distance_threshold(self, mock_embeddings_manager, mock_collection_with_data):
+    def test_agglomerative_with_distance_threshold(
+        self, mock_embeddings_manager, mock_collection_with_data, mock_database
+    ):
         """Test agglomerative clustering with distance threshold instead of n_clusters."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
 
-        labels = cm.cluster(method="agglomerative", distance_threshold=5.0, n_clusters=None)
+        labels = cm.cluster(distance_threshold=5.0)
 
         assert labels is not None
         assert len(labels) == 10
@@ -705,13 +580,15 @@ class TestNewClusteringMethods:
         n_clusters_found = len(np.unique(labels))
         assert n_clusters_found >= 1
 
-    def test_agglomerative_hierarchy_extraction(self, mock_embeddings_manager, mock_collection_with_data):
+    def test_agglomerative_hierarchy_extraction(
+        self, mock_embeddings_manager, mock_collection_with_data, mock_database
+    ):
         """Test that hierarchical structure is extracted for agglomerative clustering."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
 
-        cm.cluster(method="agglomerative", n_clusters=3)
+        cm.cluster(n_clusters=3)
 
         # Check that hierarchy was extracted
         assert cm.cluster_hierarchy is not None
@@ -722,13 +599,15 @@ class TestNewClusteringMethods:
         # Should have n_samples - 1 merges to form the tree
         assert len(cm.cluster_hierarchy["merges"]) == 9  # 10 samples - 1
 
-    def test_agglomerative_hierarchy_in_results(self, mock_embeddings_manager, mock_collection_with_data):
+    def test_agglomerative_hierarchy_in_results(
+        self, mock_embeddings_manager, mock_collection_with_data, mock_database
+    ):
         """Test that hierarchy is included in clustering results."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
-        cm.cluster(method="agglomerative", n_clusters=3)
-        cm.reduce_dimensions(method="pca", n_components=2)
+        cm.cluster(n_clusters=3)
+        cm.reduce_dimensions(n_components=2)
 
         results = cm.get_clustering_results()
 
@@ -736,89 +615,32 @@ class TestNewClusteringMethods:
         assert isinstance(results["cluster_hierarchy"], dict)
         assert "merges" in results["cluster_hierarchy"]
 
-    def test_agglomerative_with_linkage(self, mock_embeddings_manager, mock_collection_with_data):
+    def test_agglomerative_with_linkage(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
         """Test agglomerative clustering with different linkage methods."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
 
         # Test with different linkage methods
         for linkage in ["ward", "complete", "average"]:
-            cm_test = ClusteringManager(mock_embeddings_manager)
+            cm_test = ClusteringManager(mock_embeddings_manager, mock_database)
             cm_test.load_embeddings()
-            labels = cm_test.cluster(method="agglomerative", n_clusters=3, linkage=linkage)
+            labels = cm_test.cluster(n_clusters=3, linkage=linkage)
 
             assert labels is not None
             assert len(labels) == 10
-
-    def test_clustering_method_names_case_insensitive(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test that clustering method names are case-insensitive."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-
-        # Test different case variations
-        for method in ["SPECTRAL", "Spectral", "sPeCtRaL"]:
-            cm = ClusteringManager(mock_embeddings_manager)
-            cm.load_embeddings()
-            labels = cm.cluster(method=method, n_clusters=3)
-            assert labels is not None
-
-    def test_fuzzy_cmeans_alternative_name(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test that fuzzy c-means accepts both 'fuzzy_cmeans' and 'fuzzy-cmeans'."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-
-        # Test with hyphen
-        cm = ClusteringManager(mock_embeddings_manager)
-        cm.load_embeddings()
-        labels = cm.cluster(method="fuzzy-cmeans", n_clusters=3)
-
-        assert labels is not None
-        assert cm.fuzzy_memberships is not None
-
-    def test_unknown_clustering_method_error(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test that unknown clustering methods raise ClusteringError."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
-        cm.load_embeddings()
-
-        with pytest.raises(ClusteringError, match="Unknown clustering method"):
-            cm.cluster(method="invalid_method", n_clusters=3)
-
-    def test_spectral_on_reduced_embeddings(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test spectral clustering on reduced embeddings."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
-        cm.load_embeddings()
-        cm.reduce_dimensions(method="pca", n_components=5)
-
-        labels = cm.cluster(method="spectral", n_clusters=3, use_reduced=True)
-
-        assert labels is not None
-        assert len(labels) == 10
-
-    def test_fuzzy_cmeans_on_reduced_embeddings(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test fuzzy c-means clustering on reduced embeddings."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
-        cm.load_embeddings()
-        cm.reduce_dimensions(method="pca", n_components=5)
-
-        labels = cm.cluster(method="fuzzy_cmeans", n_clusters=3, use_reduced=True)
-
-        assert labels is not None
-        assert len(labels) == 10
-        assert cm.fuzzy_memberships is not None
 
 
 class TestHierarchicalClustering:
     """Test suite for hierarchical clustering visualization features."""
 
-    def test_build_hierarchy_tree(self, mock_embeddings_manager, mock_collection_with_data):
+    def test_build_hierarchy_tree(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
         """Test that hierarchy tree is built correctly."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
 
-        cm.cluster(method="agglomerative", n_clusters=3)
+        cm.cluster(n_clusters=3)
 
         assert cm.cluster_hierarchy is not None
         assert "tree" in cm.cluster_hierarchy
@@ -831,43 +653,15 @@ class TestHierarchicalClustering:
         # Check that we have leaf and internal nodes
         assert len(tree["nodes"]) == 19  # 10 leaves + 9 internal nodes
 
-    def test_get_hierarchy_level_clusters(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test getting clusters at a specific hierarchy level."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
-        cm.load_embeddings()
-
-        cm.cluster(method="agglomerative", n_clusters=3)
-
-        # Get leaf level (level 0)
-        level0 = cm.get_hierarchy_level_clusters(level=0)
-        assert level0["level"] == 0
-        assert len(level0["clusters"]) == 10  # All original samples
-
-        # Get a higher level
-        level2 = cm.get_hierarchy_level_clusters(level=2)
-        assert level2["level"] == 2
-        assert len(level2["clusters"]) < 10  # Should have fewer clusters
-
-    def test_get_hierarchy_level_clusters_no_hierarchy(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test that getting hierarchy levels fails without hierarchy."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
-        cm.load_embeddings()
-
-        # Use non-hierarchical clustering
-        cm.cluster(method="kmeans", n_clusters=3)
-
-        with pytest.raises(ClusteringError, match="Cluster hierarchy not available"):
-            cm.get_hierarchy_level_clusters(level=0)
-
-    def test_generate_hierarchical_labels_fallback(self, mock_embeddings_manager, mock_collection_with_data):
+    def test_generate_hierarchical_labels_fallback(
+        self, mock_embeddings_manager, mock_collection_with_data, mock_database
+    ):
         """Test hierarchical label generation with fallback (no LLM)."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
 
-        cm.cluster(method="agglomerative", n_clusters=3)
+        cm.cluster(n_clusters=3)
 
         # Generate labels without LLM
         labels = cm.generate_hierarchical_labels(use_llm=False)
@@ -880,13 +674,13 @@ class TestHierarchicalClustering:
         for node_id in tree["nodes"].keys():
             assert node_id in labels
 
-    def test_parent_label_fallback(self, mock_embeddings_manager, mock_collection_with_data):
+    def test_parent_label_fallback(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
         """Test fallback parent label generation."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
 
-        cm.cluster(method="agglomerative", n_clusters=3)
+        cm.cluster(n_clusters=3)
 
         # Test the fallback method directly
         child_labels = ["Machine Learning", "Deep Learning", "Neural Networks"]
@@ -896,14 +690,14 @@ class TestHierarchicalClustering:
         assert isinstance(parent_label, str)
         assert len(parent_label) > 0
 
-    def test_hierarchy_labels_in_tree_nodes(self, mock_embeddings_manager, mock_collection_with_data):
+    def test_hierarchy_labels_in_tree_nodes(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
         """Test that hierarchical labels are added to tree nodes."""
         mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
+        cm = ClusteringManager(mock_embeddings_manager, mock_database)
         cm.load_embeddings()
 
         # Use agglomerative clustering
-        cm.cluster(method="agglomerative", n_clusters=3)
+        cm.cluster(n_clusters=3)
 
         # Generate hierarchical labels
         hierarchical_labels = cm.generate_hierarchical_labels(use_llm=False)
@@ -1100,34 +894,3 @@ class TestClusteringCache:
         assert cached_any["statistics"]["n_clusters"] == 2
 
         db.close()
-
-
-class TestAgglomerativeParameterFiltering:
-    """Test that agglomerative clustering properly filters parameters."""
-
-    def test_agglomerative_with_spectral_parameters(self, mock_embeddings_manager, mock_collection_with_data):
-        """Test that agglomerative clustering ignores spectral-specific parameters like affinity."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager)
-        cm.load_embeddings()
-
-        # Reduce dimensions
-        cm.reduce_dimensions(method="pca", n_components=2)
-
-        # Try clustering with parameters that include 'affinity' (for spectral)
-        # This should NOT raise an error even though affinity is not valid for agglomerative
-        cm.cluster(
-            method="agglomerative",
-            distance_threshold=5.0,
-            linkage="ward",
-            affinity="rbf",  # This should be ignored for agglomerative
-            n_neighbors=10,  # This should also be ignored
-        )
-
-        # Verify clustering succeeded
-        assert cm.cluster_labels is not None
-        assert len(cm.cluster_labels) == 10  # mock has 10 items
-
-        # Verify hierarchy was extracted
-        assert cm.cluster_hierarchy is not None
-        assert "tree" in cm.cluster_hierarchy

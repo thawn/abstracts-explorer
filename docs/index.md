@@ -19,7 +19,7 @@ A live demo is available at [abstracts.hzdr.de](https://abstracts.hzdr.de).
 - **Plugin system** for downloading from workshops and other conferences
 - **Store abstracts** in a SQL database (SQLite or PostgreSQL) with full metadata
 - **Create vector embeddings** for semantic search
-- **Cluster and visualize** paper embeddings with multiple algorithms
+- **Cluster and visualize** paper embeddings (agglomerative clustering with hierarchical topic exploration)
 - **MCP server** for LLM-based cluster analysis and topic exploration
 - **RAG (Retrieval-Augmented Generation)** chat interface for querying papers
 - **Web interface** for browsing and searching papers
@@ -46,7 +46,7 @@ Download conference abstracts:
 uv run abstracts-explorer download --year 2025
 
 # Or download from a workshop using plugins
-uv run abstracts-explorer download --plugin ml4ps --year 2025
+uv run abstracts-explorer download --conference ml4ps --year 2025
 ```
 
 Alternatively, download pre-built data from an OCI registry (no LLM backend required):

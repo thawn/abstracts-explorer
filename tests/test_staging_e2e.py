@@ -1,8 +1,8 @@
 """
 Staging end-to-end tests for the Abstracts Explorer web UI.
 
-These Selenium tests are designed to run against a **live deployment** (e.g. a
-staging server) rather than a locally-spawned test server.  They verify the
+These Playwright tests are designed to run against a **live deployment** (e.g.
+a staging server) rather than a locally-spawned test server.  They verify the
 critical user-facing functionality described in
 ``docs/branching_strategy.md#staging-end-to-end-tests``.
 
@@ -24,9 +24,8 @@ Notes
 -----
 * All tests are marked with ``@pytest.mark.staging`` **and**
   ``@pytest.mark.slow`` so they are excluded from the default test run.
-* The browser is selected via the ``E2E_BROWSER`` environment variable
-  (``chrome``, ``firefox``, or ``auto``), reusing the same logic as the
-  existing e2e suite.
+* Tests use Playwright (sync API) with Chromium and the module-scoped
+  ``staging_page`` fixture.
 * Chat test correctness is evaluated by calling the LLM backend configured
   in ``.env.tests`` (``LLM_BACKEND_URL`` / ``CHAT_MODEL``).  Set
   ``LLM_BACKEND_AUTH_TOKEN`` to authenticate.  If the backend is unavailable,
@@ -41,12 +40,7 @@ from warnings import warn
 
 import pytest
 import requests as _requests
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import Select, WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
-from selenium.webdriver.remote.webdriver import WebDriver
+from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, expect
 
 from abstracts_explorer.config import get_config
 from tests.conftest import get_env_test_path
@@ -65,7 +59,7 @@ _DEFAULT_YEAR = "2025"
 
 
 def _select_conference_and_year(
-    driver: WebDriver,
+    page: Page,
     conference: str = _DEFAULT_CONFERENCE,
     year: str = _DEFAULT_YEAR,
     timeout: int = 15,
@@ -81,8 +75,8 @@ def _select_conference_and_year(
 
     Parameters
     ----------
-    driver : WebDriver
-        The Selenium WebDriver instance.
+    page : Page
+        The Playwright page.
     conference : str, optional
         Conference name to select (default: ``"NeurIPS"``).
     year : str, optional
@@ -90,33 +84,29 @@ def _select_conference_and_year(
     timeout : int, optional
         Maximum seconds to wait for the dropdowns to be populated (default: 15).
     """
-    wait = WebDriverWait(driver, timeout)
+    timeout_ms = timeout * 1000
 
     # Wait until the specific conference option is available in the selector
-    wait.until(
-        lambda d: any(
-            opt.get_attribute("value") == conference
-            for opt in d.find_element(By.ID, "conference-selector").find_elements(By.TAG_NAME, "option")
-        )
+    page.wait_for_function(
+        "sel => [...document.querySelectorAll('#conference-selector option')].some(o => o.value === sel)",
+        arg=conference,
+        timeout=timeout_ms,
     )
 
-    conf_select_el = driver.find_element(By.ID, "conference-selector")
-    Select(conf_select_el).select_by_value(conference)
+    page.locator("#conference-selector").select_option(value=conference)
     # Trigger the JS change handler so the year dropdown is updated
-    driver.execute_script("handleConferenceChange()")
+    page.evaluate("handleConferenceChange()")
 
     # Wait until the target year option is available in the year selector
-    wait.until(
-        lambda d: any(
-            opt.get_attribute("value") == year
-            for opt in d.find_element(By.ID, "year-selector").find_elements(By.TAG_NAME, "option")
-        )
+    page.wait_for_function(
+        "sel => [...document.querySelectorAll('#year-selector option')].some(o => o.value === sel)",
+        arg=year,
+        timeout=timeout_ms,
     )
 
-    year_select_el = driver.find_element(By.ID, "year-selector")
-    Select(year_select_el).select_by_value(year)
+    page.locator("#year-selector").select_option(value=year)
     # Trigger the JS change handler so filters are refreshed
-    driver.execute_script("handleYearChange()")
+    page.evaluate("handleYearChange()")
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +178,8 @@ def _judge_with_llm(query: str, response: str, criteria: str | None = None) -> t
         )
         resp.raise_for_status()
         content = resp.json()["choices"][0]["message"]["content"]
+        if not content:
+            return None, "LLM judgment unavailable (empty response)"
         passed = content.strip().upper().startswith("YES")
         return passed, content
     except _requests.exceptions.RequestException as exc:
@@ -201,7 +193,7 @@ def _judge_with_llm(query: str, response: str, criteria: str | None = None) -> t
 # ---------------------------------------------------------------------------
 
 
-def _has_complete_response(driver: WebDriver) -> bool:
+def _has_complete_response(page: Page) -> bool:
     """
     Return ``True`` once there is at least one complete (non-loading) assistant
     message in the chat.
@@ -213,17 +205,16 @@ def _has_complete_response(driver: WebDriver) -> bool:
 
     Parameters
     ----------
-    driver : WebDriver
-        The Selenium WebDriver instance.
+    page : Page
+        The Playwright page.
     """
-    assistant_msgs = driver.find_elements(By.CSS_SELECTOR, ".chat-message[data-role='assistant']")
-    if not assistant_msgs:
+    assistant_msgs = page.locator(".chat-message[data-role='assistant']")
+    if assistant_msgs.count() == 0:
         return False
-    last = assistant_msgs[-1]
-    return len(last.find_elements(By.CSS_SELECTOR, ".spinner")) == 0
+    return assistant_msgs.last.locator(".spinner").count() == 0
 
 
-def _check_chart_rendered(driver: WebDriver, timeout: int = 15) -> tuple:
+def _check_chart_rendered(page: Page, timeout: int = 15) -> tuple:
     """
     Check whether a Plotly chart has been rendered inside the chat.
 
@@ -235,8 +226,8 @@ def _check_chart_rendered(driver: WebDriver, timeout: int = 15) -> tuple:
 
     Parameters
     ----------
-    driver : WebDriver
-        The Selenium WebDriver instance.
+    page : Page
+        The Playwright page.
     timeout : int, optional
         Maximum seconds to wait for a chart to appear (default: 15).
 
@@ -249,34 +240,39 @@ def _check_chart_rendered(driver: WebDriver, timeout: int = 15) -> tuple:
         the evaluation criteria.
     """
     try:
-        WebDriverWait(driver, timeout).until(
-            lambda d: d.find_elements(By.CSS_SELECTOR, _CSS_PLOTLY_RENDERED)
-            or any(
-                c.find_elements(By.CSS_SELECTOR, "svg")
-                for c in d.find_elements(By.CSS_SELECTOR, _CSS_CHAT_PLOT_CONTAINER)
-            )
+        page.wait_for_function(
+            """() => {
+                if (document.querySelectorAll("#chat-messages .js-plotly-plot").length) {
+                    return true;
+                }
+                return [...document.querySelectorAll("div[id^='chat-plot-']")].some(
+                    (c) => c.querySelector("svg")
+                );
+            }""",
+            timeout=timeout * 1000,
         )
-    except TimeoutException:
+    except PlaywrightTimeoutError:
         return False, "No chart was rendered in the chat."
 
-    plotly_charts = driver.find_elements(By.CSS_SELECTOR, _CSS_PLOTLY_RENDERED)
-    if plotly_charts:
-        return True, f"A chart was rendered in the chat ({len(plotly_charts)} Plotly chart(s) detected)."
-    chart_containers = driver.find_elements(By.CSS_SELECTOR, _CSS_CHAT_PLOT_CONTAINER)
-    populated = [c for c in chart_containers if c.find_elements(By.CSS_SELECTOR, "svg")]
+    plotly_charts = page.locator(_CSS_PLOTLY_RENDERED)
+    plotly_count = plotly_charts.count()
+    if plotly_count:
+        return True, f"A chart was rendered in the chat ({plotly_count} Plotly chart(s) detected)."
+    chart_containers = page.locator(_CSS_CHAT_PLOT_CONTAINER)
+    populated = sum(1 for i in range(chart_containers.count()) if chart_containers.nth(i).locator("svg").count())
     if populated:
-        return True, f"A chart was rendered in the chat ({len(populated)} SVG chart(s) detected)."
+        return True, f"A chart was rendered in the chat ({populated} SVG chart(s) detected)."
     return False, "No chart was rendered in the chat."
 
 
-def _extract_chat_history(driver: WebDriver) -> list:
+def _extract_chat_history(page: Page) -> list:
     """
     Return all visible chat messages as a list of ``(role, text)`` tuples.
 
     Parameters
     ----------
-    driver : WebDriver
-        The Selenium WebDriver instance.
+    page : Page
+        The Playwright page.
 
     Returns
     -------
@@ -284,11 +280,11 @@ def _extract_chat_history(driver: WebDriver) -> list:
         Each tuple is ``(role, text)`` where *role* is ``'user'``,
         ``'assistant'``, or ``'unknown'``.
     """
-    messages = driver.find_elements(By.CSS_SELECTOR, ".chat-message[data-role]")
+    messages = page.locator(".chat-message[data-role]").all()
     history = []
     for msg in messages:
         role = msg.get_attribute("data-role") or "unknown"
-        history.append((role, msg.text))
+        history.append((role, msg.inner_text()))
     return history
 
 
@@ -353,25 +349,111 @@ def _assert_llm_judgment(query: str, response: str, criteria: str | None = None)
     )
 
 
-def _submit_search_query(driver: WebDriver, query: str) -> None:
+def _submit_search_query(page: Page, query: str) -> None:
     """
     Select the default conference and year in the header, then enter *query*
     in the main search input and submit with Enter.
 
     Parameters
     ----------
-    driver : WebDriver
-        The Selenium WebDriver instance.
+    page : Page
+        The Playwright page.
     query : str
         Search query text to submit.
     """
 
-    _select_conference_and_year(driver)
+    _select_conference_and_year(page)
 
-    search_input = driver.find_element(By.ID, "search-input")
-    search_input.clear()
-    search_input.send_keys(query)
-    search_input.send_keys(Keys.RETURN)
+    search_input = page.locator("#search-input")
+    search_input.fill(query)
+    search_input.press("Enter")
+
+
+def _seed_interesting_papers(
+    staging_url: str,
+    page: Page,
+    query: str = "learning",
+    count: int = 2,
+) -> None:
+    """
+    Rate the first *count* search results as 5-star interesting papers.
+
+    Parameters
+    ----------
+    staging_url : str
+        Base URL of the staging deployment.
+    page : Page
+        The Playwright page.
+    query : str, optional
+        Search query used to find papers to rate (default: ``"learning"``).
+    count : int, optional
+        Number of search results to rate (default: 2).
+    """
+    page.goto(staging_url)
+    page.evaluate("localStorage.removeItem('paperPriorities')")
+    page.reload()
+    _submit_search_query(page, query)
+
+    stars = page.locator("#search-results .paper-star")
+    expect(stars.first).to_be_attached(timeout=15000)
+
+    for index in range(count):
+        star = stars.nth(index * 5 + 4)
+        expect(star).to_be_attached(timeout=15000)
+        star.click()
+
+    page.wait_for_function(
+        """count => {
+            const raw = localStorage.getItem('paperPriorities');
+            if (!raw) return false;
+            return Object.keys(JSON.parse(raw)).length >= count;
+        }""",
+        arg=count,
+        timeout=5000,
+    )
+
+
+def _clear_interesting_paper_ratings(page: Page) -> None:
+    """
+    Remove interesting-paper ratings and reset the app's in-memory state.
+
+    Parameters
+    ----------
+    page : Page
+        The Playwright page.
+    """
+    if page.is_closed():
+        return
+    page.evaluate("localStorage.removeItem('paperPriorities')")
+    page.reload()
+
+
+@pytest.fixture
+def interesting_paper_ratings(staging_url, staging_page):
+    """
+    Provide two 5-star interesting papers and clean them up afterward.
+
+    The fixture is function-scoped so every test starts with a known rating
+    state and leaves ``localStorage.paperPriorities`` empty for later tests.
+    Cleanup runs even when the test fails.
+
+    Parameters
+    ----------
+    staging_url : str
+        Base URL of the staging deployment.
+    staging_page : Page
+        Module-scoped Playwright page shared by staging tests.
+
+    Yields
+    ------
+    None
+        The fixture only prepares and clears browser state.
+    """
+    try:
+        _seed_interesting_papers(staging_url, staging_page)
+        yield
+    finally:
+        _clear_interesting_paper_ratings(staging_page)
 
 
 # ---------------------------------------------------------------------------
@@ -384,7 +466,7 @@ def _submit_search_query(driver: WebDriver, query: str) -> None:
 class TestApplicationStartup:
     """Verify the application boots and renders without errors."""
 
-    def test_page_loads(self, staging_url, browser):
+    def test_page_loads(self, staging_url, staging_page):
         """
         Page loads successfully.
 
@@ -395,44 +477,41 @@ class TestApplicationStartup:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
-        browser.get(staging_url)
+        staging_page.goto(staging_url)
 
-        assert "Abstracts Explorer" in browser.title
+        assert "Abstracts Explorer" in staging_page.title()
 
         # Core layout elements must be present
-        assert browser.find_element(By.ID, "search-input")
-        assert browser.find_element(By.ID, "search-results")
-        assert browser.find_element(By.ID, "tab-search")
-        assert browser.find_element(By.ID, "tab-chat")
+        for selector in ("#search-input", "#search-results", "#tab-search", "#tab-chat"):
+            expect(staging_page.locator(selector)).to_be_attached()
 
-    def test_page_no_javascript_errors(self, staging_url, browser):
+    def test_page_no_javascript_errors(self, staging_url, staging_page, staging_console_errors):
         """
         No JavaScript errors on load.
 
-        The browser console contains no SEVERE-level entries after the
-        initial page load.  On Firefox (which does not support
-        ``get_log``), the test falls back to verifying the page title.
+        The browser console contains no error-level entries after the
+        initial page load.  Messages related to ``favicon`` or
+        ``ERR_BLOCKED_BY_CLIENT`` are ignored as they are not application
+        errors.
 
         Parameters
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
+        staging_console_errors : list[str]
+            Console and uncaught page errors collected by the fixture.
         """
-        browser.get(staging_url)
-        time.sleep(2)  # allow async scripts to settle
+        staging_page.goto(staging_url)
+        staging_page.wait_for_timeout(2000)  # allow async scripts to settle
 
-        try:
-            logs = browser.get_log("browser")
-            errors = [entry for entry in logs if entry["level"] == "SEVERE"]
-            assert len(errors) == 0, f"JavaScript errors found: {errors}"
-        except (AttributeError, TimeoutException):
-            # Firefox does not support get_log – fall back
-            assert "Abstracts Explorer" in browser.title
+        ignored = ("favicon", "ERR_BLOCKED_BY_CLIENT")
+        errors = [entry for entry in staging_console_errors if not any(token in entry for token in ignored)]
+        assert len(errors) == 0, f"JavaScript errors found: {errors}"
 
 
 # ---------------------------------------------------------------------------
@@ -445,7 +524,7 @@ class TestApplicationStartup:
 class TestCoreSearch:
     """Verify keyword search, empty search, and no-results handling."""
 
-    def test_keyword_search_returns_results(self, staging_url, browser):
+    def test_keyword_search_returns_results(self, staging_url, staging_page):
         """
         Keyword search returns results.
 
@@ -456,20 +535,19 @@ class TestCoreSearch:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
-        browser.get(staging_url)
+        staging_page.goto(staging_url)
 
-        _submit_search_query(browser, "learning")
+        _submit_search_query(staging_page, "learning")
 
-        wait = WebDriverWait(browser, 15)
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
+        results = staging_page.locator("#search-results .bg-white.rounded-lg")
+        expect(results.first).to_be_attached(timeout=15000)
 
-        results = browser.find_elements(By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")
-        assert len(results) > 0, "Search should return at least one result"
+        assert results.count() > 0, "Search should return at least one result"
 
-    def test_empty_search_shows_message(self, staging_url, browser):
+    def test_empty_search_shows_message(self, staging_url, staging_page):
         """
         Empty search shows a message.
 
@@ -480,19 +558,18 @@ class TestCoreSearch:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
-        browser.get(staging_url)
+        staging_page.goto(staging_url)
 
-        _submit_search_query(browser, "")
+        _submit_search_query(staging_page, "")
 
-        time.sleep(1)
+        staging_page.wait_for_timeout(1000)
 
-        results_div = browser.find_element(By.ID, "search-results")
-        assert results_div is not None, "Search results container should exist"
+        expect(staging_page.locator("#search-results")).to_be_attached()
 
-    def test_search_no_results(self, staging_url, browser):
+    def test_search_no_results(self, staging_url, staging_page):
         """
         Search with no results.
 
@@ -503,18 +580,17 @@ class TestCoreSearch:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
-        browser.get(staging_url)
+        staging_page.goto(staging_url)
 
-        _submit_search_query(browser, "xyzqwertyuiopasdfghjkl9999")
+        _submit_search_query(staging_page, "xyzqwertyuiopasdfghjkl9999")
 
-        time.sleep(1)
+        staging_page.wait_for_timeout(1000)
 
         # The page must not crash – the results container should still be present
-        results_div = browser.find_element(By.ID, "search-results")
-        assert results_div is not None
+        expect(staging_page.locator("#search-results")).to_be_attached()
 
 
 # ---------------------------------------------------------------------------
@@ -530,7 +606,7 @@ class TestAuthorSearch:
     _RESULT_CARD_CSS = "#search-results .bg-white.rounded-lg"
     _WAIT_TIMEOUT = 30
 
-    def test_author_name_only(self, staging_url, browser):
+    def test_author_name_only(self, staging_url, staging_page):
         """
         Author name only search returns results.
 
@@ -541,23 +617,22 @@ class TestAuthorSearch:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
-        browser.get(staging_url)
+        staging_page.goto(staging_url)
 
-        _submit_search_query(browser, "LeCun")
+        _submit_search_query(staging_page, "LeCun")
 
-        wait = WebDriverWait(browser, self._WAIT_TIMEOUT)
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, self._RESULT_CARD_CSS)))
+        results = staging_page.locator(self._RESULT_CARD_CSS)
+        expect(results.first).to_be_attached(timeout=self._WAIT_TIMEOUT * 1000)
 
-        results = browser.find_elements(By.CSS_SELECTOR, self._RESULT_CARD_CSS)
-        assert len(results) > 0, "Searching for 'LeCun' should return at least one result"
+        assert results.count() > 0, "Searching for 'LeCun' should return at least one result"
 
-        results_text = browser.find_element(By.ID, "search-results").text
+        results_text = staging_page.locator("#search-results").inner_text()
         assert "LeCun" in results_text, "Results for 'LeCun' should display the author name"
 
-    def test_author_field_syntax(self, staging_url, browser):
+    def test_author_field_syntax(self, staging_url, staging_page):
         """
         Field-formatted author query returns results for that author.
 
@@ -569,23 +644,22 @@ class TestAuthorSearch:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
-        browser.get(staging_url)
+        staging_page.goto(staging_url)
 
-        _submit_search_query(browser, 'author:"LeCun"')
+        _submit_search_query(staging_page, 'author:"LeCun"')
 
-        wait = WebDriverWait(browser, self._WAIT_TIMEOUT)
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, self._RESULT_CARD_CSS)))
+        results = staging_page.locator(self._RESULT_CARD_CSS)
+        expect(results.first).to_be_attached(timeout=self._WAIT_TIMEOUT * 1000)
 
-        results = browser.find_elements(By.CSS_SELECTOR, self._RESULT_CARD_CSS)
-        assert len(results) > 0, 'author:"LeCun" should return at least one result'
+        assert results.count() > 0, 'author:"LeCun" should return at least one result'
 
-        results_text = browser.find_element(By.ID, "search-results").text
+        results_text = staging_page.locator("#search-results").inner_text()
         assert "LeCun" in results_text, 'Results for author:"LeCun" should display the author name'
 
-    def test_author_with_topic(self, staging_url, browser):
+    def test_author_with_topic(self, staging_url, staging_page):
         """
         Combined author filter and topic query returns relevant results.
 
@@ -597,20 +671,19 @@ class TestAuthorSearch:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
-        browser.get(staging_url)
+        staging_page.goto(staging_url)
 
-        _submit_search_query(browser, 'authors:"LeCun" world model')
+        _submit_search_query(staging_page, 'authors:"LeCun" world model')
 
-        wait = WebDriverWait(browser, self._WAIT_TIMEOUT)
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, self._RESULT_CARD_CSS)))
+        results = staging_page.locator(self._RESULT_CARD_CSS)
+        expect(results.first).to_be_attached(timeout=self._WAIT_TIMEOUT * 1000)
 
-        results = browser.find_elements(By.CSS_SELECTOR, self._RESULT_CARD_CSS)
-        assert len(results) > 0, 'authors:"LeCun" world model should return at least one result'
+        assert results.count() > 0, 'authors:"LeCun" world model should return at least one result'
 
-        results_text = browser.find_element(By.ID, "search-results").text
+        results_text = staging_page.locator("#search-results").inner_text()
         assert "LeCun" in results_text, 'Results for author:"LeCun" world model should display the author name'
 
 
@@ -624,7 +697,7 @@ class TestAuthorSearch:
 class TestPaperDisplay:
     """Verify paper detail view and collapsible abstracts."""
 
-    def test_paper_detail_view(self, staging_url, browser):
+    def test_paper_detail_view(self, staging_url, staging_page):
         """
         Paper detail view.
 
@@ -634,31 +707,30 @@ class TestPaperDisplay:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
-        browser.get(staging_url)
+        staging_page.goto(staging_url)
 
-        _submit_search_query(browser, "learning")
+        _submit_search_query(staging_page, "learning")
 
-        wait = WebDriverWait(browser, 15)
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .paper-card")))
+        cards = staging_page.locator("#search-results .paper-card")
+        expect(cards.first).to_be_attached(timeout=15000)
 
-        cards = browser.find_elements(By.CSS_SELECTOR, "#search-results .paper-card")
-        assert len(cards) > 0, "Should have at least one paper card"
+        assert cards.count() > 0, "Should have at least one paper card"
 
-        first = cards[0]
+        first = cards.first
 
         # Paper card must contain a title element
-        title_elements = first.find_elements(By.CSS_SELECTOR, "h3, h4")
-        assert len(title_elements) > 0, "Paper card should have a title"
-        assert len(title_elements[0].text) > 0, "Title should not be empty"
+        title_elements = first.locator("h3, h4")
+        assert title_elements.count() > 0, "Paper card should have a title"
+        assert len(title_elements.first.inner_text()) > 0, "Title should not be empty"
 
         # Paper card must contain author information
-        author_elements = first.find_elements(By.CSS_SELECTOR, ".text-gray-600")
-        assert len(author_elements) > 0, "Paper card should have author info"
+        author_elements = first.locator(".text-gray-600")
+        assert author_elements.count() > 0, "Paper card should have author info"
 
-    def test_collapsible_abstract(self, staging_url, browser):
+    def test_collapsible_abstract(self, staging_url, staging_page):
         """
         Collapsible abstract.
 
@@ -668,33 +740,32 @@ class TestPaperDisplay:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
-        browser.get(staging_url)
+        staging_page.goto(staging_url)
 
-        _submit_search_query(browser, "large language models")
+        _submit_search_query(staging_page, "large language models")
 
-        wait = WebDriverWait(browser, 15)
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#search-results .bg-white.rounded-lg")))
+        expect(staging_page.locator("#search-results .bg-white.rounded-lg").first).to_be_attached(timeout=15000)
 
         # Paper cards use native <details>/<summary> for collapsible abstracts
         # when the abstract is longer than ~300 characters.
-        detail_elements = browser.find_elements(By.CSS_SELECTOR, "#search-results details")
-        if len(detail_elements) == 0:
+        detail_elements = staging_page.locator("#search-results details")
+        if detail_elements.count() == 0:
             pytest.skip("No collapsible abstracts found (all abstracts may be short)")
 
-        details = detail_elements[0]
-        summary = details.find_element(By.TAG_NAME, "summary")
+        details = detail_elements.first
+        summary = details.locator("summary")
 
         # Abstracts start collapsed – expand by clicking summary
         summary.click()
-        time.sleep(0.3)
+        staging_page.wait_for_timeout(300)
         assert details.get_attribute("open") is not None, "Abstract details element should be open after click"
 
         # Collapse again
         summary.click()
-        time.sleep(0.3)
+        staging_page.wait_for_timeout(300)
         assert details.get_attribute("open") is None, "Abstract details element should be closed after second click"
 
 
@@ -708,7 +779,7 @@ class TestPaperDisplay:
 class TestChatInterface:
     """Verify core chat UI elements and basic send functionality."""
 
-    def test_chat_ui_elements_present(self, staging_url, browser):
+    def test_chat_ui_elements_present(self, staging_url, staging_page):
         """
         Chat UI elements present.
 
@@ -718,25 +789,25 @@ class TestChatInterface:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
-        browser.get(staging_url)
+        staging_page.goto(staging_url)
 
-        _select_conference_and_year(browser)
+        _select_conference_and_year(staging_page)
 
         # Switch to the chat tab
-        browser.find_element(By.ID, "tab-chat").click()
-        time.sleep(0.5)
+        staging_page.locator("#tab-chat").click()
+        staging_page.wait_for_timeout(500)
 
-        assert browser.find_element(By.ID, "chat-input"), "Chat input should exist"
-        assert browser.find_element(By.ID, "chat-messages"), "Chat messages container should exist"
+        expect(staging_page.locator("#chat-input")).to_be_attached()
+        expect(staging_page.locator("#chat-messages")).to_be_attached()
 
         # Reset button (uses onclick='resetChat()')
-        reset_buttons = browser.find_elements(By.CSS_SELECTOR, "button[onclick*='resetChat']")
-        assert len(reset_buttons) > 0, "Reset button should be present"
+        reset_buttons = staging_page.locator("button[onclick*='resetChat']")
+        assert reset_buttons.count() > 0, "Reset button should be present"
 
-    def test_chat_send_message(self, staging_url, browser):
+    def test_chat_send_message(self, staging_url, staging_page):
         """
         Send a chat message.
 
@@ -749,35 +820,43 @@ class TestChatInterface:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
         query = "What papers are about machine learning?"
-        browser.get(staging_url)
+        staging_page.goto(staging_url)
 
-        _select_conference_and_year(browser)
+        _select_conference_and_year(staging_page)
 
-        browser.find_element(By.ID, "tab-chat").click()
-        time.sleep(0.5)
+        staging_page.locator("#tab-chat").click()
+        staging_page.wait_for_timeout(500)
 
-        chat_input = browser.find_element(By.ID, "chat-input")
-        chat_input.send_keys(query)
-        chat_input.send_keys(Keys.RETURN)
+        chat_input = staging_page.locator("#chat-input")
+        chat_input.fill(query)
+        chat_input.press("Enter")
 
-        wait = WebDriverWait(browser, 120)
         try:
             # Wait until there is a complete (non-loading) assistant response
-            wait.until(_has_complete_response)
-            history = _extract_chat_history(browser)
+            staging_page.wait_for_function(
+                """() => {
+                    const msgs = document.querySelectorAll(".chat-message[data-role='assistant']");
+                    if (!msgs.length) {
+                        return false;
+                    }
+                    return msgs[msgs.length - 1].querySelectorAll(".spinner").length === 0;
+                }""",
+                timeout=120000,
+            )
+            history = _extract_chat_history(staging_page)
             _print_chat_history(history, query)
-            assistant_msgs = browser.find_elements(By.CSS_SELECTOR, ".chat-message[data-role='assistant']")
-            assert len(assistant_msgs) >= 1, "Chat should display at least one assistant message"
-            assert assistant_msgs[-1].text.strip() != "", "Assistant response should not be empty"
-        except TimeoutException:
-            history = _extract_chat_history(browser)
+            assistant_msgs = staging_page.locator(".chat-message[data-role='assistant']")
+            assert assistant_msgs.count() >= 1, "Chat should display at least one assistant message"
+            assert assistant_msgs.last.inner_text().strip() != "", "Assistant response should not be empty"
+        except PlaywrightTimeoutError:
+            history = _extract_chat_history(staging_page)
             _print_chat_history(history, query)
             # LLM backend may not be available – verify input was cleared
-            val = browser.find_element(By.ID, "chat-input").get_attribute("value")
+            val = staging_page.locator("#chat-input").input_value()
             assert val == "", "Chat input should be cleared after sending"
 
 
@@ -807,7 +886,7 @@ class TestMCPToolSmokeTests:
     # Default timeout (seconds) to wait for the LLM response
     _TIMEOUT = 120
 
-    def _send_chat_query(self, staging_url, browser, query):
+    def _send_chat_query(self, staging_url, staging_page, query):
         """
         Send *query* via the chat UI and return ``(response_text, history)``.
 
@@ -823,8 +902,8 @@ class TestMCPToolSmokeTests:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         query : str
             The chat query to send.
 
@@ -835,35 +914,43 @@ class TestMCPToolSmokeTests:
             the last assistant message (empty string on timeout) and *history*
             is a list of ``(role, text)`` tuples for all visible messages.
         """
-        browser.get(staging_url)
+        staging_page.goto(staging_url)
 
-        _select_conference_and_year(browser)
+        _select_conference_and_year(staging_page)
 
-        browser.find_element(By.ID, "tab-chat").click()
-        time.sleep(0.5)
+        staging_page.locator("#tab-chat").click()
+        staging_page.wait_for_timeout(500)
 
         # Reset server-side conversation so previous test results don't
         # prevent the LLM from calling MCP tools (it might skip tool calls
         # when it already has cached context from an earlier exchange).
-        reset_buttons = browser.find_elements(By.CSS_SELECTOR, "button[onclick*='resetChat']")
-        if reset_buttons:
-            reset_buttons[0].click()
-            time.sleep(0.5)
+        reset_buttons = staging_page.locator("button[onclick*='resetChat']")
+        if reset_buttons.count():
+            reset_buttons.first.click()
+            staging_page.wait_for_timeout(500)
 
-        chat_input = browser.find_element(By.ID, "chat-input")
-        chat_input.send_keys(query)
-        chat_input.send_keys(Keys.RETURN)
+        chat_input = staging_page.locator("#chat-input")
+        chat_input.fill(query)
+        chat_input.press("Enter")
 
-        wait = WebDriverWait(browser, self._TIMEOUT)
         try:
             # Wait until the last assistant message has no spinner (response complete)
-            wait.until(_has_complete_response)
-            assistant_msgs = browser.find_elements(By.CSS_SELECTOR, ".chat-message[data-role='assistant']")
-            response_text = assistant_msgs[-1].text if assistant_msgs else ""
-        except TimeoutException:
+            staging_page.wait_for_function(
+                """() => {
+                    const msgs = document.querySelectorAll(".chat-message[data-role='assistant']");
+                    if (!msgs.length) {
+                        return false;
+                    }
+                    return msgs[msgs.length - 1].querySelectorAll(".spinner").length === 0;
+                }""",
+                timeout=self._TIMEOUT * 1000,
+            )
+            assistant_msgs = staging_page.locator(".chat-message[data-role='assistant']")
+            response_text = assistant_msgs.last.inner_text() if assistant_msgs.count() else ""
+        except PlaywrightTimeoutError:
             response_text = ""
 
-        history = _extract_chat_history(browser)
+        history = _extract_chat_history(staging_page)
         _print_chat_history(history, query)
         return response_text, history
 
@@ -871,7 +958,7 @@ class TestMCPToolSmokeTests:
     # Individual MCP tool tests
     # ------------------------------------------------------------------
 
-    def test_get_conference_topics(self, staging_url, browser):
+    def test_get_conference_topics(self, staging_url, staging_page):
         """
         MCP tool: ``get_conference_topics``.
 
@@ -884,11 +971,11 @@ class TestMCPToolSmokeTests:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
         query = "What are the main topics at NeurIPS 2025?"
-        response, _ = self._send_chat_query(staging_url, browser, query)
+        response, _ = self._send_chat_query(staging_url, staging_page, query)
         if not response:
             pytest.skip("LLM backend unavailable – no response received")
         _assert_llm_judgment(
@@ -897,7 +984,7 @@ class TestMCPToolSmokeTests:
             criteria="the response should list multiple topic names and include paper counts or representative keywords for each topic",
         )
 
-    def test_get_topic_evolution(self, staging_url, browser):
+    def test_get_topic_evolution(self, staging_url, staging_page):
         """
         MCP tool: ``get_topic_evolution``.
 
@@ -912,14 +999,14 @@ class TestMCPToolSmokeTests:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
         query = "How has research on transformers evolved at NeurIPS over the years?"
-        response, _ = self._send_chat_query(staging_url, browser, query)
+        response, _ = self._send_chat_query(staging_url, staging_page, query)
         if not response:
             pytest.skip("LLM backend unavailable – no response received")
-        chart_found, chart_description = _check_chart_rendered(browser)
+        chart_found, chart_description = _check_chart_rendered(staging_page)
         assert chart_found, f"Expected a trend chart to be rendered in chat. {chart_description}"
         _assert_llm_judgment(
             query,
@@ -930,7 +1017,7 @@ class TestMCPToolSmokeTests:
             ),
         )
 
-    def test_search_papers(self, staging_url, browser):
+    def test_search_papers(self, staging_url, staging_page):
         """
         MCP tool: ``search_papers``.
 
@@ -944,11 +1031,11 @@ class TestMCPToolSmokeTests:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
         query = "Find papers about reinforcement learning at NeurIPS 2025."
-        response, _ = self._send_chat_query(staging_url, browser, query)
+        response, _ = self._send_chat_query(staging_url, staging_page, query)
         if not response:
             pytest.skip("LLM backend unavailable – no response received")
         _assert_llm_judgment(
@@ -957,7 +1044,7 @@ class TestMCPToolSmokeTests:
             criteria="the response should briefly summarize or list multiple papers related to reinforcement learning",
         )
 
-    def test_get_paper_details(self, staging_url, browser):
+    def test_get_paper_details(self, staging_url, staging_page):
         """
         MCP tool: ``get_paper_details``.
 
@@ -970,11 +1057,11 @@ class TestMCPToolSmokeTests:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
         query = "Who are the authors of the paper titled 'Large Language Diffusion Models'?"
-        response, _ = self._send_chat_query(staging_url, browser, query)
+        response, _ = self._send_chat_query(staging_url, staging_page, query)
         if not response:
             pytest.skip("LLM backend unavailable – no response received")
         _assert_llm_judgment(
@@ -983,7 +1070,7 @@ class TestMCPToolSmokeTests:
             criteria="the response should name several authors of the paper and give a brief description.",
         )
 
-    def test_analyze_topic_relevance(self, staging_url, browser):
+    def test_analyze_topic_relevance(self, staging_url, staging_page):
         """
         MCP tool: ``analyze_topic_relevance``.
 
@@ -997,11 +1084,11 @@ class TestMCPToolSmokeTests:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
         query = "How relevant is uncertainty quantification at NeurIPS 2025?"
-        response, _ = self._send_chat_query(staging_url, browser, query)
+        response, _ = self._send_chat_query(staging_url, staging_page, query)
         if not response:
             pytest.skip("LLM backend unavailable – no response received")
         _assert_llm_judgment(
@@ -1010,7 +1097,7 @@ class TestMCPToolSmokeTests:
             criteria="the response should include a relevance score, percentage, or paper count that quantifies how relevant the topic is",
         )
 
-    def test_get_cluster_visualization(self, staging_url, browser):
+    def test_get_cluster_visualization(self, staging_url, staging_page):
         """
         MCP tool: ``get_cluster_visualization``.
 
@@ -1023,19 +1110,115 @@ class TestMCPToolSmokeTests:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
         query = "Show me a visual overview of how topics are clustered at NeurIPS."
-        response, _ = self._send_chat_query(staging_url, browser, query)
+        response, _ = self._send_chat_query(staging_url, staging_page, query)
         if not response:
             pytest.skip("LLM backend unavailable – no response received")
-        chart_found, formatted_answer = _check_chart_rendered(browser)
+        chart_found, formatted_answer = _check_chart_rendered(staging_page)
         assert chart_found, f"Expected a cluster scatter plot to be rendered in chat. {formatted_answer}"
         _assert_llm_judgment(
             query,
             response,
             criteria=("the response should describe or reference a cluster visualization. Note: " + formatted_answer),
+        )
+
+    def test_summarize_interesting_papers(self, staging_url, staging_page, interesting_paper_ratings):
+        """
+        MCP tool: ``summarize_interesting_papers``.
+
+        Example query: *"Summarize the papers I marked as interesting."*
+
+        Success criteria (LLM-judged): the response summarises the interesting
+        papers, indicates how many were marked, and mentions at least one
+        paper title, topic, keyword, or rating.
+
+        Parameters
+        ----------
+        staging_url : str
+            Base URL of the staging deployment.
+        staging_page : Page
+            Playwright page instance.
+        interesting_paper_ratings : None
+            Fixture that seeds and clears interesting-paper ratings.
+        """
+        query = "Summarize the papers I marked as interesting."
+        response, _ = self._send_chat_query(staging_url, staging_page, query)
+        if not response:
+            pytest.skip("LLM backend unavailable – no response received")
+        _assert_llm_judgment(
+            query,
+            response,
+            criteria=(
+                "the response should summarize the user's interesting paper(s), indicate how many "
+                "papers were marked, and mention at least one paper title, topic, keyword, or rating"
+            ),
+        )
+
+    def test_recommend_related_papers(self, staging_url, staging_page, interesting_paper_ratings):
+        """
+        MCP tool: ``recommend_related_papers``.
+
+        Example query: *"Based on my interesting papers, suggest other papers
+        that may interest me."*
+
+        Success criteria (LLM-judged): the response recommends at least one
+        additional paper related to the user's interesting papers.
+
+        Parameters
+        ----------
+        staging_url : str
+            Base URL of the staging deployment.
+        staging_page : Page
+            Playwright page instance.
+        interesting_paper_ratings : None
+            Fixture that seeds and clears interesting-paper ratings.
+        """
+        query = "Based on my interesting papers, suggest other papers that may interest me."
+        response, _ = self._send_chat_query(staging_url, staging_page, query)
+        if not response:
+            pytest.skip("LLM backend unavailable – no response received")
+        _assert_llm_judgment(
+            query,
+            response,
+            criteria=(
+                "the response should recommend at least one additional paper related to the "
+                "user's interesting papers; it may include a title, topic, or reason for the recommendation"
+            ),
+        )
+
+    def test_suggest_authors_to_meet(self, staging_url, staging_page, interesting_paper_ratings):
+        """
+        MCP tool: ``suggest_authors_to_meet``.
+
+        Example query: *"Who should I meet based on my interesting papers?"*
+
+        Success criteria (LLM-judged): the response names at least one author
+        working on topics similar to the user's interesting papers, ideally
+        with a session or poster location.
+
+        Parameters
+        ----------
+        staging_url : str
+            Base URL of the staging deployment.
+        staging_page : Page
+            Playwright page instance.
+        interesting_paper_ratings : None
+            Fixture that seeds and clears interesting-paper ratings.
+        """
+        query = "Who should I meet based on my interesting papers?"
+        response, _ = self._send_chat_query(staging_url, staging_page, query)
+        if not response:
+            pytest.skip("LLM backend unavailable – no response received")
+        _assert_llm_judgment(
+            query,
+            response,
+            criteria=(
+                "the response should name at least one author who works on topics similar to the "
+                "user's interesting papers, ideally with a session or poster location"
+            ),
         )
 
 
@@ -1049,7 +1232,7 @@ class TestMCPToolSmokeTests:
 class TestClusteringTab:
     """Verify the clustering tab and its visualization."""
 
-    def test_clustering_tab_exists(self, staging_url, browser):
+    def test_clustering_tab_exists(self, staging_url, staging_page):
         """
         Clustering tab exists.
 
@@ -1059,16 +1242,16 @@ class TestClusteringTab:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
-        browser.get(staging_url)
+        staging_page.goto(staging_url)
 
-        wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
-        assert clustering_tab.is_displayed(), "Clustering tab should be visible"
+        clustering_tab = staging_page.locator("#tab-clusters")
+        expect(clustering_tab).to_be_enabled(timeout=10000)
+        assert clustering_tab.is_visible(), "Clustering tab should be visible"
 
-    def test_clustering_plot_loads(self, staging_url, browser):
+    def test_clustering_plot_loads(self, staging_url, staging_page):
         """
         Clustering plot loads.
 
@@ -1079,23 +1262,22 @@ class TestClusteringTab:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
-        browser.get(staging_url)
+        staging_page.goto(staging_url)
 
-        wait = WebDriverWait(browser, 10)
-        clustering_tab = wait.until(EC.element_to_be_clickable((By.ID, "tab-clusters")))
+        clustering_tab = staging_page.locator("#tab-clusters")
+        expect(clustering_tab).to_be_enabled(timeout=10000)
         clustering_tab.click()
 
         # Wait for either the Plotly plot or a placeholder to appear
         try:
-            wait.until(EC.visibility_of_element_located((By.ID, "cluster-plot")))
-        except TimeoutException:
+            staging_page.wait_for_selector("#cluster-plot", state="visible", timeout=10000)
+        except PlaywrightTimeoutError:
             pytest.fail("Cluster plot container did not become visible")
 
-        plot_container = browser.find_element(By.ID, "cluster-plot")
-        assert plot_container.is_displayed(), "Cluster plot container should be visible"
+        assert staging_page.locator("#cluster-plot").is_visible(), "Cluster plot container should be visible"
 
 
 # ---------------------------------------------------------------------------
@@ -1108,7 +1290,7 @@ class TestClusteringTab:
 class TestAccessibilityResponsiveness:
     """Verify keyboard navigation and responsive layout."""
 
-    def test_keyboard_navigation(self, staging_url, browser):
+    def test_keyboard_navigation(self, staging_url, staging_page):
         """
         Keyboard navigation.
 
@@ -1119,21 +1301,19 @@ class TestAccessibilityResponsiveness:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
-        browser.get(staging_url)
+        staging_page.goto(staging_url)
 
-        body = browser.find_element(By.TAG_NAME, "body")
         for _ in range(10):
-            body.send_keys(Keys.TAB)
-            time.sleep(0.15)
+            staging_page.keyboard.press("Tab")
+            staging_page.wait_for_timeout(150)
 
         # The search input must be reachable
-        search_input = browser.find_element(By.ID, "search-input")
-        assert search_input is not None, "Search input should be reachable via keyboard"
+        expect(staging_page.locator("#search-input")).to_be_attached()
 
-    def test_responsive_layout(self, staging_url, browser):
+    def test_responsive_layout(self, staging_url, staging_page):
         """
         Responsive layout.
 
@@ -1144,30 +1324,30 @@ class TestAccessibilityResponsiveness:
         ----------
         staging_url : str
             Base URL of the staging deployment.
-        browser : WebDriver
-            Selenium WebDriver instance.
+        staging_page : Page
+            Playwright page instance.
         """
-        browser.get(staging_url)
+        staging_page.goto(staging_url)
 
         # Desktop
-        browser.set_window_size(1920, 1080)
-        time.sleep(0.3)
-        assert browser.find_element(By.ID, "search-input").is_displayed()
+        staging_page.set_viewport_size({"width": 1920, "height": 1080})
+        staging_page.wait_for_timeout(300)
+        assert staging_page.locator("#search-input").is_visible()
 
         # Tablet
-        browser.set_window_size(768, 1024)
-        time.sleep(0.3)
-        assert browser.find_element(By.ID, "search-input").is_displayed()
+        staging_page.set_viewport_size({"width": 768, "height": 1024})
+        staging_page.wait_for_timeout(300)
+        assert staging_page.locator("#search-input").is_visible()
 
         # Check no horizontal overflow
-        body_width = browser.execute_script("return document.body.scrollWidth")
-        viewport_width = browser.execute_script("return window.innerWidth")
+        body_width = staging_page.evaluate("document.body.scrollWidth")
+        viewport_width = staging_page.evaluate("window.innerWidth")
         assert (
             body_width <= viewport_width + 5
         ), f"Horizontal overflow detected: body={body_width}px, viewport={viewport_width}px"
 
         # Reset to default size
-        browser.set_window_size(1920, 1080)
+        staging_page.set_viewport_size({"width": 1920, "height": 1080})
 
 
 # ---------------------------------------------------------------------------
@@ -1201,7 +1381,7 @@ class TestParallelChatRequests:
         "Find papers about unsupervised learning at NeurIPS 2025.",
     ]  # type: ignore[var-annotated]
 
-    def test_concurrent_chat_api_requests(self, staging_url, browser):
+    def test_concurrent_chat_api_requests(self, staging_url, staging_page):
         """
         Concurrent RAG chat requests should all complete with HTTP 200.
 

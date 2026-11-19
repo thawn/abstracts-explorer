@@ -6,7 +6,8 @@
  */
 
 import { API_BASE } from './utils/constants.js';
-import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
+import { parseJsonResponse } from './utils/api-utils.js';
+import { escapeAttr, escapeHtml, getSelectedConference, getSelectedYears, sanitizeUrl } from './utils/dom-utils.js';
 import { showError } from './utils/ui-utils.js';
 import { renderMarkdownWithLatex, renderInlineMarkdownWithLatex } from './utils/markdown-utils.js';
 import {
@@ -29,13 +30,13 @@ export function buildUrlBadges(paper, compact = false, stopPropagation = true) {
     const size = compact ? 'px-2 py-0.5 text-xs' : 'px-2 py-1 text-xs';
     let badges = '';
     if (paper.url) {
-        badges += `<a href="${escapeHtml(paper.url)}" target="_blank"${stop} class="${size} bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 rounded-full hover:bg-purple-200 dark:hover:bg-purple-900 inline-flex items-center gap-1"><i class="fas fa-external-link-alt"></i>Paper Page</a>`;
+        badges += `<a href="${escapeAttr(sanitizeUrl(paper.url))}" target="_blank"${stop} class="${size} bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 rounded-full hover:bg-purple-200 dark:hover:bg-purple-900 inline-flex items-center gap-1"><i class="fas fa-external-link-alt"></i>Paper Page</a>`;
     }
     if (paper.paper_pdf_url) {
-        badges += `<a href="${escapeHtml(paper.paper_pdf_url)}" target="_blank"${stop} class="${size} bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full hover:bg-blue-200 dark:hover:bg-blue-900 inline-flex items-center gap-1"><i class="fas fa-file-pdf"></i>PDF</a>`;
+        badges += `<a href="${escapeAttr(sanitizeUrl(paper.paper_pdf_url))}" target="_blank"${stop} class="${size} bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-full hover:bg-blue-200 dark:hover:bg-blue-900 inline-flex items-center gap-1"><i class="fas fa-file-pdf"></i>PDF</a>`;
     }
     if (paper.poster_image_url) {
-        badges += `<a href="${escapeHtml(paper.poster_image_url)}" target="_blank"${stop} class="${size} bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 rounded-full hover:bg-green-200 dark:hover:bg-green-900 inline-flex items-center gap-1"><i class="fas fa-image"></i>Poster</a>`;
+        badges += `<a href="${escapeAttr(sanitizeUrl(paper.poster_image_url))}" target="_blank"${stop} class="${size} bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 rounded-full hover:bg-green-200 dark:hover:bg-green-900 inline-flex items-center gap-1"><i class="fas fa-image"></i>Poster</a>`;
     }
     return badges ? `<div class="flex flex-wrap gap-1 ${compact ? 'mb-2' : 'mb-3'}">${badges}</div>` : '';
 }
@@ -104,7 +105,7 @@ export function formatPaperCard(paper, options = {}) {
     if (showSearchTerm && paper.searchTerm) {
         metadata += `<span class="px-2 py-1 bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 text-xs rounded-full mr-${compact ? '1' : '2'} inline-flex items-center">
             <i class="fas fa-search mr-1"></i>${escapeHtml(paper.searchTerm)}
-            <button onclick="editPaperSearchTerm(${paper.uid}, event)" class="ml-1 text-purple-600 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-200 focus:outline-none" title="Edit search term">
+            <button onclick="editPaperSearchTerm('${escapeAttr(paper.uid)}', event)" class="ml-1 text-purple-600 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-200 focus:outline-none" title="Edit search term">
                 <i class="fas fa-edit text-xs"></i>
             </button>
         </span>`;
@@ -128,12 +129,12 @@ export function formatPaperCard(paper, options = {}) {
         const starClass = isSelected
             ? 'fas fa-star text-yellow-400 hover:text-yellow-500'
             : 'far fa-star text-gray-300 dark:text-gray-600 hover:text-yellow-400';
-        starsHtml += `<i class="${starClass} cursor-pointer text-${compact ? 'sm' : 'base'} paper-star" data-paper-id="${paper.uid}" onclick="setPaperPriority('${paper.uid}', ${i})"></i>`;
+        starsHtml += `<i class="${starClass} cursor-pointer text-${compact ? 'sm' : 'base'} paper-star" data-paper-id="${paper.uid}" onclick="setPaperPriority('${escapeAttr(paper.uid)}', ${i}, event)"></i>`;
     }
     starsHtml += '</div>';
 
     return `
-        <div ${cardId} class="${cardClasses}" onclick="showPaperDetails('${paper.uid}')">
+        <div ${cardId} class="${cardClasses}" onclick="showPaperDetails('${escapeAttr(paper.uid)}')">
             ${showNumber !== null ? `
                 <div class="flex items-start justify-between mb-1">
                     <span class="text-xs font-semibold text-purple-600">#${showNumber}</span>
@@ -169,7 +170,7 @@ export function formatPaperCard(paper, options = {}) {
 export async function showPaperDetails(paperId) {
     try {
         const response = await fetch(`${API_BASE}/api/paper/${paperId}`);
-        const paper = await response.json();
+        const paper = await parseJsonResponse(response);
 
         if (paper.error) {
             showError(paper.error);
@@ -243,7 +244,7 @@ export async function showPaperDetails(paperId) {
         document.body.appendChild(modal);
     } catch (error) {
         console.error('Error loading paper details:', error);
-        showError('Error loading paper details');
+        showError(error.message || 'Could not load paper details. Please try again.');
     }
 }
 
@@ -259,7 +260,7 @@ export function updateStarDisplay(paperId) {
     
     allStars.forEach((star) => {
         // Determine which star number this is by looking at its onclick attribute
-        const onclickMatch = star.getAttribute('onclick').match(/setPaperPriority\('[^']+',\s*(\d+)\)/);
+        const onclickMatch = star.getAttribute('onclick').match(/setPaperPriority\('[^']+',\s*(\d+)/);
         if (!onclickMatch) return;
         
         const starNumber = parseInt(onclickMatch[1], 10);
@@ -315,7 +316,7 @@ export async function updateInterestingPapersCount() {
             body: JSON.stringify({ paper_ids: paperIds })
         });
 
-        const data = await response.json();
+        const data = await parseJsonResponse(response);
 
         if (data.error || !data.papers) {
             countElement.textContent = paperIds.length;
@@ -342,9 +343,13 @@ export async function updateInterestingPapersCount() {
  * @param {string} paperId - Paper ID
  * @param {number} priority - Priority (1-5)
  */
-export function setPaperPriority(paperId, priority) {
+export function setPaperPriority(paperId, priority, evt) {
     // Stop event propagation to prevent opening paper details
-    event.stopPropagation();
+    if (evt) {
+        evt.stopPropagation();
+    } else if (typeof window !== 'undefined' && window.event) {
+        window.event.stopPropagation();
+    }
 
     setPaperPriorityInState(paperId, priority);
 

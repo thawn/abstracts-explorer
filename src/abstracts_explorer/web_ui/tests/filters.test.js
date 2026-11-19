@@ -195,6 +195,54 @@ describe('Filters Module', () => {
 
             expect(window.conferenceYearsMap).toEqual({ 'NeurIPS': [2025], 'ICLR': [2024] });
         });
+
+        it('should ignore stale responses when calls overlap', async () => {
+            const pending = [];
+            global.fetch.mockImplementation((url) => new Promise((resolve) => {
+                pending.push({ url, resolve });
+            }));
+
+            const first = loadFilterOptions();
+            const second = loadFilterOptions();
+
+            expect(pending).toHaveLength(2);
+            expect(pending[0].url).toContain('/api/filters');
+            expect(pending[1].url).toContain('/api/filters');
+
+            pending[1].resolve({
+                ok: true,
+                json: async () => ({ sessions: ['New Session'] })
+            });
+            await new Promise((resolve) => setTimeout(resolve, 0));
+
+            const availableCall = pending.find((call) => call.url.includes('/api/available-filters'));
+            expect(availableCall).toBeDefined();
+            availableCall.resolve({
+                ok: true,
+                json: async () => ({
+                    conferences: ['NeurIPS'],
+                    years: [2025],
+                    conference_years: { 'NeurIPS': [2025] },
+                    default_conference: 'NeurIPS',
+                    default_year: 2025
+                })
+            });
+
+            await second;
+
+            pending[0].resolve({
+                ok: true,
+                json: async () => ({ sessions: ['Old Session'] })
+            });
+            await first;
+
+            const sessionSelect = document.getElementById('session-filter');
+            const values = Array.from(sessionSelect.options).map((o) => o.value);
+            expect(values).toContain('New Session');
+            expect(values).not.toContain('Old Session');
+
+            global.fetch.mockReset();
+        });
     });
 
     describe('updateYearsForConference', () => {

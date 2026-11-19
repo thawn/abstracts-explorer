@@ -155,6 +155,16 @@ error when the LLM backend is unavailable).
 | `get_paper_details` | *"Who are the authors of 'Attention is All You Need'?"* | Response includes author names, URL/PDF links, and session info (if available). |
 | `analyze_topic_relevance` | *"How relevant is uncertainty quantification at NeurIPS 2025?"* | Response contains a relevance score or paper count within the embedding distance threshold. |
 | `get_cluster_visualization` | *"Show me a visual overview of NeurIPS 2025 clusters."* | Response returns or references visualization data (Plotly JSON or a rendered plot). |
+| `summarize_interesting_papers` | *"Summarize the papers I marked as interesting."* | Response states how many papers are marked and mentions at least one title, topic, keyword, or rating. |
+| `recommend_related_papers` | *"Based on my interesting papers, suggest other papers that may interest me."* | Response recommends at least one additional paper related to the interesting papers. |
+| `suggest_authors_to_meet` | *"Who should I meet based on my interesting papers?"* | Response names at least one author working on similar topics, ideally with a session or poster location. |
+
+```{note}
+The three interesting-paper smoke tests mark the first search results as
+5-star interesting papers via the web UI before sending the chat query.  The
+ratings are stored in the browser's ``localStorage`` and are forwarded
+automatically with the chat request.
+```
 
 ### 5. Clustering tab
 
@@ -172,7 +182,7 @@ error when the LLM backend is unavailable).
 
 ```{note}
 This list is a **first draft** and should evolve as the project matures. The staging
-tests are implemented as Selenium tests in
+tests are implemented as Playwright tests in
 [`tests/test_staging_e2e.py`](https://github.com/thawn/abstracts-explorer/blob/main/tests/test_staging_e2e.py)
 and can be run against any deployment URL::
 
@@ -182,3 +192,41 @@ Alternatively, set the ``STAGING_URL`` environment variable::
 
     STAGING_URL=https://staging.example.com uv run pytest tests/test_staging_e2e.py -m staging
 ```
+
+## Stress tests
+
+The stress tests in
+[`tests/test_stress.py`](https://github.com/thawn/abstracts-explorer/blob/main/tests/test_stress.py)
+measure how many parallel RAG chat requests a deployment can handle. Both tests
+send waves with increasing concurrency and stop at the first wave in which any
+request fails. The last fully successful wave is printed as the measured
+capacity.
+
+* The HTTP test sends ``/api/chat`` requests with concurrency 1, 2, 4, 8, ...
+  up to 256.
+* The browser test drives the full web UI with Playwright, using one Chromium
+  browser context per simulated user. Its concurrency goes 1, 2, 4, 8, 16, 32.
+
+Run both tests against any deployment URL::
+
+    uv run pytest tests/test_stress.py -m stress --server-url http://localhost:5000 -s
+
+Alternatively, set the ``SERVER_URL`` environment variable::
+
+    SERVER_URL=https://staging.example.com uv run pytest tests/test_stress.py -m stress -s
+
+The browser test requires Chromium::
+
+    uv run playwright install chromium
+
+Run only the browser UI stress test::
+
+    uv run pytest tests/test_stress.py -m stress --server-url http://localhost:5000 -k browser -s
+
+Target a specific MCP tool with the prompts::
+
+    uv run pytest tests/test_stress.py -m stress --server-url http://localhost:5000 --stress-mcp-tool get_conference_topics -s
+
+Alternatively, set the ``STRESS_MCP_TOOL`` environment variable. The default is
+``search_papers``. The option only shapes the prompt; the LLM still decides
+which MCP tool to call.

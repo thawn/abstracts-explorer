@@ -36,74 +36,48 @@ Example usage with plugins::
 
 Creating Custom Plugins
 ------------------------
-You can create custom downloader plugins by subclassing `DownloaderPlugin` for full control,
-or `LightweightDownloaderPlugin` for a simpler interface::
-
-    # Full schema plugin
-    from abstracts_explorer.plugins import DownloaderPlugin, register_plugin
-
-    class MyCustomPlugin(DownloaderPlugin):
-        plugin_name = "mycustom"
-        plugin_description = "My custom data source"
-        supported_years = [2024, 2025]
-
-        def download(self, year=None, output_path=None, force_download=False, **kwargs):
-            # Implement your download logic
-            return {'count': 0, 'next': None, 'previous': None, 'results': []}
-
-        def get_metadata(self):
-            return {
-                'name': self.plugin_name,
-                'description': self.plugin_description,
-                'supported_years': self.supported_years
-            }
-
-    # Register your plugin
-    register_plugin(MyCustomPlugin())
-
-Lightweight Plugin API
------------------------
-For simpler use cases, use `LightweightDownloaderPlugin` which only requires essential fields::
+Subclass ``DownloaderPlugin`` and return
+:class:`~abstracts_explorer.plugin.LightweightPaper` objects::
 
     from abstracts_explorer.plugins import (
-        LightweightDownloaderPlugin,
+        DownloaderPlugin,
         LightweightPaper,
-        register_plugin
+        register_plugin,
     )
 
-    class MyLightweightPlugin(LightweightDownloaderPlugin):
+    class MyWorkshopPlugin(DownloaderPlugin):
         plugin_name = "myworkshop"
         plugin_description = "My workshop downloader"
-        supported_years = [2025]
+        _start_year = 2025
 
-        def download(self, year=None, output_path=None, force_download=False, **kwargs):
-            # Return papers in lightweight format as LightweightPaper objects
-            papers_data = [
-                {
-                    'title': 'Paper Title',
-                    'authors': ['John Doe', 'Jane Smith'],
-                    'abstract': 'Paper abstract...',
-                    'session': 'Morning Session',
-                    'poster_position': 'A1',
-                    'year': year,
-                    'conference': 'MyWorkshop',
-                    'paper_pdf_url': 'https://example.com/paper.pdf',  # optional
-                    'url': 'https://example.com/paper',  # optional
-                    'keywords': ['ML', 'Physics'],  # optional
-                }
+        def get_url(self, year):
+            return f"https://example.com/{year}"
+
+        def _download_uncached(self, year, output_path, options):
+            return [
+                LightweightPaper(
+                    title="Paper Title",
+                    authors=["John Doe", "Jane Smith"],
+                    abstract="Paper abstract...",
+                    session="Morning Session",
+                    poster_position="A1",
+                    year=year,
+                    conference="MyWorkshop",
+                )
             ]
-
-            # Return as LightweightPaper objects
-            return [LightweightPaper(**paper) for paper in papers_data]
 
         def get_metadata(self):
             return {
-                'name': self.plugin_name,
-                'description': self.plugin_description,
-                'supported_years': self.supported_years
+                "name": self.plugin_name,
+                "description": self.plugin_description,
+                "supported_years": self.supported_years,
             }
 
-    register_plugin(MyLightweightPlugin())
+    register_plugin(MyWorkshopPlugin())
+
+The base ``download()`` template handles year resolution, validation, caching,
+and saving. HTTP-based plugins can subclass ``HTTPDownloaderPlugin`` for shared
+retry and rate-limit handling. See ``docs/plugins.md`` for details.
 """
 
 import logging
@@ -145,7 +119,6 @@ from abstracts_explorer.rag import RAGChat  # noqa: E402
 from abstracts_explorer.registry import RegistryClient, RegistryError  # noqa: E402
 from abstracts_explorer.plugins import (  # noqa: E402
     DownloaderPlugin,
-    LightweightDownloaderPlugin,
     PluginRegistry,
     register_plugin,
     get_plugin,
@@ -172,7 +145,6 @@ __all__ = [
     "RegistryClient",
     "RegistryError",
     "DownloaderPlugin",
-    "LightweightDownloaderPlugin",
     "PluginRegistry",
     "register_plugin",
     "get_plugin",

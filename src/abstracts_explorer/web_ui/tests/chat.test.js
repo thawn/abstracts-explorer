@@ -136,6 +136,21 @@ describe('Chat Module', () => {
             expect(messages.innerHTML).toContain('Chat error');
         });
 
+        it('should show a friendly message for a gateway timeout', async () => {
+            global.fetch.mockResolvedValueOnce({
+                ok: false,
+                status: 504,
+                json: async () => {
+                    throw new SyntaxError('Unexpected token <');
+                }
+            });
+
+            await sendChatMessage();
+
+            const messages = document.getElementById('chat-messages');
+            expect(messages.innerHTML).toContain('The server took too long to respond');
+        });
+
         it('should set current search term', async () => {
             State.setCurrentSearchTerm('');
             global.fetch.mockResolvedValueOnce({
@@ -699,6 +714,25 @@ describe('Chat Module', () => {
             expect(feedbackDiv.innerHTML).toContain('Thanks for your feedback');
         });
 
+        it('should show a friendly message for an HTML 503 response', async () => {
+            global.confirm.mockReturnValue(true);
+            global.fetch.mockResolvedValueOnce({
+                ok: false,
+                status: 503,
+                json: async () => {
+                    throw new SyntaxError('Unexpected token <');
+                }
+            });
+
+            const messageId = addChatMessage('Test response', 'assistant');
+            await handleChatFeedback(messageId, 'up');
+
+            const msgDiv = document.getElementById(messageId);
+            const feedbackDiv = msgDiv.querySelector('.chat-feedback-buttons');
+            expect(feedbackDiv.textContent).toContain('The server is temporarily unavailable');
+            expect(feedbackDiv.textContent).not.toContain('Unexpected token');
+        });
+
         it('should store consent in localStorage', async () => {
             global.confirm.mockReturnValue(true);
             global.fetch.mockResolvedValueOnce({
@@ -766,6 +800,8 @@ describe('Chat Module', () => {
             expect(html).toContain('papers I marked as interesting');
             // Interesting papers recommendations
             expect(html).toContain('suggest other papers');
+            // Authors to meet
+            expect(html).toContain('Who should I meet');
         });
 
         it('removeMcpToolsHint should add hide class when hint exists', () => {

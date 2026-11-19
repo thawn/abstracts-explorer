@@ -9,7 +9,7 @@ import pytest
 import requests
 from bs4 import BeautifulSoup
 
-from abstracts_explorer.plugin import LightweightDownloaderPlugin, get_failed_downloads_path
+from abstracts_explorer.plugin import DownloaderPlugin, get_failed_downloads_path
 from abstracts_explorer.plugins import AAAIDownloaderPlugin, get_plugin
 
 BASE = "https://ojs.aaai.org/index.php/AAAI"
@@ -159,7 +159,7 @@ def aaai_site(monkeypatch):
     plugin = AAAIDownloaderPlugin()
     get = Mock(side_effect=respond)
     monkeypatch.setattr(plugin._session, "get", get)
-    monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", Mock())
+    monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", Mock())
     return plugin, pages, get
 
 
@@ -167,7 +167,7 @@ def test_registration():
     """Importing the package registers the standalone lightweight plugin."""
     plugin = get_plugin("aaai")
     assert isinstance(plugin, AAAIDownloaderPlugin)
-    assert isinstance(plugin, LightweightDownloaderPlugin)
+    assert isinstance(plugin, DownloaderPlugin)
     assert plugin.conference_name == "AAAI"
 
 
@@ -180,7 +180,7 @@ def test_metadata_and_supported_years(aaai_site):
     assert metadata["supported_years"][0] == 2010
     assert "request_delay" in metadata["parameters"]
     plugin.get_metadata()
-    assert get.call_count == 1
+    assert get.call_count == 0
     assert plugin.get_url(2010) == plugin.get_url(2026) == BASE + "/issue/archive"
 
 
@@ -278,7 +278,7 @@ def test_transport_options_and_delay(aaai_site, monkeypatch):
     """Forward HTTP options and delay every proceedings request."""
     plugin, _, get = aaai_site
     sleep = Mock()
-    monkeypatch.setattr("abstracts_explorer.plugin.time.sleep", sleep)
+    monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", sleep)
     plugin.download(2026, timeout=7, verify_ssl=False, request_delay=0.25)
     for call in get.call_args_list:
         assert call.kwargs == {"timeout": 7, "verify": False}
@@ -291,11 +291,11 @@ def test_explicit_download_after_failed_availability_probe(aaai_site, monkeypatc
     plugin, _, get = aaai_site
     clock = Mock()
     clock.now.return_value = datetime(2026, 1, 1)
-    monkeypatch.setattr("abstracts_explorer.plugin.datetime", clock)
+    monkeypatch.setattr("abstracts_explorer.plugin.base.datetime", clock)
     monkeypatch.setattr("abstracts_explorer.plugins.aaai_downloader.datetime", clock)
     respond = get.side_effect
     get.side_effect = requests.Timeout("availability probe failed")
-    assert 2026 not in plugin.get_metadata()["supported_years"]
+    assert 2026 in plugin.get_metadata()["supported_years"]
     get.side_effect = respond
     get.reset_mock()
     papers = plugin.download(2026, timeout=60, verify_ssl=False, request_delay=0)

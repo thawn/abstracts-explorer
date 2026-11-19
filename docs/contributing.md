@@ -155,6 +155,15 @@ uv run pytest -s
 # Run only slow tests (requires LM Studio)
 uv run pytest -m slow
 
+# Run stress tests against a live deployment
+uv run pytest tests/test_stress.py -m stress --server-url http://localhost:5000 -s
+
+# Run only the browser UI stress test (requires Chromium)
+uv run pytest tests/test_stress.py -m stress --server-url http://localhost:5000 -k browser -s
+
+# Target a specific MCP tool with the stress-test prompts
+uv run pytest tests/test_stress.py -m stress --server-url http://localhost:5000 --stress-mcp-tool get_conference_topics -s
+
 # Run all tests including slow ones
 uv run pytest -m ""
 ```
@@ -163,6 +172,36 @@ uv run pytest -m ""
 - LM Studio running at the configured URL (default: http://localhost:1234)
 - A chat model loaded in LM Studio
 - Use `pytest -m slow` to run only slow tests
+
+**Local test configuration overrides:** The test suite reads backend settings from the
+tracked `.env.tests` file. To use a local backend or a personal token without editing
+that file, copy it to the gitignored `.env.tests.local` and edit the copy:
+
+```bash
+cp .env.tests .env.tests.local
+```
+
+When `.env.tests.local` exists, it is used instead of `.env.tests`; it must therefore
+contain all required values. Process environment variables still take precedence over
+the file.
+
+For a local LM Studio instance, change these values in `.env.tests.local`:
+
+```bash
+LLM_BACKEND_URL=http://localhost:1234
+LLM_BACKEND_AUTH_TOKEN=
+CHAT_MODEL=<local-chat-model-id>
+EMBEDDING_MODEL=<local-embedding-model-id>
+```
+
+For Blablador, set the remote URL and your personal token instead:
+
+```bash
+LLM_BACKEND_URL=https://api.helmholtz-blablador.fz-juelich.de
+LLM_BACKEND_AUTH_TOKEN=<your-token>
+```
+
+List local model identifiers with `curl http://localhost:1234/v1/models`.
 
 #### Python Test Organization
 

@@ -1,7 +1,7 @@
 """
 Unit tests for the CLI module.
 
-This module tests the command-line interface for neurips-abstracts,
+This module tests the command-line interface for abstracts-explorer,
 including the download and create-embeddings commands.
 """
 
@@ -24,6 +24,7 @@ from abstracts_explorer.cli import (
     pre_process_command,
     download_command,
     create_embeddings_command,
+    _download_single,
 )
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.plugin import LightweightPaper, get_failed_downloads_path
@@ -51,8 +52,62 @@ def patch_get_config_for_test(monkeypatch, embeddings_path):
     def get_config_with_reload(reload=False):
         return original_get_config(reload=True, env_path=env_test)
 
-    # Patch get_config in the cli module
-    monkeypatch.setattr("abstracts_explorer.cli.get_config", get_config_with_reload)
+    # Patch get_config in the cli package (each command module holds its own binding)
+    import importlib
+
+    for mod_name in [
+        "_common",
+        "clustering",
+        "data_mgmt",
+        "download",
+        "embeddings",
+        "evaluation",
+        "feedback",
+        "main",
+        "pipeline",
+        "registry",
+        "search_chat",
+        "servers",
+    ]:
+        module = importlib.import_module(f"abstracts_explorer.cli.{mod_name}")
+        if hasattr(module, "get_config"):
+            monkeypatch.setattr(module, "get_config", get_config_with_reload)
+
+
+class TestDownloadSingleOptions:
+    """Test plugin-specific option forwarding in _download_single."""
+
+    def test_agu_forwards_concurrency_and_resume_options(self, tmp_path):
+        plugin = Mock()
+        plugin.plugin_name = "agu"
+        plugin.download.return_value = []
+        args = argparse.Namespace(max_workers=12, request_delay=0.25, no_resume=True)
+
+        _download_single(plugin, 2026, tmp_path / "abstracts.json", False, args)
+
+        plugin.download.assert_called_once_with(
+            year=2026,
+            output_path=str(tmp_path / "agu_2026.json"),
+            force_download=False,
+            max_workers=12,
+            request_delay=0.25,
+            resume=False,
+        )
+
+    def test_agu_uses_plugin_defaults_without_cli_overrides(self, tmp_path):
+        plugin = Mock()
+        plugin.plugin_name = "agu"
+        plugin.download.return_value = []
+        args = argparse.Namespace(max_workers=20, request_delay=None, no_resume=False)
+
+        _download_single(plugin, 2026, tmp_path / "abstracts.json", True, args)
+
+        plugin.download.assert_called_once_with(
+            year=2026,
+            output_path=str(tmp_path / "agu_2026.json"),
+            force_download=True,
+            max_workers=20,
+        )
 
 
 class TestBuildEmbeddingsWhereFilters:
@@ -163,7 +218,7 @@ class TestCLI:
 
     def test_main_no_command(self, capsys):
         """Test main() with no command shows help."""
-        with patch.object(sys, "argv", ["neurips-abstracts"]):
+        with patch.object(sys, "argv", ["abstracts-explorer"]):
             exit_code = main()
             assert exit_code == 1
 
@@ -173,7 +228,7 @@ class TestCLI:
 
     def test_main_help(self, capsys):
         """Test main() with --help shows help."""
-        with patch.object(sys, "argv", ["neurips-abstracts", "--help"]):
+        with patch.object(sys, "argv", ["abstracts-explorer", "--help"]):
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 0
@@ -184,8 +239,8 @@ class TestCLI:
 
     def test_argcomplete_autocomplete_called(self):
         """Test that argcomplete.autocomplete is called during CLI startup."""
-        with patch.object(sys, "argv", ["neurips-abstracts"]):
-            with patch("abstracts_explorer.cli.argcomplete.autocomplete") as mock_autocomplete:
+        with patch.object(sys, "argv", ["abstracts-explorer"]):
+            with patch("abstracts_explorer.cli.main.argcomplete.autocomplete") as mock_autocomplete:
                 main()
                 assert mock_autocomplete.called, "argcomplete.autocomplete should be called in main()"
                 # Verify it received the argument parser as its first argument
@@ -227,14 +282,14 @@ class TestCLI:
         ]
         mock_plugin.download.return_value = mock_papers
 
-        with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
+        with patch("abstracts_explorer.cli.download.get_plugin") as mock_get_plugin:
             mock_get_plugin.return_value = mock_plugin
 
             with patch.object(
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "download",
                     "--conference",
                     "neurips",
@@ -285,7 +340,7 @@ class TestCLI:
             verbose=0,
         )
 
-        with patch("abstracts_explorer.cli.get_plugin", return_value=mock_plugin):
+        with patch("abstracts_explorer.cli.download.get_plugin", return_value=mock_plugin):
             rc = download_command(args, on_unit_complete=lambda c, y, n: completed.append((c, y, n)))
 
         assert rc == 0
@@ -314,7 +369,7 @@ class TestCLI:
             verbose=0,
         )
 
-        with patch("abstracts_explorer.cli.get_plugin", return_value=mock_plugin):
+        with patch("abstracts_explorer.cli.download.get_plugin", return_value=mock_plugin):
             rc = download_command(args, on_unit_complete=lambda c, y, n: completed.append((c, y, n)))
 
         assert rc == 0
@@ -343,7 +398,7 @@ class TestCLI:
             encoding="utf-8",
         )
 
-        with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
+        with patch("abstracts_explorer.cli.download.get_plugin") as mock_get_plugin:
             mock_get_plugin.return_value = mock_plugin
 
             with patch.object(
@@ -383,13 +438,13 @@ class TestCLI:
         mock_plugin.supported_years = [2025]
         mock_plugin.download.side_effect = Exception("Network error")
 
-        with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
+        with patch("abstracts_explorer.cli.download.get_plugin") as mock_get_plugin:
             mock_get_plugin.return_value = mock_plugin
 
             with patch.object(
                 sys,
                 "argv",
-                ["neurips-abstracts", "download", "--conference", "neurips", "--output", str(output_db)],
+                ["abstracts-explorer", "download", "--conference", "neurips", "--output", str(output_db)],
             ):
                 exit_code = main()
 
@@ -423,14 +478,14 @@ class TestCLI:
         mock_plugin.download.return_value = mock_papers
 
         # Mock get_plugin to return the plugin
-        with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
+        with patch("abstracts_explorer.cli.download.get_plugin") as mock_get_plugin:
             mock_get_plugin.return_value = mock_plugin
 
             with patch.object(
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "download",
                     "--conference",
                     "neurips",
@@ -487,7 +542,7 @@ class TestCLI:
             ),
         ]
 
-        with patch("abstracts_explorer.cli.get_all_plugins", return_value=[mock_plugin_a, mock_plugin_b]):
+        with patch("abstracts_explorer.cli.download.get_all_plugins", return_value=[mock_plugin_a, mock_plugin_b]):
             with patch.object(
                 sys,
                 "argv",
@@ -527,7 +582,7 @@ class TestCLI:
             ),
         ]
 
-        with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
+        with patch("abstracts_explorer.cli.download.get_plugin") as mock_get_plugin:
             mock_get_plugin.return_value = mock_plugin
 
             with patch.object(
@@ -564,7 +619,7 @@ class TestCLI:
             ),
         ]
 
-        with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
+        with patch("abstracts_explorer.cli.download.get_plugin") as mock_get_plugin:
             mock_get_plugin.return_value = mock_plugin
 
             with patch.object(
@@ -610,7 +665,7 @@ class TestCLI:
         # First call (2024) fails, second call (2025) succeeds
         mock_plugin.download.side_effect = [Exception("Network error"), papers_2025]
 
-        with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
+        with patch("abstracts_explorer.cli.download.get_plugin") as mock_get_plugin:
             mock_get_plugin.return_value = mock_plugin
 
             with patch.object(
@@ -648,7 +703,7 @@ class TestCLI:
         ]
 
         # Pass "NeurIPS" (mixed case) – should still find the lowercase plugin "neurips"
-        with patch("abstracts_explorer.cli.get_plugin") as mock_get_plugin:
+        with patch("abstracts_explorer.cli.download.get_plugin") as mock_get_plugin:
             mock_get_plugin.return_value = mock_plugin
 
             with patch.object(
@@ -676,9 +731,9 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
         with (
-            patch("abstracts_explorer.cli.download_command") as mock_download,
-            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
-            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+            patch("abstracts_explorer.cli.pipeline.download_command") as mock_download,
+            patch("abstracts_explorer.cli.pipeline.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pipeline.pre_generate_clustering_command") as mock_cluster,
         ):
 
             def fake_download(download_args, on_unit_complete=None):
@@ -722,9 +777,9 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
         with (
-            patch("abstracts_explorer.cli.download_command") as mock_download,
-            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
-            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+            patch("abstracts_explorer.cli.pipeline.download_command") as mock_download,
+            patch("abstracts_explorer.cli.pipeline.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pipeline.pre_generate_clustering_command") as mock_cluster,
         ):
             mock_download.return_value = 1  # failure
             mock_embed.return_value = 0
@@ -742,9 +797,9 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
         with (
-            patch("abstracts_explorer.cli.download_command") as mock_download,
-            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
-            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+            patch("abstracts_explorer.cli.pipeline.download_command") as mock_download,
+            patch("abstracts_explorer.cli.pipeline.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pipeline.pre_generate_clustering_command") as mock_cluster,
         ):
 
             def fake_download(download_args, on_unit_complete=None):
@@ -784,9 +839,9 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
         with (
-            patch("abstracts_explorer.cli.download_command") as mock_download,
-            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
-            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+            patch("abstracts_explorer.cli.pipeline.download_command") as mock_download,
+            patch("abstracts_explorer.cli.pipeline.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pipeline.pre_generate_clustering_command") as mock_cluster,
         ):
 
             def fake_download(download_args, on_unit_complete=None):
@@ -804,7 +859,7 @@ class TestCLI:
                 force=False,
                 verbose=0,
                 collection="custom-collection",
-                lm_studio_url="http://example.test:1234/v1",
+                backend_url="http://example.test:1234/v1",
                 model="custom-embedding-model",
                 where="year = 2024",
                 requests_per_minute=42,
@@ -815,7 +870,7 @@ class TestCLI:
         assert rc == 0
         embed_args = mock_embed.call_args[0][0]
         assert embed_args.collection == "custom-collection"
-        assert embed_args.lm_studio_url == "http://example.test:1234/v1"
+        assert embed_args.backend_url == "http://example.test:1234/v1"
         assert embed_args.model == "custom-embedding-model"
         assert embed_args.where == "year = 2024"
         assert embed_args.requests_per_minute == 42
@@ -830,9 +885,9 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
         with (
-            patch("abstracts_explorer.cli.download_command") as mock_download,
-            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
-            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+            patch("abstracts_explorer.cli.pipeline.download_command") as mock_download,
+            patch("abstracts_explorer.cli.pipeline.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pipeline.pre_generate_clustering_command") as mock_cluster,
         ):
 
             def fake_download(download_args, on_unit_complete=None):
@@ -866,9 +921,9 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
         with (
-            patch("abstracts_explorer.cli.download_command") as mock_download,
-            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
-            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+            patch("abstracts_explorer.cli.pipeline.download_command") as mock_download,
+            patch("abstracts_explorer.cli.pipeline.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pipeline.pre_generate_clustering_command") as mock_cluster,
         ):
 
             def fake_download(download_args, on_unit_complete=None):
@@ -896,9 +951,9 @@ class TestCLI:
         overlap_observed = {}
 
         with (
-            patch("abstracts_explorer.cli.download_command") as mock_download,
-            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
-            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+            patch("abstracts_explorer.cli.pipeline.download_command") as mock_download,
+            patch("abstracts_explorer.cli.pipeline.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pipeline.pre_generate_clustering_command") as mock_cluster,
         ):
 
             def fake_download(download_args, on_unit_complete=None):
@@ -940,9 +995,9 @@ class TestCLI:
         no_overlap = {}
 
         with (
-            patch("abstracts_explorer.cli.download_command") as mock_download,
-            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
-            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+            patch("abstracts_explorer.cli.pipeline.download_command") as mock_download,
+            patch("abstracts_explorer.cli.pipeline.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pipeline.pre_generate_clustering_command") as mock_cluster,
         ):
 
             def fake_download(download_args, on_unit_complete=None):
@@ -982,9 +1037,9 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
         with (
-            patch("abstracts_explorer.cli.download_command") as mock_download,
-            patch("abstracts_explorer.cli.create_embeddings_command") as mock_embed,
-            patch("abstracts_explorer.cli.pre_generate_clustering_command") as mock_cluster,
+            patch("abstracts_explorer.cli.pipeline.download_command") as mock_download,
+            patch("abstracts_explorer.cli.pipeline.create_embeddings_command") as mock_embed,
+            patch("abstracts_explorer.cli.pipeline.pre_generate_clustering_command") as mock_cluster,
         ):
 
             def fake_download(download_args, on_unit_complete=None):
@@ -1016,21 +1071,22 @@ class TestCLI:
         nonexistent_db = tmp_path / "nonexistent.db"
         set_test_db(nonexistent_db)
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.embeddings.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = False
+            mock_em.test_api_connection.return_value = False
             MockEM.return_value = mock_em
 
             with patch.object(
                 sys,
                 "argv",
-                ["neurips-abstracts", "create-embeddings"],
+                ["abstracts-explorer", "create-embeddings"],
             ):
                 exit_code = main()
 
         assert exit_code == 1
         assert nonexistent_db.exists()
+        mock_em.close.assert_called_once()
 
     def test_create_embeddings_lm_studio_not_available(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings when OpenAI API is not available."""
@@ -1058,24 +1114,25 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
         # Mock OpenAI API connection failure
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.embeddings.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = False
+            mock_em.test_api_connection.return_value = False
             MockEM.return_value = mock_em
 
             with patch.object(
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                 ],
             ):
                 exit_code = main()
 
         assert exit_code == 1
-        mock_em.verbose_api_connection_test.assert_called_once()
+        mock_em.test_api_connection.assert_called_once()
+        mock_em.close.assert_called_once()
 
     def test_create_embeddings_success(self, tmp_path, capsys, monkeypatch):
         """Test create-embeddings command completes successfully."""
@@ -1112,10 +1169,10 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
         # Mock embeddings manager
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.embeddings.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 2
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 2}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1126,7 +1183,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                 ],
             ):
@@ -1166,10 +1223,10 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
         # Mock embeddings manager
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.embeddings.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1180,7 +1237,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                     "--force",
                 ],
@@ -1192,14 +1249,14 @@ class TestCLI:
         assert "Resetting existing collection" in captured.out
 
         # Verify init was called with reset=True
-        mock_em.init.assert_called_once_with(reset=True)
+        mock_em.create_collection.assert_called_once_with(reset=True)
 
     def _create_mismatch_test_args(self):
         return argparse.Namespace(
             conference=None,
             year=None,
             collection="test",
-            lm_studio_url="http://localhost:1234/v1",
+            backend_url="http://localhost:1234/v1",
             model="new-model",
             force=False,
             where=None,
@@ -1231,10 +1288,10 @@ class TestCLI:
 
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.embeddings.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (False, "old-model", "new-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             MockEM.return_value = mock_em
@@ -1249,7 +1306,7 @@ class TestCLI:
         assert rc == 0
         captured = capsys.readouterr()
         assert "ignore-embedding-model-mismatch detected" in captured.out
-        mock_em.init.assert_called_once_with(reset=True)
+        mock_em.create_collection.assert_called_once_with(reset=True)
 
     def test_create_embeddings_non_interactive_mismatch_fails(self, tmp_path, capsys, monkeypatch):
         """In non-interactive mode a model mismatch fails instead of prompting."""
@@ -1275,10 +1332,10 @@ class TestCLI:
 
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.embeddings.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (False, "old-model", "new-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             MockEM.return_value = mock_em
 
             args = self._create_mismatch_test_args()
@@ -1314,13 +1371,13 @@ class TestCLI:
 
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.embeddings.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
-            mock_em.delete_embeddings_by_filter.return_value = 0
+            mock_em.delete_embeddings_by_ids.return_value = 0
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
@@ -1329,7 +1386,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                     "--force",
                     "--conference",
@@ -1347,9 +1404,9 @@ class TestCLI:
         assert "conference=NeurIPS" in captured.out
 
         # init must be called with reset=False (not wipe the collection)
-        mock_em.init.assert_called_once_with(reset=False)
-        # delete_embeddings_by_filter must be called with the conference
-        mock_em.delete_embeddings_by_filter.assert_called_once_with(conference="NeurIPS", year=None)
+        mock_em.create_collection.assert_called_once_with(reset=False)
+        # delete_embeddings_by_ids must be called for the resolved paper UIDs
+        mock_em.delete_embeddings_by_ids.assert_called_once()
 
     def test_create_embeddings_force_with_year_does_not_reset_collection(self, tmp_path, capsys, monkeypatch):
         """--force --year should delete only matching embeddings, not reset whole collection."""
@@ -1374,13 +1431,13 @@ class TestCLI:
 
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.embeddings.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
-            mock_em.delete_embeddings_by_filter.return_value = 2
+            mock_em.delete_embeddings_by_ids.return_value = 2
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
@@ -1389,7 +1446,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                     "--force",
                     "--year",
@@ -1406,8 +1463,8 @@ class TestCLI:
         # Reports the number removed
         assert "Removed 2" in captured.out
 
-        mock_em.init.assert_called_once_with(reset=False)
-        mock_em.delete_embeddings_by_filter.assert_called_once_with(conference=None, year=2024)
+        mock_em.create_collection.assert_called_once_with(reset=False)
+        mock_em.delete_embeddings_by_ids.assert_called_once()
 
     def test_create_embeddings_force_with_conference_and_year(self, tmp_path, capsys, monkeypatch):
         """--force --conference X --year Y deletes only that conference+year slice."""
@@ -1432,13 +1489,13 @@ class TestCLI:
 
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.embeddings.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
-            mock_em.delete_embeddings_by_filter.return_value = 5
+            mock_em.delete_embeddings_by_ids.return_value = 5
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
@@ -1447,7 +1504,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                     "--force",
                     "--conference",
@@ -1465,8 +1522,8 @@ class TestCLI:
         assert "conference=NeurIPS" in captured.out
         assert "year=2024" in captured.out
 
-        mock_em.init.assert_called_once_with(reset=False)
-        mock_em.delete_embeddings_by_filter.assert_called_once_with(conference="NeurIPS", year=2024)
+        mock_em.create_collection.assert_called_once_with(reset=False)
+        mock_em.delete_embeddings_by_ids.assert_called_once()
 
         """Test create-embeddings with --requests-per-minute flag."""
         from abstracts_explorer import DatabaseManager
@@ -1491,10 +1548,10 @@ class TestCLI:
 
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.embeddings.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1505,7 +1562,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                     "--requests-per-minute",
                     "30",
@@ -1545,10 +1602,10 @@ class TestCLI:
 
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.embeddings.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1559,7 +1616,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                     "--requests-per-minute",
                     "0",
@@ -1601,10 +1658,10 @@ class TestCLI:
         custom_model = "custom-embedding-model"
 
         # Mock embeddings manager
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.embeddings.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, custom_model)
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1615,9 +1672,9 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
-                    "--lm-studio-url",
+                    "--backend-url",
                     custom_url,
                     "--model",
                     custom_model,
@@ -1630,7 +1687,7 @@ class TestCLI:
         # Verify EmbeddingsManager was initialized with custom settings
         MockEM.assert_called_once()
         call_kwargs = MockEM.call_args.kwargs
-        assert call_kwargs["lm_studio_url"] == custom_url
+        assert call_kwargs["backend_url"] == custom_url
         assert call_kwargs["model_name"] == custom_model
 
     def test_create_embeddings_embeddings_error(self, tmp_path, capsys):
@@ -1657,17 +1714,17 @@ class TestCLI:
             db.add_papers(papers)
 
         # Mock embeddings manager to raise error
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.embeddings.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
-            mock_em.init.side_effect = EmbeddingsError("Connection failed")
+            mock_em.test_api_connection.return_value = True
+            mock_em.create_collection.side_effect = EmbeddingsError("Connection failed")
             MockEM.return_value = mock_em
 
             with patch.object(
                 sys,
                 "argv",
-                ["neurips-abstracts", "create-embeddings"],
+                ["abstracts-explorer", "create-embeddings"],
             ):
                 exit_code = main()
 
@@ -1707,10 +1764,10 @@ class TestCLI:
 
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.embeddings.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1721,7 +1778,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                     "--conference",
                     "NeurIPS",
@@ -1770,10 +1827,10 @@ class TestCLI:
 
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.embeddings.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1784,7 +1841,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                     "--year",
                     "2024",
@@ -1794,7 +1851,7 @@ class TestCLI:
 
         assert exit_code == 0
         captured = capsys.readouterr()
-        assert "Year:       2024" in captured.out
+        assert "Year: 2024" in captured.out
         assert "Filter will process 1 abstracts" in captured.out
 
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
@@ -1841,10 +1898,10 @@ class TestCLI:
 
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.embeddings.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 1
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1855,7 +1912,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                     "--conference",
                     "NeurIPS",
@@ -1868,7 +1925,7 @@ class TestCLI:
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "Conference: NeurIPS" in captured.out
-        assert "Year:       2024" in captured.out
+        assert "Year: 2024" in captured.out
         assert "Filter will process 1 abstracts" in captured.out
 
         call_kwargs = mock_em.embed_from_database.call_args.kwargs
@@ -1908,10 +1965,10 @@ class TestCLI:
 
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.embeddings.EmbeddingsManager") as MockEM:
             mock_em = Mock()
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.embed_from_database.return_value = 2
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 2}
             mock_em.__enter__ = Mock(return_value=mock_em)
@@ -1922,7 +1979,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                 ],
             ):
@@ -1945,7 +2002,7 @@ class TestCLI:
             sys,
             "argv",
             [
-                "neurips-abstracts",
+                "abstracts-explorer",
                 "search",
                 "test query",
             ],
@@ -1966,16 +2023,16 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
         # Mock embeddings manager with OpenAI API unavailable
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM:
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = False
+            mock_em.test_api_connection.return_value = False
             MockEM.return_value = mock_em
 
             with patch.object(
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "search",
                     "test query",
                 ],
@@ -1983,7 +2040,8 @@ class TestCLI:
                 exit_code = main()
 
         assert exit_code == 1
-        mock_em.verbose_api_connection_test.assert_called_once()
+        mock_em.test_api_connection.assert_called_once()
+        mock_em.close.assert_called_once()
 
     def test_search_success(self, tmp_path, capsys, monkeypatch):
         """Test search command completes successfully."""
@@ -1994,9 +2052,12 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
         # Mock embeddings manager with results
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with (
+            patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM,
+            patch("abstracts_explorer.cli.search_chat.DatabaseManager") as MockDB,
+        ):
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 100}
             mock_em.search_similar.return_value = {
                 "ids": [["123", "456"]],
@@ -2022,15 +2083,44 @@ class TestCLI:
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
+            mock_db = Mock()
+            mock_db.search.return_value = (
+                [
+                    {
+                        "uid": "123",
+                        "title": "Paper 1",
+                        "authors": ["Author 1"],
+                        "abstract": "Abstract 1",
+                        "session": "S",
+                        "year": 2025,
+                        "conference": "NeurIPS",
+                        "distance": 0.1,
+                        "similarity": 0.9,
+                    },
+                    {
+                        "uid": "456",
+                        "title": "Paper 2",
+                        "authors": ["Author 2"],
+                        "abstract": "Abstract 2",
+                        "session": "S",
+                        "year": 2025,
+                        "conference": "NeurIPS",
+                        "distance": 0.2,
+                        "similarity": 0.8,
+                    },
+                ],
+                None,
+            )
+            MockDB.return_value = mock_db
 
             with patch.object(
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "search",
                     "test query",
-                    "--n-results",
+                    "--limit",
                     "2",
                 ],
             ):
@@ -2051,9 +2141,12 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
         # Mock embeddings manager
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with (
+            patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM,
+            patch("abstracts_explorer.cli.search_chat.DatabaseManager") as MockDB,
+        ):
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 10}
             mock_em.search_similar.return_value = {
                 "ids": [["789"]],
@@ -2064,12 +2157,30 @@ class TestCLI:
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
+            mock_db = Mock()
+            mock_db.search.return_value = (
+                [
+                    {
+                        "uid": "789",
+                        "title": "Test Paper",
+                        "authors": ["Test Author"],
+                        "abstract": "This is a test abstract about machine learning.",
+                        "session": "S",
+                        "year": 2025,
+                        "conference": "NeurIPS",
+                        "distance": 0.15,
+                        "similarity": 0.85,
+                    }
+                ],
+                None,
+            )
+            MockDB.return_value = mock_db
 
             with patch.object(
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "search",
                     "machine learning",
                     "--show-abstract",
@@ -2091,9 +2202,12 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
         # Mock embeddings manager
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with (
+            patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM,
+            patch("abstracts_explorer.cli.search_chat.DatabaseManager") as MockDB,
+        ):
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 50}
             mock_em.search_similar.return_value = {
                 "ids": [["111"]],
@@ -2112,12 +2226,30 @@ class TestCLI:
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
+            mock_db = Mock()
+            mock_db.search.return_value = (
+                [
+                    {
+                        "uid": "111",
+                        "title": "Filtered Paper",
+                        "authors": ["Author"],
+                        "abstract": "Abstract",
+                        "session": "S",
+                        "year": 2025,
+                        "conference": "NeurIPS",
+                        "distance": 0.05,
+                        "similarity": 0.95,
+                    }
+                ],
+                None,
+            )
+            MockDB.return_value = mock_db
 
             with patch.object(
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "search",
                     "neural networks",
                     "--where",
@@ -2140,20 +2272,26 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
         # Mock embeddings manager with empty results
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with (
+            patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM,
+            patch("abstracts_explorer.cli.search_chat.DatabaseManager") as MockDB,
+        ):
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 100}
             mock_em.search_similar.return_value = {"ids": [[]], "distances": [[]], "metadatas": [[]]}
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
+            mock_db = Mock()
+            mock_db.search.return_value = ([], None)
+            MockDB.return_value = mock_db
 
             with patch.object(
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "search",
                     "nonexistent topic",
                 ],
@@ -2194,9 +2332,12 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
         # Mock embeddings manager
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with (
+            patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM,
+            patch("abstracts_explorer.cli.search_chat.DatabaseManager") as MockDB,
+        ):
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.search_similar.return_value = {
                 "ids": [["1"]],
@@ -2219,12 +2360,32 @@ class TestCLI:
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
+            mock_db = Mock()
+            mock_db.search.return_value = (
+                [
+                    {
+                        "uid": "1",
+                        "title": "Test Paper",
+                        "authors": ["John Doe", "Jane Smith"],
+                        "abstract": "Test abstract",
+                        "session": "Session 1",
+                        "year": 2025,
+                        "conference": "NeurIPS",
+                        "url": "https://example.com/paper/1",
+                        "poster_position": "A12",
+                        "distance": 0.1,
+                        "similarity": 0.9,
+                    }
+                ],
+                None,
+            )
+            MockDB.return_value = mock_db
 
             with patch.object(
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "search",
                     "test",
                 ],
@@ -2249,9 +2410,12 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
         # Mock embeddings manager
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with (
+            patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM,
+            patch("abstracts_explorer.cli.search_chat.DatabaseManager") as MockDB,
+        ):
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.search_similar.return_value = {
                 "ids": [["1"]],
@@ -2261,12 +2425,30 @@ class TestCLI:
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
+            mock_db = Mock()
+            mock_db.search.return_value = (
+                [
+                    {
+                        "uid": "1",
+                        "title": "Test",
+                        "authors": ["101", "102"],
+                        "abstract": "Abstract",
+                        "session": "S",
+                        "year": 2025,
+                        "conference": "NeurIPS",
+                        "distance": 0.1,
+                        "similarity": 0.9,
+                    }
+                ],
+                None,
+            )
+            MockDB.return_value = mock_db
 
             with patch.object(
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "search",
                     "test",
                 ],
@@ -2276,7 +2458,7 @@ class TestCLI:
         # Should succeed but fall back to author IDs (no author name resolution)
         assert exit_code == 0
         captured = capsys.readouterr()
-        assert "101,102" in captured.out  # Shows IDs as fallback
+        assert "101; 102" in captured.out  # Shows IDs as fallback
 
     def test_search_with_db_path_lookup_error(self, tmp_path, capsys, monkeypatch):
         """Test search command when database connection fails (no longer relevant)."""
@@ -2291,9 +2473,12 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
         # Mock embeddings manager
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with (
+            patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM,
+            patch("abstracts_explorer.cli.search_chat.DatabaseManager") as MockDB,
+        ):
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 1}
             mock_em.search_similar.return_value = {
                 "ids": [["1"]],
@@ -2303,12 +2488,30 @@ class TestCLI:
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
             MockEM.return_value = mock_em
+            mock_db = Mock()
+            mock_db.search.return_value = (
+                [
+                    {
+                        "uid": "1",
+                        "title": "Test",
+                        "authors": ["101"],
+                        "abstract": "Abstract",
+                        "session": "S",
+                        "year": 2025,
+                        "conference": "NeurIPS",
+                        "distance": 0.1,
+                        "similarity": 0.9,
+                    }
+                ],
+                None,
+            )
+            MockDB.return_value = mock_db
 
             with patch.object(
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "search",
                     "test",
                 ],
@@ -2329,9 +2532,9 @@ class TestCLI:
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
         # Mock embeddings manager to raise unexpected exception
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM:
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.get_collection_stats.side_effect = Exception("Unexpected error")
             mock_em.__enter__ = Mock(return_value=mock_em)
             mock_em.__exit__ = Mock(return_value=False)
@@ -2341,7 +2544,7 @@ class TestCLI:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "search",
                     "test",
                 ],
@@ -2549,9 +2752,10 @@ class TestCLI:
         set_test_db(tmp_path / "test.db")
 
         with (
-            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
-            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
-            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
         ):
             mock_em_class.return_value = Mock()
             mock_compute.return_value = {
@@ -2588,9 +2792,10 @@ class TestCLI:
 
         # DB returns one conference with two years
         with (
-            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
-            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
-            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -2618,11 +2823,10 @@ class TestCLI:
         # Verify fixed agglomerative/t-SNE parameters on all calls
         for call in mock_compute.call_args_list:
             kw = call[1]
-            assert kw["clustering_method"] == "agglomerative"
             assert kw["linkage"] == "ward"
             assert kw["distance_threshold"] == 150.0
-            assert kw["reduction_method"] == "tsne"
             assert kw["n_clusters"] is None
+        mock_em.close.assert_called_once()
 
     def test_pre_generate_clustering_no_conferences_in_db(self, tmp_path, capsys, monkeypatch):
         """Test pre-generate-clustering without args fails gracefully when DB is empty."""
@@ -2633,8 +2837,9 @@ class TestCLI:
         set_test_db(tmp_path / "test.db")
 
         with (
-            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
-            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
         ):
             mock_em_class.return_value = Mock()
 
@@ -2670,9 +2875,10 @@ class TestCLI:
         }
 
         with (
-            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
-            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
-            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -2715,9 +2921,10 @@ class TestCLI:
         }
 
         with (
-            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
-            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
-            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -2766,9 +2973,10 @@ class TestCLI:
         }
 
         with (
-            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
-            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
-            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -2811,9 +3019,10 @@ class TestCLI:
         set_test_db(tmp_path / "test.db")
 
         with (
-            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
-            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
-            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
         ):
             mock_em_class.return_value = Mock()
             mock_compute.side_effect = Exception("Clustering failed")
@@ -2849,9 +3058,10 @@ class TestCLI:
         }
 
         with (
-            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
-            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
-            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -2894,9 +3104,10 @@ class TestCLI:
         }
 
         with (
-            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
-            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
-            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -2938,8 +3149,8 @@ class TestCLI:
         }
 
         with (
-            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
-            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -2983,9 +3194,10 @@ class TestCLI:
 
         # DatabaseManager methods return the canonical spelling
         with (
-            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
-            patch("abstracts_explorer.cli.compute_clusters_with_cache") as mock_compute,
-            patch("abstracts_explorer.cli.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -3040,7 +3252,7 @@ class TestCLI:
             collection="test",
             model="test-model",
             embedding_model="test-embedding-model",
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             max_context=5,
             temperature=0.7,
             show_sources=False,
@@ -3069,22 +3281,23 @@ class TestCLI:
             collection="test",
             model="test-model",
             embedding_model="test-embedding-model",
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             max_context=5,
             temperature=0.7,
             show_sources=False,
             export=None,
         )
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM:
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = False
+            mock_em.test_api_connection.return_value = False
             MockEM.return_value = mock_em
 
             exit_code = chat_command(args)
 
         assert exit_code == 1
-        mock_em.verbose_api_connection_test.assert_called_once()
+        mock_em.test_api_connection.assert_called_once()
+        mock_em.close.assert_called_once()
 
     def test_chat_rag_error(self, tmp_path, capsys, monkeypatch):
         """Test chat command with RAG error."""
@@ -3107,20 +3320,20 @@ class TestCLI:
             collection="test",
             model="test-model",
             embedding_model="test-embedding-model",
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             max_context=5,
             temperature=0.7,
             show_sources=False,
             export=None,
         )
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM:
             mock_em = Mock()
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.get_collection_stats.return_value = {"name": "test", "count": 100}
             MockEM.return_value = mock_em
 
-            with patch("abstracts_explorer.cli.RAGChat") as MockRAG:
+            with patch("abstracts_explorer.cli.search_chat.RAGChat") as MockRAG:
                 MockRAG.side_effect = RAGError("Test RAG error")
 
                 exit_code = chat_command(args)
@@ -3221,6 +3434,28 @@ class TestWebUICommand:
         assert exit_code == 0
         mock_run_server.assert_called_once_with(host="127.0.0.1", port=5000, debug=False, dev=False, threads=10)
 
+    def test_web_ui_threads_default_from_config(self):
+        """The web-ui --threads default comes from the loaded config."""
+        from abstracts_explorer.cli.parsers import build_parser
+
+        config = Config()
+        config.web_ui_threads = 12
+        parser, _ = build_parser(config)
+
+        args = parser.parse_args(["web-ui"])
+        assert args.threads == 12
+
+    def test_web_ui_threads_cli_overrides_config(self):
+        """An explicit --threads value overrides the configured default."""
+        from abstracts_explorer.cli.parsers import build_parser
+
+        config = Config()
+        config.web_ui_threads = 12
+        parser, _ = build_parser(config)
+
+        args = parser.parse_args(["web-ui", "--threads", "3"])
+        assert args.threads == 3
+
     def test_web_ui_invalid_threads_returns_error(self, capsys):
         """Test that web-ui command returns exit code 1 when threads < 1."""
         from abstracts_explorer.cli import web_ui_command
@@ -3247,8 +3482,8 @@ class TestMainDispatch:
         # Set EMBEDDING_DB and patch config reload
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
-        with patch.object(sys, "argv", ["neurips-abstracts", "chat"]):
-            with patch("abstracts_explorer.cli.chat_command") as mock_chat:
+        with patch.object(sys, "argv", ["abstracts-explorer", "chat"]):
+            with patch("abstracts_explorer.cli.main.chat_command") as mock_chat:
                 mock_chat.return_value = 0
                 exit_code = main()
 
@@ -3257,8 +3492,8 @@ class TestMainDispatch:
 
     def test_main_web_ui_command(self):
         """Test main() dispatches web-ui command."""
-        with patch.object(sys, "argv", ["neurips-abstracts", "web-ui"]):
-            with patch("abstracts_explorer.cli.web_ui_command") as mock_web:
+        with patch.object(sys, "argv", ["abstracts-explorer", "web-ui"]):
+            with patch("abstracts_explorer.cli.main.web_ui_command") as mock_web:
                 mock_web.return_value = 0
                 exit_code = main()
 
@@ -3283,7 +3518,7 @@ class TestCLISearchErrorHandling:
     """Test search command error handling paths."""
 
     def test_search_command_where_parse_warning(self, tmp_path, capsys, monkeypatch):
-        """Test warning when where clause cannot be parsed (lines 229-230)."""
+        """An invalid --where clause aborts instead of running an unfiltered search."""
         import argparse
 
         embeddings_path = tmp_path / "chroma_db"
@@ -3295,16 +3530,16 @@ class TestCLISearchErrorHandling:
         args = argparse.Namespace(
             query="test",
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             collection="test_collection",
-            n_results=5,
+            limit=5,
             show_abstract=False,
             where="invalid_no_equals_sign",  # Will fail parsing - no = sign
             db_path=None,
         )
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
@@ -3317,7 +3552,7 @@ class TestCLISearchErrorHandling:
 
             exit_code = search_command(args)
 
-        assert exit_code == 0  # Should still succeed
+        assert exit_code == 1
         captured = capsys.readouterr()
         # Should show warning about filter parsing
         assert "Warning" in captured.err or "Could not parse" in captured.err
@@ -3335,16 +3570,16 @@ class TestCLISearchErrorHandling:
         args = argparse.Namespace(
             query="test",
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             collection="test_collection",
-            n_results=5,
+            limit=5,
             show_abstract=False,
             where=None,
             db_path=None,
         )
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM:
             # Make EmbeddingsManager raise unexpected exception
             MockEM.side_effect = RuntimeError("Unexpected error")
 
@@ -3387,10 +3622,10 @@ class TestCLIEmbeddingsProgressAndStats:
         # Set EMBEDDING_DB and patch config reload
         patch_get_config_for_test(monkeypatch, tmp_path / "chroma_db")
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.embeddings.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.check_model_compatibility.return_value = (True, None, "test-model")
-            mock_em.verbose_api_connection_test.return_value = True
+            mock_em.test_api_connection.return_value = True
             mock_em.collection_exists.return_value = False
 
             # Mock embed_from_database to simulate progress callbacks
@@ -3413,7 +3648,7 @@ class TestCLIEmbeddingsProgressAndStats:
                 sys,
                 "argv",
                 [
-                    "neurips-abstracts",
+                    "abstracts-explorer",
                     "create-embeddings",
                 ],
             ):
@@ -3443,7 +3678,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3453,13 +3688,13 @@ class TestCLIChatInteractiveLoop:
             export=None,
         )
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
             mock_em.get_collection_stats.return_value = {"name": "test_collection", "count": 100}
 
-            with patch("abstracts_explorer.cli.RAGChat"):
+            with patch("abstracts_explorer.cli.search_chat.RAGChat"):
 
                 # Simulate: empty input, then exit
                 with patch("builtins.input", side_effect=["", "   ", "exit"]):
@@ -3481,7 +3716,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3491,13 +3726,13 @@ class TestCLIChatInteractiveLoop:
             export=None,
         )
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
             mock_em.get_collection_stats.return_value = {"name": "test_collection", "count": 100}
 
-            with patch("abstracts_explorer.cli.RAGChat"):
+            with patch("abstracts_explorer.cli.search_chat.RAGChat"):
                 # Test 'quit' command
                 with patch("builtins.input", side_effect=["quit"]):
                     exit_code = chat_command(args)
@@ -3519,7 +3754,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3529,13 +3764,13 @@ class TestCLIChatInteractiveLoop:
             export=None,
         )
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
             mock_em.get_collection_stats.return_value = {"name": "test_collection", "count": 100}
 
-            with patch("abstracts_explorer.cli.RAGChat"):
+            with patch("abstracts_explorer.cli.search_chat.RAGChat"):
                 # Test 'q' command
                 with patch("builtins.input", side_effect=["q"]):
                     exit_code = chat_command(args)
@@ -3557,7 +3792,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3567,13 +3802,13 @@ class TestCLIChatInteractiveLoop:
             export=None,
         )
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
             mock_em.get_collection_stats.return_value = {"name": "test_collection", "count": 100}
 
-            with patch("abstracts_explorer.cli.RAGChat") as MockRAG:
+            with patch("abstracts_explorer.cli.search_chat.RAGChat") as MockRAG:
                 mock_rag = MockRAG.return_value
 
                 # Test reset then exit
@@ -3598,7 +3833,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3608,13 +3843,13 @@ class TestCLIChatInteractiveLoop:
             export=None,
         )
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
             mock_em.get_collection_stats.return_value = {"name": "test_collection", "count": 100}
 
-            with patch("abstracts_explorer.cli.RAGChat"):
+            with patch("abstracts_explorer.cli.search_chat.RAGChat"):
                 # Test help then exit
                 with patch("builtins.input", side_effect=["help", "exit"]):
                     exit_code = chat_command(args)
@@ -3638,7 +3873,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3648,13 +3883,13 @@ class TestCLIChatInteractiveLoop:
             export=None,
         )
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
             mock_em.get_collection_stats.return_value = {"name": "test_collection", "count": 100}
 
-            with patch("abstracts_explorer.cli.RAGChat") as MockRAG:
+            with patch("abstracts_explorer.cli.search_chat.RAGChat") as MockRAG:
                 mock_rag = MockRAG.return_value
                 mock_rag.query.return_value = {
                     "response": "Test response about transformers",
@@ -3691,7 +3926,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3701,13 +3936,13 @@ class TestCLIChatInteractiveLoop:
             export=str(export_file),  # Export enabled
         )
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
             mock_em.get_collection_stats.return_value = {"name": "test_collection", "count": 100}
 
-            with patch("abstracts_explorer.cli.RAGChat") as MockRAG:
+            with patch("abstracts_explorer.cli.search_chat.RAGChat") as MockRAG:
                 mock_rag = MockRAG.return_value
 
                 # Exit immediately
@@ -3732,7 +3967,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3742,13 +3977,13 @@ class TestCLIChatInteractiveLoop:
             export=None,
         )
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
             mock_em.get_collection_stats.return_value = {"name": "test_collection", "count": 100}
 
-            with patch("abstracts_explorer.cli.RAGChat"):
+            with patch("abstracts_explorer.cli.search_chat.RAGChat"):
                 # Simulate Ctrl+C
                 with patch("builtins.input", side_effect=KeyboardInterrupt()):
                     exit_code = chat_command(args)
@@ -3770,7 +4005,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            lm_studio_url="http://localhost:1234",
+            backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3780,13 +4015,13 @@ class TestCLIChatInteractiveLoop:
             export=None,
         )
 
-        with patch("abstracts_explorer.cli.EmbeddingsManager") as MockEM:
+        with patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM:
             mock_em = MockEM.return_value
             mock_em.connect.return_value = None
             mock_em.create_collection.return_value = None
             mock_em.get_collection_stats.return_value = {"name": "test_collection", "count": 100}
 
-            with patch("abstracts_explorer.cli.RAGChat"):
+            with patch("abstracts_explorer.cli.search_chat.RAGChat"):
                 # Simulate EOF
                 with patch("builtins.input", side_effect=EOFError()):
                     exit_code = chat_command(args)
@@ -3844,7 +4079,7 @@ class TestDeleteDataCommand:
                 "argv",
                 ["abstracts-explorer", "delete-data", "--conference", "NeurIPS", "--year", "2024"],
             ),
-            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.data_mgmt.EmbeddingsManager") as mock_em_class,
             patch("builtins.input", return_value="no"),
         ):
             mock_em = Mock()
@@ -3895,11 +4130,11 @@ class TestDeleteDataCommand:
                     "--yes",
                 ],
             ),
-            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.data_mgmt.EmbeddingsManager") as mock_em_class,
         ):
             mock_em = Mock()
             mock_em.collection.get.return_value = {"ids": ["emb1", "emb2"]}
-            mock_em.delete_embeddings_by_filter.return_value = 2
+            mock_em.delete_embeddings_by_ids.return_value = 2
             mock_em_class.return_value = mock_em
 
             exit_code = main()
@@ -3909,12 +4144,12 @@ class TestDeleteDataCommand:
         assert "Deleted" in captured.out
         assert "paper" in captured.out.lower()
 
-        # Verify delete_embeddings_by_filter was called with correct parameters
-        mock_em.delete_embeddings_by_filter.assert_called_once_with(conference="NeurIPS", year=2024)
+        # Verify delete_embeddings_by_ids was called
+        mock_em.delete_embeddings_by_ids.assert_called_once()
 
         # Verify papers deleted from DB
         with DatabaseManager() as db:
-            papers = db.search_papers(conferences=["NeurIPS"], years=[2024], limit=0)
+            papers = db.keyword_search(conferences=["NeurIPS"], years=[2024], limit=0)
             assert len(papers) == 0
 
             # Verify clustering cache deleted
@@ -3945,7 +4180,7 @@ class TestDeleteDataCommand:
                     "--yes",
                 ],
             ),
-            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.data_mgmt.EmbeddingsManager") as mock_em_class,
         ):
             mock_em = Mock()
             mock_em.collection.get.return_value = {"ids": []}
@@ -3974,12 +4209,12 @@ class TestDeleteDataCommand:
                 "argv",
                 ["abstracts-explorer", "delete-data", "--conference", "ICLR", "--year", "2023"],
             ),
-            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.data_mgmt.EmbeddingsManager") as mock_em_class,
             patch("builtins.input", return_value="yes"),
         ):
             mock_em = Mock()
             mock_em.collection.get.return_value = {"ids": []}
-            mock_em.delete_embeddings_by_filter.return_value = 0
+            mock_em.delete_embeddings_by_ids.return_value = 0
             mock_em_class.return_value = mock_em
 
             exit_code = main()
@@ -4013,7 +4248,7 @@ class TestDeleteDataCommand:
                     "2025",
                 ],
             ),
-            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.data_mgmt.EmbeddingsManager") as mock_em_class,
             patch("builtins.input", return_value="no"),
         ):
             mock_em = Mock()
@@ -4054,11 +4289,11 @@ class TestDeleteDataCommand:
                     "--yes",
                 ],
             ),
-            patch("abstracts_explorer.cli.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.data_mgmt.EmbeddingsManager") as mock_em_class,
         ):
             mock_em = Mock()
             mock_em.collection.get.return_value = {"ids": ["e1"]}
-            mock_em.delete_embeddings_by_filter.side_effect = Exception("ChromaDB failure")
+            mock_em.delete_embeddings_by_ids.side_effect = Exception("ChromaDB failure")
             mock_em_class.return_value = mock_em
 
             exit_code = main()

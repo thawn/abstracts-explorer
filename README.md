@@ -12,7 +12,7 @@ Open source · Apache-2.0 · runs locally or on your institute's server.
 
 | Layer          | What it does                                                                               |
 | -------------- | ------------------------------------------------------------------------------------------ |
-| **Data**       | Downloads & stores abstracts from 8 conferences (NeurIPS · ICLR · ICML · CHI · HAICON · …) |
+| **Data**       | Downloads & stores abstracts from 11 conferences (NeurIPS · ICLR · ICML · CHI · AGU · IGARSS · …) |
 | **Embeddings** | Converts abstracts to vectors via an LLM embedding model (Blablador / LM Studio)           |
 | **Retrieval**  | Semantic (cosine similarity) search                                                        |
 | **Reasoning**  | RAG chat: the LLM reads relevant abstracts, then answers with citations                    |
@@ -44,6 +44,7 @@ The LLM picks the right tool automatically from your plain-English question.
 | `get_paper_details`         | "Who wrote that paper? Where is the poster?"           |
 | `summarize_interesting_papers` | "Summarize the papers I marked as interesting for ICLR'26" |
 | `recommend_related_papers`  | "Suggest other papers based on my interesting papers"  |
+| `suggest_authors_to_meet`   | "Who should I meet based on my interesting papers?"    |
 
 ## Quick Start
 

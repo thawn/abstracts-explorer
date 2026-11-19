@@ -6,18 +6,18 @@ orphan: true
 
 Quick reference for the Abstracts Explorer plugin APIs.
 
-## Lightweight API
+## DownloaderPlugin
 
 ### Minimal Example
 
 ```python
 from abstracts_explorer.plugins import (
-    LightweightDownloaderPlugin,
-    convert_lightweight_to_neurips_schema,
+    DownloaderPlugin,
+    convert_to_lightweight_schema,
     register_plugin
 )
 
-class MyPlugin(LightweightDownloaderPlugin):
+class MyPlugin(DownloaderPlugin):
     plugin_name = "myplugin"
     plugin_description = "My Plugin"
     supported_years = [2025]
@@ -35,7 +35,7 @@ class MyPlugin(LightweightDownloaderPlugin):
             }
         ]
         
-        return convert_lightweight_to_neurips_schema(
+        return convert_to_lightweight_schema(
             papers,
             session_default=f'My Event {year}',
             event_type='Workshop Poster',
@@ -98,7 +98,7 @@ _register()
 ### Converter Function
 
 ```python
-convert_lightweight_to_neurips_schema(
+convert_to_lightweight_schema(
     papers,                          # List of lightweight papers
     session_default='My Event 2025', # Default session name
     event_type='Workshop Poster',    # Default event type
@@ -182,13 +182,13 @@ abstracts-explorer download --list-plugins
 
 ```bash
 # Basic
-abstracts-explorer download --plugin myplugin --year 2025 --db-path output.db
+abstracts-explorer download --conference myplugin --year 2025
 
 # With options
 abstracts-explorer download \
-    --plugin ml4ps \
+    --conference ml4ps \
     --year 2025 \
-    --db-path data/ml4ps_2025.db \
+    \
     --fetch-abstracts \
     --max-workers 10
 ```
@@ -213,7 +213,7 @@ def download(self, year=None, **kwargs):
             # ...
         })
     
-    return convert_lightweight_to_neurips_schema(papers, ...)
+    return convert_to_lightweight_schema(papers, ...)
 ```
 
 ### Error Handling

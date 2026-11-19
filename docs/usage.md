@@ -13,7 +13,7 @@ Download papers for a specific conference and year:
 uv run abstracts-explorer download --year 2025
 
 # Download from a specific conference using a plugin
-uv run abstracts-explorer download --plugin iclr --year 2025
+uv run abstracts-explorer download --conference iclr --year 2025
 ```
 
 Alternatively, download pre-built data from a registry (no API access or LLM backend required):
@@ -25,9 +25,10 @@ uv run abstracts-explorer registry download \
 ```
 
 Options:
-- `--year`: Conference year (e.g., 2025)
-- `--db-path`: Path to SQLite database (will be created if doesn't exist)
+- `--conference`: Conference to download (default: all conferences)
+- `--year`: Conference year (e.g., 2025; default: all available years)
 - `--force`: Force re-download even if papers already exist
+- `--list-plugins`: List available downloader plugins and exit
 
 ### 2. Create Embeddings
 
@@ -38,10 +39,12 @@ uv run abstracts-explorer create-embeddings
 ```
 
 Options:
-- `--db-path`: Path to SQLite database with papers
-- `--embedding-db-path`: Path to ChromaDB database (default: from config)
-- `--collection-name`: Collection name in ChromaDB (default: from config)
-- `--force`: Recreate embeddings even if they exist
+- `--conference`: Only embed papers from this conference
+- `--year`: Only embed papers from this year
+- `--collection`: Collection name in ChromaDB (default: `papers`)
+- `--force`: Reset collection if it already exists
+- `--ignore-embedding-model-mismatch`: Recreate embeddings after an
+  embedding model mismatch without prompting
 
 ### 3. Search Papers
 
@@ -87,13 +90,13 @@ db = DatabaseManager()
 papers = db.get_paper(limit=0)
 
 # Keyword search across title, abstract, and keywords
-results = db.search_papers(keyword="transformer")
+results = db.keyword_search(keyword="transformer")
 
 # Field-specific substring search
-title_matches = db.search_papers(field_filters={"title": "attention"})
+title_matches = db.keyword_search(field_filters={"title": "attention"})
 
 # Filter by year
-papers_2025 = db.search_papers(years=[2025])
+papers_2025 = db.keyword_search(years=[2025])
 
 # Authors are stored on the paper record as a semicolon-separated string
 authors = papers[0]["authors"] if papers else None
@@ -134,16 +137,23 @@ em = EmbeddingsManager(
 )
 
 # Create embeddings from database
-em.create_embeddings_from_db()
+em.embed_from_database()
 
 # Search by semantic similarity
-results = em.search("transformer attention mechanism", n_results=5)
+from abstracts_explorer.embeddings import QueryEmbedding
+
+query = QueryEmbedding("transformer attention mechanism", em)
+results = em.search_similar(query, limit=5)
 
 # Search with metadata filter
-results = em.search(
-    "deep learning",
-    n_results=10,
-    where={"year": 2025}
+from abstracts_explorer.database import DatabaseManager
+
+db = DatabaseManager()
+uids = db.resolve_paper_uids(years=[2025])
+results = em.search_similar(
+    QueryEmbedding("deep learning", em),
+    limit=10,
+    ids=uids,
 )
 ```
 
@@ -158,8 +168,8 @@ em = EmbeddingsManager()
 
 chat = RAGChat(
     em,
-    lm_studio_url="http://localhost:1234",
-    model="gemma-3-4b-it-qat"
+    backend_url="http://localhost:1234",
+    model="diffbot-small-xl-2508"
 )
 
 # Ask a question
@@ -167,7 +177,7 @@ response = chat.query("What are the latest developments in transformers?")
 print(response)
 
 # Continue conversation
-response = chat.chat("Tell me more about the first paper")
+response = chat.query("Tell me more about the first paper")
 print(response)
 
 # Export conversation
@@ -198,7 +208,7 @@ Use a custom configuration file:
 ```python
 import os
 os.environ['PAPER_DB'] = 'custom_papers.db'
-os.environ['EMBEDDING_DB_PATH'] = 'custom_embeddings'
+os.environ['EMBEDDING_DB'] = 'custom_embeddings'
 
 from abstracts_explorer.config import get_config
 config = get_config()
@@ -212,7 +222,7 @@ from abstracts_explorer.database import DatabaseManager
 db = DatabaseManager()
 
 # Complex search with multiple filters
-papers = db.search_papers(
+papers = db.keyword_search(
     title="learning",
     abstract="neural network",
     year=2025,

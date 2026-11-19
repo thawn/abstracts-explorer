@@ -37,8 +37,8 @@ em = EmbeddingsManager()
 # Initialize RAG chat
 chat = RAGChat(
     embeddings_manager=em,
-    lm_studio_url="http://localhost:1234",
-    model="gemma-3-4b-it-qat"
+    backend_url="http://localhost:1234",
+    model="diffbot-small-xl-2508"
 )
 ```
 
@@ -61,10 +61,10 @@ response1 = chat.query("Tell me about vision transformers")
 print(response1)
 
 # Continue the conversation (maintains context)
-response2 = chat.chat("What are their main advantages?")
+response2 = chat.query("What are their main advantages?")
 print(response2)
 
-response3 = chat.chat("Can you explain the first paper in more detail?")
+response3 = chat.query("Can you explain the first paper in more detail?")
 print(response3)
 ```
 
@@ -74,7 +74,7 @@ print(response3)
 # Query with custom settings
 response = chat.query(
     query="Explain self-attention mechanisms",
-    n_results=10,              # Use 10 papers for context
+    limit=10,              # Use 10 papers for context
     temperature=0.8,           # More creative responses
     max_tokens=2000,           # Longer responses
     system_prompt="You are a helpful research assistant."
@@ -97,6 +97,7 @@ MCP (Model Context Protocol) tools are specialized functions that the LLM can ca
 6. **get_paper_details** - Look up authors, links, sessions, and other metadata
 7. **summarize_interesting_papers** - Summarize the papers the user marked as interesting
 8. **recommend_related_papers** - Suggest related papers based on the user's interesting papers
+9. **suggest_authors_to_meet** - Suggest authors to meet based on the user's interesting papers
 
 ### How It Works
 
@@ -138,7 +139,7 @@ response = chat.query(
     paper_priorities={"paper-uid": {"priority": 5, "searchTerm": "llms"}},
 )
 print(response)
-# The LLM calls summarize_interesting_papers and recommend_related_papers
+# The LLM calls summarize_interesting_papers, recommend_related_papers, and suggest_authors_to_meet
 ```
 
 ### Tool Selection
@@ -150,6 +151,7 @@ The LLM automatically decides which tool(s) to use based on the question:
 - **Questions about "recent", "latest", "new"** → Uses `search_papers`
 - **Questions about "papers I marked/starred/rated as interesting"** → Uses `summarize_interesting_papers`
 - **Questions about suggestions/recommendations based on interesting papers** → Uses `recommend_related_papers`
+- **Questions about who to meet, talk to, or network with** → Uses `suggest_authors_to_meet`
 - **Questions about specific papers** → Uses standard RAG (no tools)
 
 ### Disabling MCP Tools
@@ -237,22 +239,14 @@ If your LLM doesn't support function calling, disable MCP tools:
 chat = RAGChat(em, db, enable_mcp_tools=False)
 ```
 
-### Metadata Filtering
+### Conference and Year Context
 
 ```python
-# Query papers from specific year
+# Query papers from a specific conference and years
 response = chat.query(
-    "What are the main themes in 2025?",
-    where={"year": 2025}
-)
-
-# Multiple filters
-response = chat.query(
-    "Explain recent attention mechanisms",
-    where={
-        "year": {"$gte": 2024},
-    },
-    n_results=5
+    "What are the main themes?",
+    conferences=["NeurIPS"],
+    years=[2025],
 )
 ```
 
@@ -285,7 +279,7 @@ Exported conversations include:
 ```python
 {
     "timestamp": "2025-11-26T10:00:00",
-    "model": "gemma-3-4b-it-qat",
+    "model": "diffbot-small-xl-2508",
     "messages": [
         {
             "role": "user",
@@ -321,7 +315,7 @@ The module is designed for LM Studio but works with any OpenAI-compatible API:
 # With authentication token
 chat = RAGChat(
     em,
-    lm_studio_url="https://api.example.com",
+    backend_url="https://api.example.com",
     model="gpt-4",
     auth_token="sk-..."
 )
@@ -333,7 +327,7 @@ chat = RAGChat(
 # Different backend URL
 chat = RAGChat(
     em,
-    lm_studio_url="http://localhost:8080",
+    backend_url="http://localhost:8080",
     model="custom-model"
 )
 ```
@@ -399,7 +393,7 @@ except Exception as e:
 
 Factors affecting response time:
 
-- Number of papers retrieved (n_results)
+- Number of papers retrieved (limit)
 - LLM model size and speed
 - Token generation length (max_tokens)
 - Network latency to LLM backend
@@ -414,21 +408,21 @@ Factors affecting response time:
 
 ```python
 # Faster responses
-chat.query(query, n_results=3, max_tokens=500)
+chat.query(query, limit=3, max_tokens=500)
 
 # More comprehensive but slower
-chat.query(query, n_results=10, max_tokens=2000)
+chat.query(query, limit=10, max_tokens=2000)
 
 # Balance quality and speed
-chat.query(query, n_results=5, max_tokens=1000)
+chat.query(query, limit=5, max_tokens=1000)
 ```
 
 ## Best Practices
 
 1. **Start specific** - Focused queries get better results
-2. **Use filters** - Narrow search space with metadata filters
+2. **Use filters** - Provide conference/year context to narrow results
 3. **Manage history** - Reset conversation when changing topics
 4. **Export important conversations** - Save valuable interactions
-5. **Adjust parameters** - Tune n_results and temperature for your needs
+5. **Adjust parameters** - Tune limit and temperature for your needs
 6. **Monitor backend** - Ensure LM Studio/LLM is running and responsive
 7. **Handle errors** - Wrap calls in try-except for production use

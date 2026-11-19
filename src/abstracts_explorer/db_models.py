@@ -6,8 +6,6 @@ This module defines SQLAlchemy ORM models for the database tables.
 These models support both SQLite and PostgreSQL backends.
 """
 
-from datetime import datetime, timezone
-
 from sqlalchemy import (
     Column,
     Float,
@@ -19,11 +17,44 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase
 
+from abstracts_explorer.utils.time_utils import utcnow
+
 
 class Base(DeclarativeBase):
     """Base class for all database models."""
 
     pass
+
+
+def timestamp_column(*, onupdate: bool = False) -> Column:
+    """
+    Build a timezone-aware UTC timestamp column.
+
+    All timestamp columns in this module share the same definition:
+    ``DateTime(timezone=True)``, not nullable, defaulting to the current UTC
+    time on the client side and ``now()`` on the server side.  When
+    *onupdate* is true, the value is also refreshed on every UPDATE.
+
+    Parameters
+    ----------
+    onupdate : bool, optional
+        Refresh the timestamp on every update, by default False.
+
+    Returns
+    -------
+    Column
+        Configured timestamp column.
+    """
+    kwargs: dict = {}
+    if onupdate:
+        kwargs["onupdate"] = utcnow
+    return Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utcnow,
+        server_default=func.now(),
+        **kwargs,
+    )
 
 
 class Paper(Base):
@@ -91,9 +122,7 @@ class Paper(Base):
     award = Column(String, nullable=True)
     year = Column(Integer, nullable=True, index=True)
     conference = Column(String, nullable=True, index=True)
-    created_at = Column(
-        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now()
-    )
+    created_at = timestamp_column()
 
     def __repr__(self) -> str:
         """String representation of Paper."""
@@ -122,16 +151,8 @@ class EmbeddingsMetadata(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     embedding_model = Column(String, nullable=False)
-    created_at = Column(
-        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now()
-    )
-    updated_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-        server_default=func.now(),
-    )
+    created_at = timestamp_column()
+    updated_at = timestamp_column(onupdate=True)
 
     def __repr__(self) -> str:
         """String representation of EmbeddingsMetadata."""
@@ -186,9 +207,7 @@ class ClusteringCache(Base):
     n_clusters = Column(Integer, nullable=True)
     clustering_params = Column(Text, nullable=True)
     results_json = Column(Text, nullable=False)
-    created_at = Column(
-        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now()
-    )
+    created_at = timestamp_column()
 
     def __repr__(self) -> str:
         """String representation of ClusteringCache."""
@@ -227,12 +246,7 @@ class HierarchicalLabelCache(Base):
     embedding_model = Column(String, nullable=False, index=True)
     linkage = Column(String, nullable=False, default="ward")
     labels_json = Column(Text, nullable=False)
-    created_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        server_default=func.now(),
-    )
+    created_at = timestamp_column()
 
     def __repr__(self) -> str:
         """String representation of HierarchicalLabelCache."""
@@ -266,9 +280,7 @@ class ValidationData(Base):
     paper_uid = Column(String(16), nullable=False, index=True)
     priority = Column(Integer, nullable=False)
     search_term = Column(String, nullable=True)
-    donated_at = Column(
-        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now()
-    )
+    donated_at = timestamp_column()
 
     def __repr__(self) -> str:
         """String representation of ValidationData."""
@@ -299,9 +311,7 @@ class ChatDonation(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     rating = Column(String, nullable=False)
     transcript = Column(Text, nullable=False)
-    donated_at = Column(
-        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now()
-    )
+    donated_at = timestamp_column()
 
     def __repr__(self) -> str:
         """String representation of ChatDonation."""
@@ -353,19 +363,8 @@ class EvalQAPair(Base):
     tool_name = Column(String, nullable=True, index=True)
     verified = Column(Integer, nullable=False, default=0)
     source_info = Column(Text, nullable=True)
-    created_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        server_default=func.now(),
-    )
-    updated_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-        server_default=func.now(),
-    )
+    created_at = timestamp_column()
+    updated_at = timestamp_column(onupdate=True)
 
     def __repr__(self) -> str:
         """String representation of EvalQAPair."""
@@ -420,12 +419,7 @@ class EvalResult(Base):
     latency_ms = Column(Integer, nullable=True)
     error = Column(Text, nullable=True)
     judge_reasoning = Column(Text, nullable=True)
-    created_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        server_default=func.now(),
-    )
+    created_at = timestamp_column()
 
     def __repr__(self) -> str:
         """String representation of EvalResult."""
