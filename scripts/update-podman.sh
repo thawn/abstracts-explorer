@@ -35,7 +35,7 @@ podman pull docker.io/chromadb/chroma:latest
 
 # Pull the reverse-proxy image (whichever variant is active)
 if systemctl --user is-active --quiet abstracts-nginx.service 2>/dev/null; then
-    podman pull docker.io/nginxinc/nginx-unprivileged:stable-alpine
+    podman pull docker.io/nginx/nginx-unprivileged:stable-alpine
     PROXY_UNIT="abstracts-nginx"
 elif systemctl --user is-active --quiet abstracts-caddy.service 2>/dev/null; then
     podman pull docker.io/caddy:alpine
