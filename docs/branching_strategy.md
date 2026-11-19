@@ -192,3 +192,41 @@ Alternatively, set the ``STAGING_URL`` environment variable::
 
     STAGING_URL=https://staging.example.com uv run pytest tests/test_staging_e2e.py -m staging
 ```
+
+## Stress tests
+
+The stress tests in
+[`tests/test_stress.py`](https://github.com/thawn/abstracts-explorer/blob/main/tests/test_stress.py)
+measure how many parallel RAG chat requests a deployment can handle. Both tests
+send waves with increasing concurrency and stop at the first wave in which any
+request fails. The last fully successful wave is printed as the measured
+capacity.
+
+* The HTTP test sends ``/api/chat`` requests with concurrency 1, 2, 4, 8, ...
+  up to 256.
+* The browser test drives the full web UI with Playwright, using one Chromium
+  browser context per simulated user. Its concurrency goes 1, 2, 4, 8, 16, 32.
+
+Run both tests against any deployment URL::
+
+    uv run pytest tests/test_stress.py -m stress --server-url http://localhost:5000 -s
+
+Alternatively, set the ``SERVER_URL`` environment variable::
+
+    SERVER_URL=https://staging.example.com uv run pytest tests/test_stress.py -m stress -s
+
+The browser test requires Chromium::
+
+    uv run playwright install chromium
+
+Run only the browser UI stress test::
+
+    uv run pytest tests/test_stress.py -m stress --server-url http://localhost:5000 -k browser -s
+
+Target a specific MCP tool with the prompts::
+
+    uv run pytest tests/test_stress.py -m stress --server-url http://localhost:5000 --stress-mcp-tool get_conference_topics -s
+
+Alternatively, set the ``STRESS_MCP_TOOL`` environment variable. The default is
+``search_papers``. The option only shapes the prompt; the LLM still decides
+which MCP tool to call.

@@ -90,7 +90,7 @@ See `docs/plugins.md` for adding one.
 - JavaScript: Jest + jsdom; target **>80%** coverage.
 - One test file per source module (`database.py` → `tests/test_database.py`).
   Test-type exceptions: `test_integration.py`, `test_web_integration.py`,
-  `test_web_e2e.py`, `test_staging_e2e.py`.
+  `test_web_e2e.py`, `test_staging_e2e.py`, `test_stress.py`.
 - Reuse the central test infrastructure instead of duplicating setup:
   `tests/conftest.py` fixtures (`db_manager`, `connected_db`, `test_database`,
   `mock_lm_studio`, `embeddings_manager`, `web_test_papers`, ...) and
@@ -98,7 +98,8 @@ See `docs/plugins.md` for adding one.
   `find_free_port`, Playwright fixtures, ...).
 - Mock external services (APIs, LLM backends, databases). Tests must skip
   gracefully when optional services are unavailable.
-- Markers: `slow` (deselected by default), `integration`, `e2e`, `staging`.
+- Markers: `slow` (deselected by default), `integration`, `e2e`, `staging`,
+  `stress` (deselected by default).
 
 ```bash
 uv run pytest                                  # fast suite
