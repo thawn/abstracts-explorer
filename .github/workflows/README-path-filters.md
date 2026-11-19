@@ -15,7 +15,7 @@ Path filters have been added to all workflows to skip unnecessary runs when only
 **Triggers on changes to**:
 - `src/**/*.py` - Python source code
 - `tests/**/*.py` - Python test files
-- `src/abstracts_explorer/web_ui/static/**/*.js` - JavaScript source code
+- `src/abstracts_explorer/web_ui/static/**/*.js` / `*.ts` - JavaScript/TypeScript source code
 - `src/abstracts_explorer/web_ui/templates/**` - HTML templates
 - `pyproject.toml` - Python dependencies
 - `uv.lock` - Python dependency lock file
@@ -90,7 +90,10 @@ Path filters have been added to all workflows to skip unnecessary runs when only
 **Triggers on changes to**:
 - `src/**/*.py` - Python source code
 - `tests/**/*.py` - Python test files
-- `src/abstracts_explorer/web_ui/static/**/*.js` - JavaScript source code
+- `src/abstracts_explorer/web_ui/static/**/*.js` / `*.ts` - JavaScript/TypeScript source code
+- `src/abstracts_explorer/web_ui/types/**` - TypeScript ambient declarations
+- `tsconfig.json` - TypeScript configuration
+- `scripts/**` - Frontend build scripts
 - `src/abstracts_explorer/web_ui/templates/**` - HTML templates
 - `pyproject.toml` - Python dependencies
 - `uv.lock` - Python dependency lock file
@@ -151,8 +154,8 @@ If you modify a file in `src/abstracts_explorer/`, all workflows will run:
 - ✅ `docker.yml` (Docker)
 - ✅ `slow-tests.yml` (Slow Tests)
 
-### Example 3: JavaScript Code Change
-If you modify a file in `src/abstracts_explorer/web_ui/static/`, the following will run:
+### Example 3: Frontend Code Change
+If you modify a file in `src/abstracts_explorer/web_ui/static/` (JavaScript/TypeScript), the following will run:
 - ✅ `tests.yml` (Tests - includes JavaScript tests)
 - ✅ `docker.yml` (Docker)
 - ✅ `slow-tests.yml` (Slow Tests - includes E2E tests)
