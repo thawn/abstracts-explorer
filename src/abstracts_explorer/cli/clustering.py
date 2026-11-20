@@ -56,12 +56,15 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
     if not _validate_embeddings_db(config):
         return 1
 
+    requests_per_minute = getattr(args, "requests_per_minute", config.requests_per_minute)
+    rate_limit_str = f"{requests_per_minute} req/min" if requests_per_minute > 0 else "disabled"
     _print_header(
         "Clustering",
         f"Embeddings: {config.embedding_db}",
         f"Collection: {args.collection}",
         "Reduction: umap (2 components for visualization)",
         "Clustering: BERTopic + agglomerative (ward, distance_threshold=0.5)",
+        f"Rate limit: {rate_limit_str}",
         f"Limit: {args.limit} papers" if args.limit else None,
     )
 
@@ -74,6 +77,7 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
             limit=args.limit,
             show_progress=True,
             use_llm_labels=not getattr(args, "no_llm_labels", False),
+            requests_per_minute=requests_per_minute,
         )
 
         # Display statistics

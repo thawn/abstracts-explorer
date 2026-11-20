@@ -49,6 +49,20 @@ class TestTokenBucketInitialization:
         assert limiter.requests_per_minute == 1000
         assert limiter._tokens == pytest.approx(1000.0)
 
+    def test_burst_limits_initial_capacity(self):
+        limiter = TokenBucketRateLimiter(requests_per_minute=60, burst=1)
+        assert limiter.burst == 1
+        assert limiter._tokens == pytest.approx(1.0)
+
+    def test_zero_burst_is_clamped_to_one(self):
+        limiter = TokenBucketRateLimiter(requests_per_minute=60, burst=0)
+        assert limiter.burst == 1
+        assert limiter._tokens == pytest.approx(1.0)
+
+    def test_negative_burst_raises(self):
+        with pytest.raises(ValueError, match="burst must be non-negative"):
+            TokenBucketRateLimiter(requests_per_minute=60, burst=-1)
+
 
 class TestTokenBucketAcquire:
     def test_acquire_single_token(self):
@@ -339,6 +353,16 @@ class TestRateLimitedTransport:
         gl = get_global_rate_limiter()
         assert gl is not None
         assert gl.requests_per_minute == 60
+        assert gl.burst == 1
+        assert gl._tokens == pytest.approx(1.0)
+
+    def test_transport_accepts_custom_burst(self):
+        set_global_rate_limiter(None)
+        _ = RateLimitedTransport(httpx2.AsyncHTTPTransport(), requests_per_minute=60, burst=5)
+        gl = get_global_rate_limiter()
+        assert gl is not None
+        assert gl.burst == 5
+        assert gl._tokens == pytest.approx(5.0)
 
     def test_async_transport_forwards_request(self):
         set_global_rate_limiter(None)

@@ -229,6 +229,7 @@ Cluster embeddings and optionally export results.
 usage: abstracts-explorer clustering run [-h] [--collection COLLECTION]
                                          [--output OUTPUT] [--limit LIMIT]
                                          [--no-llm-labels]
+                                         [--requests-per-minute REQUESTS_PER_MINUTE]
 ```
 
 | Option | Description |
@@ -237,9 +238,12 @@ usage: abstracts-explorer clustering run [-h] [--collection COLLECTION]
 | `--output OUTPUT` | Path to export clustering results as JSON (optional) |
 | `--limit LIMIT` | Maximum number of embeddings to process (optional) |
 | `--no-llm-labels` | Use c-TF-IDF keywords instead of LLM-generated labels |
+| `--requests-per-minute REQUESTS_PER_MINUTE` | Max API requests per minute, 0 to disable rate limiting (default: 60) |
 
-LLM labels are generated for flat topics and merged hierarchy levels. Failed
-or empty LLM responses are retried, then fall back to top c-TF-IDF keywords.
+LLM labels are generated for flat topics and merged hierarchy levels. Flat
+labeling shows a `Labeling clusters (LLM)` progress bar; hierarchy labeling
+uses BERTopic's per-merge progress bar. Failed or empty LLM responses are
+retried, then fall back to top c-TF-IDF keywords.
 
 ### clustering clear-cache
 

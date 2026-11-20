@@ -76,6 +76,7 @@ def perform_clustering(
     nr_levels: int = DEFAULT_NR_LEVELS,
     level_scale: str = DEFAULT_LEVEL_SCALE,
     cluster_n_components: int = DEFAULT_CLUSTER_N_COMPONENTS,
+    requests_per_minute: Optional[int] = None,
     **kwargs: Any,
 ) -> Dict[str, Any]:
     """
@@ -105,6 +106,9 @@ def perform_clustering(
         Level scaling mode (default ``"linear"``).
     cluster_n_components : int, optional
         UMAP components used before clustering (default 5).
+    requests_per_minute : int, optional
+        Maximum embedding/LLM API requests per minute. ``None`` uses the
+        configured default; ``0`` disables rate limiting.
     **kwargs
         Ignored compatibility parameters.
 
@@ -119,7 +123,13 @@ def perform_clustering(
         If any step fails.
     """
     try:
-        with DatabaseManager() as db, EmbeddingsManager(collection_name=collection_name) as em:
+        with (
+            DatabaseManager() as db,
+            EmbeddingsManager(
+                collection_name=collection_name,
+                requests_per_minute=requests_per_minute,
+            ) as em,
+        ):
             cm = ClusteringManager(em, db)
             cm.load_embeddings(limit=limit, conferences=conferences, years=years)
             results = cm.fit(

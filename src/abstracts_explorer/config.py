@@ -136,13 +136,16 @@ class Config:
         may be a thinking-capable agent model).
     llm_max_attempts : int
         Maximum number of attempts for one cluster-label LLM request
-        (default: 3). Set to 1 to disable retries.
+        (default: 6). Set to 1 to disable retries.
     llm_retry_base_delay : float
         Base delay in seconds for exponential backoff between cluster-label
         retries (default: 1.0).
     llm_retry_max_delay : float
         Maximum delay in seconds between cluster-label retries
         (default: 10.0).
+    llm_rate_limit_delay : float
+        Delay in seconds applied after HTTP 429 responses when the backend
+        does not provide a ``Retry-After`` header (default: 60.0).
     enable_query_rewriting : bool
         Whether to enable query rewriting for better semantic search.
     query_similarity_threshold : float
@@ -302,9 +305,10 @@ class Config:
         )
 
         # Cluster-label retry settings
-        self.llm_max_attempts = max(1, self._get_env_int("LLM_MAX_ATTEMPTS", default=3))
+        self.llm_max_attempts = max(1, self._get_env_int("LLM_MAX_ATTEMPTS", default=6))
         self.llm_retry_base_delay = max(0.0, self._get_env_float("LLM_RETRY_BASE_DELAY", default=1.0))
         self.llm_retry_max_delay = max(0.0, self._get_env_float("LLM_RETRY_MAX_DELAY", default=10.0))
+        self.llm_rate_limit_delay = max(0.0, self._get_env_float("LLM_RATE_LIMIT_DELAY", default=60.0))
 
         # Query Rewriting Settings
         self.enable_query_rewriting = self._get_env_bool("ENABLE_QUERY_REWRITING", default=True)
@@ -500,6 +504,7 @@ class Config:
             "llm_max_attempts": self.llm_max_attempts,
             "llm_retry_base_delay": self.llm_retry_base_delay,
             "llm_retry_max_delay": self.llm_retry_max_delay,
+            "llm_rate_limit_delay": self.llm_rate_limit_delay,
             "web_rate_limit_per_minute": self.web_rate_limit_per_minute,
             "web_ui_threads": self.web_ui_threads,
         }

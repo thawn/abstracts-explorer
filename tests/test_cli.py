@@ -2746,6 +2746,29 @@ class TestCLI:
         assert exit_code == 0
         assert mock_perform.call_args.kwargs["show_progress"] is True
 
+    def test_cluster_embeddings_requests_per_minute(self, tmp_path, capsys, monkeypatch):
+        """Test clustering run forwards the configured API rate limit."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+
+        mock_results = {
+            "statistics": {"total_papers": 5, "n_clusters": 2, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        with patch("abstracts_explorer.cli.clustering.perform_clustering") as mock_perform:
+            mock_perform.return_value = mock_results
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "clustering", "run", "--requests-per-minute", "30"],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        assert mock_perform.call_args.kwargs["requests_per_minute"] == 30
+        assert "30 req/min" in capsys.readouterr().out
+
     def test_pre_generate_clustering_missing_embeddings(self, tmp_path, capsys, monkeypatch):
         """Test pre-generate-clustering fails when embeddings DB doesn't exist."""
         patch_get_config_for_test(monkeypatch, tmp_path / "nonexistent")

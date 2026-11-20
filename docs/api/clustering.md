@@ -12,6 +12,10 @@ imports Plotly; all rendering happens in the browser.
 - 10 linear hierarchy levels with per-level flat-topic mappings
 - LLM-generated labels for flat and merged topics, with retry and keyword
   fallback
+- Optional `Labeling clusters (LLM)` progress bar for flat-topic labeling;
+  hierarchy labeling uses BERTopic's per-merge progress bar
+- HTTP 429 handling honors `Retry-After` and pauses all LLM label calls for a
+  shared cooldown, avoiding repeated retries against an exhausted quota
 - Base c-TF-IDF keyword extraction for every flat topic
 - Compact JSON cache (points, statistics, flat labels/keywords, hierarchy levels)
 - Export clustering results to JSON

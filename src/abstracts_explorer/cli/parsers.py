@@ -434,6 +434,12 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         default=False,
         help="Use c-TF-IDF keywords instead of LLM-generated labels",
     )
+    cluster_parser.add_argument(
+        "--requests-per-minute",
+        type=int,
+        default=config.requests_per_minute,
+        help=f"Maximum number of API requests per minute, 0 to disable rate limiting (default: {config.requests_per_minute})",
+    )
 
     # clustering clear-cache
     clear_cache_parser = clustering_subparsers.add_parser(

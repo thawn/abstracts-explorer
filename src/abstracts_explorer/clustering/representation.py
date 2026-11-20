@@ -6,6 +6,7 @@ import logging
 from typing import Any, Dict, List, Mapping, Tuple
 
 from bertopic.representation import BaseRepresentation
+from tqdm import tqdm
 
 from abstracts_explorer.clustering.llm import generate_llm_label
 
@@ -37,6 +38,7 @@ class ProjectLLMRepresentation(BaseRepresentation):
         nr_docs: int = 4,
         diversity: float | None = 0.1,
         doc_length: int = 500,
+        show_progress: bool = False,
     ) -> None:
         """
         Initialize the representation model.
@@ -56,6 +58,8 @@ class ProjectLLMRepresentation(BaseRepresentation):
             extraction (default 0.1).
         doc_length : int, optional
             Maximum characters per representative document (default 500).
+        show_progress : bool, optional
+            Show a tqdm progress bar for multi-topic LLM batches (default False).
         """
         self.embeddings_manager = embeddings_manager
         self.prompt = prompt
@@ -63,6 +67,7 @@ class ProjectLLMRepresentation(BaseRepresentation):
         self.nr_docs = nr_docs
         self.diversity = diversity
         self.doc_length = doc_length
+        self.show_progress = show_progress
 
     def extract_topics(
         self,
@@ -106,22 +111,38 @@ class ProjectLLMRepresentation(BaseRepresentation):
         )
 
         updated_topics: Dict[Any, List[Tuple[str, float]]] = {}
-        for topic, docs in repr_docs_mappings.items():
-            keywords = [word for word, _ in topics[topic][:10]]
-            docs_text = "\n".join(f"- {doc[: self.doc_length]}" for doc in docs)
-            prompt = self.prompt.replace("[KEYWORDS]", ", ".join(keywords))
-            prompt = prompt.replace("[DOCUMENTS]", docs_text)
-            try:
-                label = generate_llm_label(self.embeddings_manager, self.system_prompt, prompt, max_tokens=200)
-            except Exception as exc:
-                logger.warning("LLM label failed for topic %s: %s; using keyword fallback", topic, exc)
-                label = ""
+        use_progress = self.show_progress and len(repr_docs_mappings) > 1
+        progress = (
+            tqdm(
+                total=len(repr_docs_mappings),
+                desc="Labeling clusters (LLM)",
+                unit="topic",
+            )
+            if use_progress
+            else None
+        )
+        try:
+            for topic, docs in repr_docs_mappings.items():
+                keywords = [word for word, _ in topics[topic][:10]]
+                docs_text = "\n".join(f"- {doc[: self.doc_length]}" for doc in docs)
+                prompt = self.prompt.replace("[KEYWORDS]", ", ".join(keywords))
+                prompt = prompt.replace("[DOCUMENTS]", docs_text)
+                try:
+                    label = generate_llm_label(self.embeddings_manager, self.system_prompt, prompt, max_tokens=200)
+                except Exception as exc:
+                    logger.warning("LLM label failed for topic %s: %s; using keyword fallback", topic, exc)
+                    label = ""
 
-            label = " ".join(label.split()).strip("\"'")
-            if label.lower().startswith("topic:"):
-                label = label.split(":", 1)[1].strip()
-            if not label:
-                label = " & ".join(keywords[:3])
-            updated_topics[topic] = [(label[:120], 1)]
+                label = " ".join(label.split()).strip("\"'")
+                if label.lower().startswith("topic:"):
+                    label = label.split(":", 1)[1].strip()
+                if not label:
+                    label = " & ".join(keywords[:3])
+                updated_topics[topic] = [(label[:120], 1)]
+                if progress is not None:
+                    progress.update(1)
+        finally:
+            if progress is not None:
+                progress.close()
 
         return updated_topics

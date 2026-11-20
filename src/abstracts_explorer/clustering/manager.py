@@ -191,7 +191,9 @@ class ClusteringManager(LoadingMixin):
         if not docs:
             raise ClusteringError("No documents available for clustering")
 
-        representation_model = ProjectLLMRepresentation(self.embeddings_manager) if use_llm_labels else None
+        representation_model = (
+            ProjectLLMRepresentation(self.embeddings_manager, show_progress=show_progress) if use_llm_labels else None
+        )
         topic_model = BERTopic(
             verbose=show_progress,
             umap_model=self._make_umap(cluster_n_components),
@@ -211,7 +213,10 @@ class ClusteringManager(LoadingMixin):
         flat_keywords = self._extract_flat_keywords(docs, self.topics)
         flat_labels = self._extract_flat_labels(self.topics, flat_keywords, use_llm_labels)
 
-        logger.info("Building hierarchical topics...")
+        if use_llm_labels:
+            logger.info("Labeling hierarchy topics with LLM (BERTopic merge progress bar)...")
+        else:
+            logger.info("Building hierarchical topics...")
         from sklearn.metrics.pairwise import cosine_similarity
 
         def distance_function(matrix):

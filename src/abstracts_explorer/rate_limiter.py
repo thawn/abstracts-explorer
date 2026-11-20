@@ -32,19 +32,30 @@ class TokenBucketRateLimiter:
     providing accurate global rate limiting rather than per-thread limits.
     """
 
-    def __init__(self, requests_per_minute: int = 60) -> None:
+    def __init__(self, requests_per_minute: int = 60, burst: Optional[int] = None) -> None:
         """
         Initialize rate limiter.
 
         Args:
             requests_per_minute: Maximum requests allowed per minute.
+            burst: Maximum number of tokens that can accumulate. Defaults to
+                ``requests_per_minute``. Set to ``1`` for smooth pacing
+                without an initial burst.
         """
         if requests_per_minute < 0:
             raise ValueError("requests_per_minute must be non-negative")
 
+        if burst is None:
+            burst = requests_per_minute
+        if burst < 0:
+            raise ValueError("burst must be non-negative")
+        if requests_per_minute > 0 and burst == 0:
+            burst = 1
+
         self._rpm = requests_per_minute
         self._rate = requests_per_minute / 60.0  # tokens per second
-        self._max_tokens = float(requests_per_minute)
+        self._burst = burst
+        self._max_tokens = float(burst)
         self._tokens = self._max_tokens
         self._last_update = time.monotonic()
         self._lock = threading.Lock()
@@ -156,6 +167,11 @@ class TokenBucketRateLimiter:
         """Return the configured requests per minute."""
         return self._rpm
 
+    @property
+    def burst(self) -> int:
+        """Return the configured burst capacity."""
+        return self._burst
+
     def reset(self) -> None:
         """Reset the rate limiter to full capacity."""
         with self._lock:
@@ -179,18 +195,26 @@ class RateLimitedTransport(httpx2.BaseTransport, httpx2.AsyncBaseTransport):
         The underlying transport to delegate requests to.
     requests_per_minute : int
         Maximum number of requests per minute. Must be > 0.
+    burst : int, optional
+        Maximum number of tokens that can accumulate (default: 1). A burst of
+        one paces requests smoothly so per-minute provider quotas are not
+        exhausted by an initial burst.
     """
 
     def __init__(
         self,
         transport: httpx2.BaseTransport | httpx2.AsyncBaseTransport,
         requests_per_minute: int,
+        burst: int = 1,
     ) -> None:
         self._transport = transport
 
         global_rate_limiter = get_global_rate_limiter()
         if global_rate_limiter is None:
-            global_rate_limiter = TokenBucketRateLimiter(requests_per_minute=requests_per_minute)
+            global_rate_limiter = TokenBucketRateLimiter(
+                requests_per_minute=requests_per_minute,
+                burst=burst,
+            )
             set_global_rate_limiter(global_rate_limiter)
         elif global_rate_limiter.requests_per_minute != requests_per_minute:
             logger.warning(

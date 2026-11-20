@@ -23,7 +23,11 @@ from abstracts_explorer.clustering.hierarchy_levels import (
     compute_level_max_distances,
     level_parent_labels,
 )
-from abstracts_explorer.clustering.llm import generate_llm_label, is_retryable_llm_error
+from abstracts_explorer.clustering.llm import (
+    _retry_after_seconds,
+    generate_llm_label,
+    is_retryable_llm_error,
+)
 from abstracts_explorer.clustering.manager import ClusteringManager
 from abstracts_explorer.clustering.pipeline import compute_clusters_with_cache, perform_clustering
 from abstracts_explorer.clustering.representation import ProjectLLMRepresentation
@@ -36,6 +40,7 @@ from abstracts_explorer.clustering.results import (
     export_results_to_json,
     results_have_flat_labels,
 )
+from abstracts_explorer.rate_limiter import RateLimitCooldown
 
 
 def sample_hierarchy() -> pd.DataFrame:
@@ -255,6 +260,12 @@ class TestResults:
 class TestLLMHelpers:
     """Tests for retry-aware label generation."""
 
+    @pytest.fixture(autouse=True)
+    def _reset_llm_cooldown(self, monkeypatch):
+        import abstracts_explorer.clustering.llm as llm_module
+
+        monkeypatch.setattr(llm_module, "_rate_limit_cooldown", RateLimitCooldown())
+
     def test_is_retryable(self):
         assert is_retryable_llm_error(ValueError("empty"))
         assert is_retryable_llm_error(TimeoutError("timeout"))
@@ -282,6 +293,22 @@ class TestLLMHelpers:
         assert generate_llm_label(em, "system", "user") == "Nice Label"
         assert chat.call_count == 1
 
+    def test_generate_label_uses_embeddings_client(self, mocker):
+        config = mocker.Mock(
+            llm_max_attempts=1,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_request_timeout=5,
+            cluster_label_model="model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        chat = mocker.patch("abstracts_explorer.clustering.llm.chat_completion_text", return_value="Label")
+        client = object()
+        em = mocker.Mock(openai_client=client)
+
+        assert generate_llm_label(em, "system", "user") == "Label"
+        assert chat.call_args.kwargs["client"] is client
+
     def test_generate_label_retries_empty_then_succeeds(self, mocker):
         config = mocker.Mock(
             llm_max_attempts=3,
@@ -304,11 +331,14 @@ class TestLLMHelpers:
             llm_max_attempts=2,
             llm_retry_base_delay=0,
             llm_retry_max_delay=0,
+            llm_rate_limit_delay=60,
             llm_request_timeout=5,
             cluster_label_model="model",
         )
         mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
         mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
+        cooldown = mocker.Mock()
+        mocker.patch("abstracts_explorer.clustering.llm._rate_limit_cooldown", cooldown)
         chat = mocker.patch(
             "abstracts_explorer.clustering.llm.chat_completion_text",
             side_effect=[MockError(status_code=429), "Label"],
@@ -317,6 +347,71 @@ class TestLLMHelpers:
 
         assert generate_llm_label(em, "system", "user") == "Label"
         assert chat.call_count == 2
+        assert cooldown.wait.call_count == 2
+        cooldown.defer.assert_called_once_with(60)
+
+    def test_generate_label_honors_retry_after_header(self, mocker):
+        config = mocker.Mock(
+            llm_max_attempts=2,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_rate_limit_delay=60,
+            llm_request_timeout=5,
+            cluster_label_model="model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
+        cooldown = mocker.Mock()
+        mocker.patch("abstracts_explorer.clustering.llm._rate_limit_cooldown", cooldown)
+        error = MockError(status_code=429, response=Mock(headers={"retry-after": "12"}))
+        mocker.patch(
+            "abstracts_explorer.clustering.llm.chat_completion_text",
+            side_effect=[error, "Label"],
+        )
+        em = mocker.Mock(openai_client=object())
+
+        assert generate_llm_label(em, "system", "user") == "Label"
+        cooldown.defer.assert_called_once_with(12)
+
+    def test_retry_after_http_date(self):
+        from datetime import datetime, timedelta, timezone
+        from email.utils import format_datetime
+
+        retry_at = datetime.now(timezone.utc) + timedelta(seconds=30)
+        error = MockError(
+            status_code=429,
+            response=Mock(headers={"retry-after": format_datetime(retry_at, usegmt=True)}),
+        )
+
+        delay = _retry_after_seconds(error)
+        assert delay is not None
+        assert 25 <= delay <= 35
+
+    def test_retry_after_invalid_value(self):
+        error = MockError(status_code=429, response=Mock(headers={"retry-after": "not-a-date"}))
+        assert _retry_after_seconds(error) is None
+
+    def test_generate_label_uses_configured_rate_limit_delay(self, mocker):
+        config = mocker.Mock(
+            llm_max_attempts=2,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_rate_limit_delay=45,
+            llm_request_timeout=5,
+            cluster_label_model="model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
+        cooldown = mocker.Mock()
+        mocker.patch("abstracts_explorer.clustering.llm._rate_limit_cooldown", cooldown)
+        mocker.patch(
+            "abstracts_explorer.clustering.llm.chat_completion_text",
+            side_effect=[MockError(status_code=429), "Label"],
+        )
+        em = mocker.Mock(openai_client=object())
+
+        assert generate_llm_label(em, "system", "user") == "Label"
+        cooldown.defer.assert_called_once_with(45)
 
     def test_generate_label_exhausts_retries(self, mocker):
         config = mocker.Mock(
@@ -403,6 +498,77 @@ class TestRepresentation:
 
         assert updated[0] == [("alpha", 1)]
 
+    def test_extract_topics_shows_progress_for_multi_topic_batch(self, mocker):
+        model = self._topic_model()
+        representation = ProjectLLMRepresentation(mocker.Mock(), show_progress=True)
+        mocker.patch(
+            "abstracts_explorer.clustering.representation.generate_llm_label",
+            return_value="Label",
+        )
+        progress = mocker.Mock()
+        tqdm_factory = mocker.patch(
+            "abstracts_explorer.clustering.representation.tqdm",
+            return_value=progress,
+        )
+
+        topics = {0: [("alpha", 1.0)], 1: [("beta", 1.0)]}
+        representation.extract_topics(model, ["d"], None, topics)
+
+        tqdm_factory.assert_called_once_with(
+            total=2,
+            desc="Labeling clusters (LLM)",
+            unit="topic",
+        )
+        assert progress.update.call_count == 2
+        progress.close.assert_called_once()
+
+    def test_extract_topics_skips_progress_for_single_topic_batch(self, mocker):
+        model = Mock()
+        model._extract_representative_docs.return_value = ({0: ["doc"]}, None, None, None)
+        representation = ProjectLLMRepresentation(mocker.Mock(), show_progress=True)
+        mocker.patch(
+            "abstracts_explorer.clustering.representation.generate_llm_label",
+            return_value="Label",
+        )
+        tqdm_factory = mocker.patch("abstracts_explorer.clustering.representation.tqdm")
+
+        representation.extract_topics(model, ["d"], None, {0: [("alpha", 1.0)]})
+
+        tqdm_factory.assert_not_called()
+
+    def test_extract_topics_skips_progress_when_disabled(self, mocker):
+        model = self._topic_model()
+        representation = ProjectLLMRepresentation(mocker.Mock(), show_progress=False)
+        mocker.patch(
+            "abstracts_explorer.clustering.representation.generate_llm_label",
+            return_value="Label",
+        )
+        tqdm_factory = mocker.patch("abstracts_explorer.clustering.representation.tqdm")
+
+        topics = {0: [("alpha", 1.0)], 1: [("beta", 1.0)]}
+        representation.extract_topics(model, ["d"], None, topics)
+
+        tqdm_factory.assert_not_called()
+
+    def test_extract_topics_progress_counts_keyword_fallbacks(self, mocker):
+        model = self._topic_model()
+        representation = ProjectLLMRepresentation(mocker.Mock(), show_progress=True)
+        mocker.patch(
+            "abstracts_explorer.clustering.representation.generate_llm_label",
+            side_effect=RuntimeError("boom"),
+        )
+        progress = mocker.Mock()
+        mocker.patch(
+            "abstracts_explorer.clustering.representation.tqdm",
+            return_value=progress,
+        )
+
+        topics = {0: [("alpha", 1.0)], 1: [("beta", 1.0)]}
+        representation.extract_topics(model, ["d"], None, topics)
+
+        assert progress.update.call_count == 2
+        progress.close.assert_called_once()
+
 
 class TestClusteringManager:
     """Tests for the BERTopic manager facade."""
@@ -464,6 +630,19 @@ class TestClusteringManager:
         assert manager.get_cluster_statistics()["total_papers"] == 4
         assert manager.get_clustering_results() is results
         assert len(results["hierarchy"]["levels"]) == 1
+
+    def test_fit_passes_show_progress_to_representation(self, mocker):
+        manager = self._manager()
+        fake_model = self._fake_topic_model()
+        mocker.patch("bertopic.BERTopic", return_value=fake_model)
+        mocker.patch.object(
+            manager, "_make_umap", return_value=Mock(fit_transform=Mock(return_value=np.zeros((4, 2))))
+        )
+        representation_class = mocker.patch("abstracts_explorer.clustering.manager.ProjectLLMRepresentation")
+
+        manager.fit(use_llm_labels=True, show_progress=True, nr_levels=2)
+
+        representation_class.assert_called_once_with(manager.embeddings_manager, show_progress=True)
 
     def test_fit_without_llm_labels(self, mocker):
         manager = self._manager()
@@ -608,6 +787,28 @@ class TestPipeline:
         assert results == _fake_results()
         manager.load_embeddings.assert_called_once_with(limit=5, conferences=["A"], years=None)
         manager.export_to_json.assert_called_once_with(tmp_path / "out.json")
+
+    def test_perform_clustering_forwards_requests_per_minute(self, mocker):
+        manager = mocker.Mock()
+        manager.fit.return_value = _fake_results()
+        mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager", return_value=manager)
+        mocker.patch("abstracts_explorer.clustering.pipeline.DatabaseManager")
+        embedding_class = mocker.patch("abstracts_explorer.clustering.pipeline.EmbeddingsManager")
+
+        perform_clustering(requests_per_minute=30)
+
+        embedding_class.assert_called_once_with(collection_name="papers", requests_per_minute=30)
+
+    def test_perform_clustering_uses_config_rate_limit_by_default(self, mocker):
+        manager = mocker.Mock()
+        manager.fit.return_value = _fake_results()
+        mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager", return_value=manager)
+        mocker.patch("abstracts_explorer.clustering.pipeline.DatabaseManager")
+        embedding_class = mocker.patch("abstracts_explorer.clustering.pipeline.EmbeddingsManager")
+
+        perform_clustering()
+
+        embedding_class.assert_called_once_with(collection_name="papers", requests_per_minute=None)
 
     def test_perform_clustering_wraps_errors(self, mocker):
         manager = mocker.Mock()
