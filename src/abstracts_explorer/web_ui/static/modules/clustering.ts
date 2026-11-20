@@ -446,7 +446,7 @@ export function renderCurrentLevel() {
     const canRestyle = plotElement.data
         && plotElement.data.length === 2
         && plotElement.data[0].x
-        && plotElement.data[0].x.length === state.points.length;
+        && plotElement.data[0].x.length === state.xs.length;
 
     if (canRestyle) {
         Plotly.restyle(plotElement, {

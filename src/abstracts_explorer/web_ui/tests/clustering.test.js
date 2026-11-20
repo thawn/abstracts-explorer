@@ -373,6 +373,23 @@ describe('Clustering Module', () => {
             expect(document.getElementById('hierarchy-level-slider').value).toBe('0');
         });
 
+        it('restyles in place when the plot is already rendered', async () => {
+            await loadHierarchy();
+
+            const plotDiv = document.getElementById('cluster-plot');
+            plotDiv.data = [
+                { x: [1, 2], y: [1, 2] },
+                { x: [1.5], y: [1.5] }
+            ];
+            global.Plotly.newPlot.mockClear();
+            global.Plotly.restyle.mockClear();
+
+            expect(() => setHierarchyLevel(0)).not.toThrow();
+
+            expect(global.Plotly.newPlot).not.toHaveBeenCalled();
+            expect(global.Plotly.restyle).toHaveBeenCalled();
+        });
+
         it('hides the slider in custom cluster mode', async () => {
             await loadHierarchy();
             global.fetch.mockResolvedValueOnce({
