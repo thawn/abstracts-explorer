@@ -213,8 +213,9 @@ usage: abstracts-explorer web-ui [-h] [--host HOST] [--port PORT] [--dev]
 
 ## clustering
 
-Clustering commands. Uses agglomerative clustering (ward linkage, distance
-threshold 150) with t-SNE dimensionality reduction.
+Clustering commands. Uses BERTopic with Agglomerative clustering (ward
+linkage, distance threshold 0.5) on 5-D UMAP embeddings and 2-D UMAP
+visualization.
 
 ```text
 usage: abstracts-explorer clustering [-h] {run,clear-cache,pre-generate} ...
@@ -227,6 +228,7 @@ Cluster embeddings and optionally export results.
 ```text
 usage: abstracts-explorer clustering run [-h] [--collection COLLECTION]
                                          [--output OUTPUT] [--limit LIMIT]
+                                         [--no-llm-labels]
 ```
 
 | Option | Description |
@@ -234,8 +236,10 @@ usage: abstracts-explorer clustering run [-h] [--collection COLLECTION]
 | `--collection COLLECTION` | Name of the ChromaDB collection (default: `papers`) |
 | `--output OUTPUT` | Path to export clustering results as JSON (optional) |
 | `--limit LIMIT` | Maximum number of embeddings to process (optional) |
+| `--no-llm-labels` | Use c-TF-IDF keywords instead of LLM-generated labels |
 
-Labeling shows a `Labeling clusters` progress bar.
+LLM labels are generated for flat topics and merged hierarchy levels. Failed
+or empty LLM responses are retried, then fall back to top c-TF-IDF keywords.
 
 ### clustering clear-cache
 
@@ -272,21 +276,14 @@ the web UI serves them instantly.
 - With `--conference` and `--year`: generates for that specific
   conference/year only.
 
-Re-running `pre-generate` resumes missing labels. Existing non-empty labels
-are skipped and no stale-label checks are performed. If flat cluster labels
-remain missing after the flat phase, hierarchy labeling is skipped and the
-command exits non-zero; rerun to retry the missing flat labels. Hierarchy
-LLM failures at levels 6+ abort labeling, but already generated labels are
-persisted for the next run.
-
-Flat labels use `Labeling clusters`. Hierarchy labeling shows
-`Labeling hierarchy (TF-IDF)` for levels 1-5 and `Labeling hierarchy (LLM)`
-for levels 6+. `pre-process` inherits the same behavior.
+The clustering cache stores the complete BERTopic result atomically. A cache
+hit avoids all LLM calls. `--force` recomputes clustering and labels; there is
+no separate resumable label cache.
 
 ```text
 usage: abstracts-explorer clustering pre-generate [-h] [--collection COLLECTION]
                                                   [--conference CONFERENCE] [--year YEAR]
-                                                  [--force] [--force-recreate-labels]
+                                                  [--force] [--no-llm-labels]
                                                   [--requests-per-minute REQUESTS_PER_MINUTE]
 ```
 
@@ -295,7 +292,7 @@ usage: abstracts-explorer clustering pre-generate [-h] [--collection COLLECTION]
 | `--collection COLLECTION` | Name of the ChromaDB collection (default: `papers`) |
 | `--conference CONFERENCE` / `--year YEAR` | Scope the pre-generation. |
 | `--force` | Force clustering recomputation |
-| `--force-recreate-labels` | Regenerate flat and hierarchy labels while reusing cached clustering |
+| `--no-llm-labels` | Use c-TF-IDF keywords instead of LLM-generated labels |
 | `--requests-per-minute REQUESTS_PER_MINUTE` | Max API requests per minute (default: 60) |
 
 **Examples:**
@@ -312,6 +309,9 @@ abstracts-explorer clustering pre-generate --conference NeurIPS --year 2024
 
 # Force recompute
 abstracts-explorer clustering pre-generate --force
+
+# Use c-TF-IDF keywords instead of LLM labels
+abstracts-explorer clustering pre-generate --no-llm-labels
 ```
 
 ## mcp-server
@@ -378,7 +378,7 @@ worker.
 
 ```text
 usage: abstracts-explorer pre-process [-h] [--conference CONFERENCE] [--year YEAR]
-                                      [--force] [--force-recreate-labels]
+                                      [--force] [--no-llm-labels]
                                       [--no-overlap-post-process]
                                       [--collection COLLECTION] [--backend-url BACKEND_URL]
                                       [--model MODEL] [--requests-per-minute REQUESTS_PER_MINUTE]
@@ -389,7 +389,7 @@ usage: abstracts-explorer pre-process [-h] [--conference CONFERENCE] [--year YEA
 | ------ | ----------- |
 | `--conference CONFERENCE` / `--year YEAR` | Filters forwarded to all steps. |
 | `--force` | Force re-download and reset embeddings/clustering |
-| `--force-recreate-labels` | Regenerate cluster labels while reusing cached clustering |
+| `--no-llm-labels` | Use c-TF-IDF keywords instead of LLM-generated labels |
 | `--no-overlap-post-process` | Run embeddings and clustering in a single worker |
 | `--collection COLLECTION` | Name for the ChromaDB collection (default: `papers`) |
 | `--backend-url BACKEND_URL` | URL for OpenAI-compatible API |
@@ -409,8 +409,8 @@ abstracts-explorer pre-process --conference neurips
 # Re-process, overwriting existing data
 abstracts-explorer pre-process --conference neurips --force
 
-# Regenerate cluster labels without re-clustering
-abstracts-explorer pre-process --force-recreate-labels
+# Use c-TF-IDF keywords instead of LLM labels
+abstracts-explorer pre-process --no-llm-labels
 
 # Recreate embeddings after switching embedding models
 abstracts-explorer pre-process --ignore-embedding-model-mismatch --model my-new-model

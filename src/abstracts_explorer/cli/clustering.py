@@ -15,9 +15,7 @@ from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.clustering import (
     perform_clustering,
     compute_clusters_with_cache,
-    results_have_complete_flat_labels,
-    DEFAULT_CLUSTERING_PARAMS,
-    DEFAULT_N_COMPONENTS,
+    DEFAULT_NR_LEVELS,
     ClusteringError,
 )
 
@@ -36,8 +34,8 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
     """
     Cluster embeddings and optionally export results.
 
-    Uses agglomerative clustering with ward linkage, distance threshold 150,
-    and t-SNE dimensionality reduction.
+    Uses BERTopic with Agglomerative clustering (ward linkage, distance
+    threshold 0.5) on 5-D UMAP embeddings and 2-D UMAP visualization.
 
     Parameters
     ----------
@@ -62,8 +60,8 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
         "Clustering",
         f"Embeddings: {config.embedding_db}",
         f"Collection: {args.collection}",
-        "Reduction: tsne (n_components=2)",
-        "Clustering: agglomerative (linkage=ward, distance_threshold=150)",
+        "Reduction: umap (2 components for visualization)",
+        "Clustering: BERTopic + agglomerative (ward, distance_threshold=0.5)",
         f"Limit: {args.limit} papers" if args.limit else None,
     )
 
@@ -72,12 +70,10 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
         print("\n🚀 Starting clustering pipeline...")
         results = perform_clustering(
             collection_name=args.collection,
-            n_components=DEFAULT_N_COMPONENTS,
-            n_clusters=None,
             output_path=args.output,
             limit=args.limit,
             show_progress=True,
-            **DEFAULT_CLUSTERING_PARAMS,
+            use_llm_labels=not getattr(args, "no_llm_labels", False),
         )
 
         # Display statistics
@@ -154,9 +150,10 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     """
     Pre-generate clustering results for one or all conference/year combinations.
 
-    Uses agglomerative clustering with ward linkage, distance threshold 150,
-    and t-SNE dimensionality reduction.  Results are persisted to the database
-    cache so that the web UI can serve them instantly.
+    Uses BERTopic with Agglomerative clustering (ward linkage, distance
+    threshold 0.5) on 5-D UMAP embeddings and 2-D UMAP visualization.
+    Results are persisted to the database cache so that the web UI can serve
+    them instantly.
 
     Without ``--conference`` or ``--year``, generates clustering for every
     conference in the database combined with each individual year.
@@ -226,8 +223,8 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
         "Pre-generate Clustering",
         f"Embeddings: {config.embedding_db}",
         f"Collection: {args.collection}",
-        "Clustering: agglomerative (linkage=ward, distance_threshold=150)",
-        "Reduction: tsne",
+        "Clustering: BERTopic + agglomerative (ward, distance_threshold=0.5)",
+        "Reduction: umap",
         f"Rate limit: {rate_limit_str}",
         *extra_lines,
     )
@@ -262,25 +259,14 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
                             embeddings_manager=em,
                             database=db,
                             embedding_model=config.embedding_model,
-                            n_components=DEFAULT_N_COMPONENTS,
-                            n_clusters=None,
                             limit=None,
                             force=args.force,
-                            force_recreate_labels=getattr(args, "force_recreate_labels", False),
                             conferences=c_conferences,
                             years=c_years,
+                            use_llm_labels=not getattr(args, "no_llm_labels", False),
                             show_progress=True,
-                            **DEFAULT_CLUSTERING_PARAMS,
+                            nr_levels=DEFAULT_NR_LEVELS,
                         )
-
-                    if not results_have_complete_flat_labels(results):
-                        print(
-                            f"   ⚠️  {label}: flat cluster labels are incomplete; "
-                            "hierarchy labeling was skipped. Re-run to resume.",
-                            file=sys.stderr,
-                        )
-                        fail_count += 1
-                        continue
 
                     stats = results.get("statistics", {})
                     n_papers = stats.get("total_papers", "N/A")

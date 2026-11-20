@@ -179,7 +179,7 @@ class ClusteringCache(Base):
     year : int, optional
         Conference year this cache entry is scoped to.
     reduction_method : str
-        Dimensionality reduction method used (e.g., 'pca', 'tsne').
+        Dimensionality reduction method used (e.g., 'umap').
     n_components : int
         Number of dimensions after reduction.
     clustering_method : str
@@ -215,78 +215,6 @@ class ClusteringCache(Base):
             f"<ClusteringCache(id={self.id}, conference='{self.conference}', "
             f"year={self.year}, method='{self.clustering_method}', n_clusters={self.n_clusters})>"
         )
-
-
-class HierarchicalLabelCache(Base):
-    """
-    Hierarchical label cache model.
-
-    Stores cached hierarchical cluster labels for agglomerative clustering.
-    Labels are independent of the number of clusters or distance threshold and
-    are reused for all agglomerative clustering settings that share the same
-    embedding model and linkage method.
-
-    Attributes
-    ----------
-    id : int
-        Auto-incrementing primary key.
-    embedding_model : str
-        Name of the embedding model used.
-    linkage : str
-        Linkage method used in agglomerative clustering (e.g., 'ward').
-    labels_json : str
-        JSON string mapping node IDs to their generated labels.
-    created_at : datetime
-        Timestamp when cache was created.
-    """
-
-    __tablename__ = "hierarchical_label_cache"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    embedding_model = Column(String, nullable=False, index=True)
-    linkage = Column(String, nullable=False, default="ward")
-    labels_json = Column(Text, nullable=False)
-    created_at = timestamp_column()
-
-    def __repr__(self) -> str:
-        """String representation of HierarchicalLabelCache."""
-        return f"<HierarchicalLabelCache(id={self.id}, model='{self.embedding_model}', linkage='{self.linkage}')>"
-
-
-class FlatLabelCache(Base):
-    """
-    Flat cluster label cache model.
-
-    Stores labels for flat clusters so interrupted labeling runs can resume.
-    The cache is keyed by embedding model and a scope string that includes the
-    dataset fingerprint and clustering parameters.
-
-    Attributes
-    ----------
-    id : int
-        Auto-incrementing primary key.
-    embedding_model : str
-        Name of the embedding model used.
-    scope : str
-        Cache scope including collection, conference, year, linkage,
-        dataset fingerprint, and clustering parameters.
-    labels_json : str
-        JSON string mapping cluster IDs to labels.
-    created_at : datetime
-        Timestamp when the cache entry was created.
-    """
-
-    __tablename__ = "flat_label_cache"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    embedding_model = Column(String, nullable=False, index=True)
-    scope = Column(String, nullable=False, index=True)
-    labels_json = Column(Text, nullable=False)
-    created_at = timestamp_column()
-
-    def __repr__(self) -> str:
-        """String representation of FlatLabelCache."""
-        return f"<FlatLabelCache(id={self.id}, model='{self.embedding_model}', scope='{self.scope}')>"
 
 
 class ValidationData(Base):

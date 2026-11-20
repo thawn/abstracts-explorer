@@ -49,11 +49,7 @@ jest.unstable_mockModule('../static/modules/paper-card.js', () => ({
 const {
     areClustersLoaded,
     loadClusters,
-    enableHierarchyMode,
-    disableHierarchyMode,
-    loadHierarchyLevel,
-    navigateHierarchyUp,
-    navigateHierarchyDown,
+    setHierarchyLevel,
     visualizeClusters,
     showClusterPaperDetails,
     exportClusters,
@@ -75,6 +71,10 @@ describe('Clustering Module', () => {
         document.body.innerHTML = `
             <div id="cluster-plot"></div>
             <div id="cluster-legend"></div>
+            <div id="hierarchy-controls" class="hidden">
+                <input id="hierarchy-level-slider" type="range" min="0" max="9" value="4" />
+                <span id="hierarchy-level-label"></span>
+            </div>
             <div id="selected-paper-details" class="hidden"></div>
             <div id="selected-paper-content"></div>
             <div id="papers-per-year-plot"></div>
@@ -198,33 +198,16 @@ describe('Clustering Module', () => {
             );
         });
 
-        it('should not auto-enable hierarchy mode for agglomerative clustering', async () => {
-            const mockHierarchyData = {
-                ...mockClusterData,
-                cluster_hierarchy: {
-                    tree: {
-                        nodes: {
-                            0: { node_id: 0, level: 0, samples: [0], is_leaf: true, children: [], label: 'Paper 1' },
-                            1: { node_id: 1, level: 1, samples: [0], is_leaf: false, children: [0], label: 'Parent' }
-                        },
-                        root: 1,
-                        max_level: 1
-                    }
-                }
-            };
-
+        it('should hide hierarchy controls for flat data without levels', async () => {
             global.fetch.mockResolvedValueOnce({
                 ok: true,
-                json: async () => mockHierarchyData
+                json: async () => mockClusterData
             });
 
             await loadClusters();
 
-            // Hierarchy mode should remain disabled after loading (default is false).
-            // Verify by attempting to load a hierarchy level — this warns when not in hierarchy mode.
-            await loadHierarchyLevel(0);
-            expect(global.console.warn).toHaveBeenCalledWith('Not in hierarchy mode');
-            // Normal visualization should have been called, not hierarchy visualization
+            const controls = document.getElementById('hierarchy-controls');
+            expect(controls.classList.contains('hidden')).toBe(true);
             expect(global.Plotly.newPlot).toHaveBeenCalled();
         });
 
@@ -271,7 +254,7 @@ describe('Clustering Module', () => {
             await loadClusters();
 
             expect(global.Plotly.newPlot).toHaveBeenCalledWith(
-                'cluster-plot',
+                expect.anything(),
                 expect.any(Array),
                 expect.objectContaining({
                     hovermode: 'closest',
@@ -309,214 +292,98 @@ describe('Clustering Module', () => {
         });
     });
 
-    describe('enableHierarchyMode', () => {
-        it('should show alert when no hierarchy available', async () => {
-            const mockClusterData = {
-                points: [{ x: 1, y: 1, cluster: 0, id: '1', title: 'Paper 1' }],
-                cluster_labels: { 0: 'Cluster 0' }
-            };
-
-            global.fetch.mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockClusterData
-                });
-
-            await loadClusters();
-            await enableHierarchyMode();
-
-            expect(global.alert).toHaveBeenCalled();
-        });
-
-        it('should enable hierarchy mode with valid tree', async () => {
-            const mockHierarchyData = {
-                points: [{ x: 1, y: 1, cluster: 0, id: '1', title: 'Paper 1' }],
-                cluster_labels: { 0: 'Cluster 0' },
-                cluster_hierarchy: {
-                    tree: {
-                        nodes: {
-                            0: { node_id: 0, level: 0, samples: [0], is_leaf: true, children: [], label: 'Leaf' },
-                            1: { node_id: 1, level: 1, samples: [0], is_leaf: false, children: [0], label: 'Parent' }
-                        },
-                        root: 1,
-                        max_level: 1
-                    }
-                }
-            };
-
-            global.fetch.mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockHierarchyData
-                });
-
-            await loadClusters();
-            await enableHierarchyMode();
-
-            expect(global.Plotly.newPlot).toHaveBeenCalled();
-        });
-
-        it('should show alert when tree has no nodes', async () => {
-            const mockHierarchyData = {
-                points: [{ x: 1, y: 1, cluster: 0, id: '1', title: 'Paper 1' }],
-                cluster_labels: { 0: 'Cluster 0' },
-                cluster_hierarchy: {
-                    tree: {
-                        nodes: {},
-                        root: 0,
-                        max_level: 0
-                    }
-                }
-            };
-
-            global.fetch.mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockHierarchyData
-                });
-
-            await loadClusters();
-            await enableHierarchyMode();
-
-            expect(global.alert).toHaveBeenCalled();
-        });
-    });
-
-    describe('disableHierarchyMode', () => {
-        it('should restore normal visualization', async () => {
-            const mockClusterData = {
-                points: [{ x: 1, y: 1, cluster: 0, id: '1', title: 'Paper 1' }],
-                cluster_labels: { 0: 'Cluster 0' }
-            };
-
-            global.fetch.mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockClusterData
-                });
-
-            await loadClusters();
-            const callCount = global.Plotly.newPlot.mock.calls.length;
-            
-            disableHierarchyMode();
-
-            expect(global.Plotly.newPlot.mock.calls.length).toBe(callCount + 1);
-        });
-    });
-
-    describe('loadHierarchyLevel', () => {
-        const mockHierarchyData = {
-            points: [{ x: 1, y: 1, cluster: 0, id: '1', title: 'Paper 1' }],
-            cluster_labels: { 0: 'Cluster 0' },
-            cluster_hierarchy: {
-                tree: {
-                    nodes: {
-                        0: { node_id: 0, level: 0, samples: [0], is_leaf: true, children: [], label: 'Leaf 1' },
-                        1: { node_id: 1, level: 0, samples: [1], is_leaf: true, children: [], label: 'Leaf 2' },
-                        2: { node_id: 2, level: 1, samples: [0, 1], is_leaf: false, children: [0, 1], label: 'Parent' }
+    describe('Hierarchy slider', () => {
+        const hierarchyData = {
+            points: [
+                { x: 1, y: 1, cluster: 0, id: '1', title: 'Paper 1', year: 2025, conference: 'NeurIPS' },
+                { x: 2, y: 2, cluster: 1, id: '2', title: 'Paper 2', year: 2025, conference: 'NeurIPS' }
+            ],
+            statistics: { total_papers: 2, n_clusters: 2, n_noise: 0, cluster_sizes: { 0: 1, 1: 1 } },
+            cluster_labels: { 0: 'Cat', 1: 'Dog' },
+            cluster_centers: { 0: { x: 1, y: 1 }, 1: { x: 2, y: 2 } },
+            hierarchy: {
+                levels: [
+                    {
+                        level: 0,
+                        max_distance: 0.1,
+                        clusters: [
+                            { id: 0, label: 'Cat', size: 1, center: { x: 1, y: 1 }, keywords: [] },
+                            { id: 1, label: 'Dog', size: 1, center: { x: 2, y: 2 }, keywords: [] }
+                        ],
+                        mapping: { 0: 0, 1: 1 }
                     },
-                    root: 2,
-                    max_level: 1
-                }
+                    {
+                        level: 1,
+                        max_distance: 0.2,
+                        clusters: [
+                            { id: 100, label: 'Animals', size: 2, center: { x: 1.5, y: 1.5 }, keywords: [] }
+                        ],
+                        mapping: { 0: 100, 1: 100 }
+                    }
+                ]
             }
         };
 
-        it('should not load level when not in hierarchy mode', async () => {
-            global.fetch.mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockHierarchyData
-                });
-
+        async function loadHierarchy() {
+            global.fetch.mockResolvedValueOnce({ ok: true, json: async () => hierarchyData });
             await loadClusters();
-            await loadHierarchyLevel(0);
+        }
 
-            expect(global.console.warn).toHaveBeenCalledWith('Not in hierarchy mode');
+        it('clamps the default level to the available levels', async () => {
+            await loadHierarchy();
+
+            const controls = document.getElementById('hierarchy-controls');
+            const slider = document.getElementById('hierarchy-level-slider');
+            expect(controls.classList.contains('hidden')).toBe(false);
+            expect(slider.max).toBe('1');
+            expect(slider.value).toBe('1');
+            expect(document.getElementById('hierarchy-level-label').textContent).toContain('Level 1');
         });
 
-        it('should load hierarchy level when in hierarchy mode', async () => {
-            const uiUtils = await import('../static/modules/utils/ui-utils.js');
-            
-            global.fetch.mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockHierarchyData
-                });
+        it('renders one document trace and one star trace', async () => {
+            await loadHierarchy();
 
-            await loadClusters();
-            await enableHierarchyMode();
-            
-            jest.clearAllMocks();
-            await loadHierarchyLevel(0);
+            const plotCall = global.Plotly.newPlot.mock.calls[0];
+            const traces = plotCall[1];
+            expect(traces).toHaveLength(2);
 
-            expect(uiUtils.showLoading).toHaveBeenCalledWith('cluster-plot', 'Loading hierarchy level 0...');
+            const [documents, stars] = traces;
+            expect(documents.mode).toBe('markers');
+            expect(documents.marker.color).toHaveLength(2);
+            expect(documents.text).toEqual(['Paper 1', 'Paper 2']);
+            expect(documents.hovertemplate).toContain('Year:');
+            expect(documents.hovertemplate).toContain('Conference:');
+
+            expect(stars.mode).toBe('markers');
+            expect(stars.marker.symbol).toBe('star');
+            expect(stars.x).toEqual([1.5]);
+            expect(stars.text).toEqual(['Animals']);
         });
-    });
 
-    describe('navigateHierarchyUp', () => {
-        it('should navigate to higher hierarchy level', async () => {
-            const uiUtils = await import('../static/modules/utils/ui-utils.js');
-            
-            const mockHierarchyData = {
-                points: [{ x: 1, y: 1, cluster: 0, id: '1', title: 'Paper 1' }],
-                cluster_labels: { 0: 'Cluster 0' },
-                cluster_hierarchy: {
-                    tree: {
-                        nodes: {
-                            0: { node_id: 0, level: 0, samples: [0], is_leaf: true, children: [], label: 'Leaf' },
-                            1: { node_id: 1, level: 1, samples: [0], is_leaf: false, children: [0], label: 'Parent' }
-                        },
-                        root: 1,
-                        max_level: 1
-                    }
-                }
-            };
+        it('updates colors and stars when the slider changes', async () => {
+            await loadHierarchy();
+            global.Plotly.newPlot.mockClear();
 
-            global.fetch.mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockHierarchyData
-                });
+            setHierarchyLevel(0);
 
-            await loadClusters();
-            await enableHierarchyMode();
-            
-            // Navigate down first
-            await loadHierarchyLevel(0);
-            jest.clearAllMocks();
-            
-            // Navigate up
-            await navigateHierarchyUp();
-
-            expect(uiUtils.showLoading).toHaveBeenCalled();
+            const traces = global.Plotly.newPlot.mock.calls[0][1];
+            expect(traces[0].marker.color).toHaveLength(2);
+            expect(traces[1].x).toEqual([1, 2]);
+            expect(traces[1].text).toEqual(['Cat', 'Dog']);
+            expect(document.getElementById('hierarchy-level-slider').value).toBe('0');
         });
-    });
 
-    describe('navigateHierarchyDown', () => {
-        it('should navigate to lower hierarchy level', async () => {
-            const uiUtils = await import('../static/modules/utils/ui-utils.js');
-            
-            const mockHierarchyData = {
-                points: [{ x: 1, y: 1, cluster: 0, id: '1', title: 'Paper 1' }],
-                cluster_labels: { 0: 'Cluster 0' },
-                cluster_hierarchy: {
-                    tree: {
-                        nodes: {
-                            0: { node_id: 0, level: 0, samples: [0], is_leaf: true, children: [], label: 'Leaf' },
-                            1: { node_id: 1, level: 1, samples: [0], is_leaf: false, children: [0], label: 'Parent' }
-                        },
-                        root: 1,
-                        max_level: 1
-                    }
-                }
-            };
-
+        it('hides the slider in custom cluster mode', async () => {
+            await loadHierarchy();
             global.fetch.mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockHierarchyData
-                });
+                ok: true,
+                json: async () => ({ query: 'test query', distance: 0.5, papers: [], count: 0, query_embedding: [] })
+            });
 
-            await loadClusters();
-            await enableHierarchyMode();
-            jest.clearAllMocks();
-            
-            // Navigate down
-            await navigateHierarchyDown();
+            await searchCustomCluster();
 
-            expect(uiUtils.showLoading).toHaveBeenCalled();
+            const controls = document.getElementById('hierarchy-controls');
+            expect(controls.classList.contains('hidden')).toBe(true);
         });
     });
 
@@ -1016,13 +883,6 @@ describe('Clustering Module', () => {
 
 
     describe('Window global functions', () => {
-        it('should expose hierarchy functions to window', () => {
-            expect(window.enableHierarchyMode).toBeDefined();
-            expect(window.disableHierarchyMode).toBeDefined();
-            expect(window.navigateHierarchyUp).toBeDefined();
-            expect(window.navigateHierarchyDown).toBeDefined();
-        });
-
         it('should expose custom cluster functions to window', () => {
             expect(window.searchCustomCluster).toBeDefined();
             expect(window.deleteCustomCluster).toBeDefined();
@@ -1086,71 +946,6 @@ describe('Clustering Module', () => {
             expect(legendDiv.innerHTML).toBeTruthy();
         });
     });
-
-    describe('Hierarchy legend and dendrogram', () => {
-        it('should create hierarchy legend with controls', async () => {
-            const mockHierarchyData = {
-                points: [{ x: 1, y: 1, cluster: 0, id: '1', title: 'Paper 1' }],
-                cluster_labels: { 0: 'Cluster 0' },
-                cluster_hierarchy: {
-                    tree: {
-                        nodes: {
-                            0: { node_id: 0, level: 0, samples: [0], is_leaf: true, children: [], label: 'Leaf' },
-                            1: { node_id: 1, level: 1, samples: [0], is_leaf: false, children: [0], label: 'Parent' }
-                        },
-                        root: 1,
-                        max_level: 1
-                    },
-                    dendrogram: {
-                        icoord: [[1, 2, 3, 4]],
-                        dcoord: [[0, 1, 1, 0]]
-                    },
-                    n_samples: 1
-                }
-            };
-
-            global.fetch.mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockHierarchyData
-                });
-
-            await loadClusters();
-            await enableHierarchyMode();
-
-            const legendDiv = document.getElementById('cluster-legend');
-            expect(legendDiv.innerHTML).toContain('Hierarchical View');
-        });
-
-        it('should handle missing dendrogram data', async () => {
-            const mockHierarchyData = {
-                points: [{ x: 1, y: 1, cluster: 0, id: '1', title: 'Paper 1' }],
-                cluster_labels: { 0: 'Cluster 0' },
-                cluster_hierarchy: {
-                    tree: {
-                        nodes: {
-                            0: { node_id: 0, level: 0, samples: [0], is_leaf: true, children: [], label: 'Leaf' },
-                            1: { node_id: 1, level: 1, samples: [0], is_leaf: false, children: [0], label: 'Parent' }
-                        },
-                        root: 1,
-                        max_level: 1
-                    }
-                }
-            };
-
-            global.fetch.mockResolvedValueOnce({
-                    ok: true,
-                    json: async () => mockHierarchyData
-                });
-
-            await loadClusters();
-            await enableHierarchyMode();
-
-            // Should still work without dendrogram
-            const legendDiv = document.getElementById('cluster-legend');
-            expect(legendDiv).toBeTruthy();
-        });
-    });
-
 
     describe('Custom cluster visualization edge cases', () => {
         it('should handle multiple custom clusters', async () => {

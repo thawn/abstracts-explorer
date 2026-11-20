@@ -717,6 +717,16 @@
                         </button>
                     </div>
                 </div>
+                <div id="hierarchy-controls" class="hidden mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <label for="hierarchy-level-slider"
+                        class="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                        Hierarchy level
+                    </label>
+                    <input type="range" id="hierarchy-level-slider" min="0" max="9" value="4" step="1"
+                        class="w-full sm:flex-1 accent-purple-600">
+                    <span id="hierarchy-level-label"
+                        class="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">Level 4</span>
+                </div>
                 <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
                     <div id="cluster-plot" class="col-span-1 lg:col-span-3" style="aspect-ratio: 1/1; width: 100%;">
                         <div class="text-center text-gray-500 dark:text-gray-400 py-12">

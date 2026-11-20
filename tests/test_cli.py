@@ -2838,13 +2838,11 @@ class TestCLI:
         assert "Pre-generation complete" in captured.out
         # 2 combos: NeurIPS 2023 + NeurIPS 2024
         assert mock_compute.call_count == 2
-        # Verify fixed agglomerative/t-SNE parameters on all calls
+        # Verify BERTopic parameters on all calls
         for call in mock_compute.call_args_list:
             kw = call[1]
-            assert kw["linkage"] == "ward"
-            assert kw["distance_threshold"] == 150.0
-            assert kw["n_clusters"] is None
-            assert kw["force_recreate_labels"] is False
+            assert kw["nr_levels"] == 10
+            assert kw["use_llm_labels"] is True
             assert kw["show_progress"] is True
         mock_em.close.assert_called_once()
 
@@ -2927,8 +2925,8 @@ class TestCLI:
         call_kwargs = mock_compute.call_args[1]
         assert call_kwargs["force"] is True
 
-    def test_pre_generate_clustering_force_recreate_labels(self, tmp_path, capsys, monkeypatch):
-        """Test --force-recreate-labels is forwarded and does not imply --force."""
+    def test_pre_generate_clustering_no_llm_labels(self, tmp_path, capsys, monkeypatch):
+        """Test --no-llm-labels is forwarded and does not imply --force."""
         embeddings_path = tmp_path / "chroma_db"
         embeddings_path.mkdir()
         patch_get_config_for_test(monkeypatch, embeddings_path)
@@ -2957,13 +2955,13 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "clustering", "pre-generate", "--force-recreate-labels"],
+                ["abstracts-explorer", "clustering", "pre-generate", "--no-llm-labels"],
             ):
                 exit_code = main()
 
         assert exit_code == 0
         kwargs = mock_compute.call_args[1]
-        assert kwargs["force_recreate_labels"] is True
+        assert kwargs["use_llm_labels"] is False
         assert kwargs["force"] is False
 
     def test_pre_generate_clustering_requests_per_minute(self, tmp_path, capsys, monkeypatch):

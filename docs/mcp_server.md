@@ -372,8 +372,10 @@ abstracts-explorer mcp-server --port 8001
 ### Clustering Configuration
 
 The MCP tools read pre-generated clustering results from the database cache. The
-pipeline is fixed to Agglomerative clustering (ward linkage, distance threshold
-150) with t-SNE dimensionality reduction. Generate the cache with:
+pipeline is fixed to BERTopic with Agglomerative clustering (ward linkage,
+distance threshold 0.5) on 5-D UMAP embeddings and 2-D UMAP visualization.
+`get_conference_topics` uses hierarchy level 6 (clamped to the available
+levels); the web UI defaults to level 4. Generate the cache with:
 
 ```bash
 abstracts-explorer clustering pre-generate --conference NeurIPS

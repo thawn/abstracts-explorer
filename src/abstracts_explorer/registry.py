@@ -493,17 +493,15 @@ class RegistryClient:
         a new embedding model association in the local database.
         """
         from abstracts_explorer.database import DatabaseManager
-        from abstracts_explorer.db_models import EmbeddingsMetadata, FlatLabelCache, HierarchicalLabelCache
+        from abstracts_explorer.db_models import EmbeddingsMetadata
         from abstracts_explorer.embeddings import EmbeddingsManager
         from sqlalchemy import delete as sa_delete
 
-        # 1. Clear EmbeddingsMetadata and clustering/hierarchical/flat caches from SQLite
+        # 1. Clear EmbeddingsMetadata and clustering cache from SQLite
         with DatabaseManager() as db:
             db.create_tables()
             db._session.execute(sa_delete(EmbeddingsMetadata))  # type: ignore[union-attr]
             db.clear_clustering_cache()
-            db._session.execute(sa_delete(HierarchicalLabelCache))  # type: ignore[union-attr]
-            db._session.execute(sa_delete(FlatLabelCache))  # type: ignore[union-attr]
             db._session.commit()  # type: ignore[union-attr]
 
         # 2. Reset the ChromaDB collection

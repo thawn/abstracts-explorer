@@ -37,7 +37,7 @@ them with `--no-verify` unless explicitly asked.
   - `cli/`: `main.py` (dispatch), `parsers.py` (argparse wiring), `_common.py`, one module per command group.
   - `db/`: `DatabaseManager` mixins (`manager.py`); `database.py` is a re-export facade.
   - `embeddings/`: ChromaDB store, generation, queries, ingestion, artifacts.
-  - `clustering/`: Agglomerative + t-SNE, hierarchy, labeling, results, cache/pipeline.
+  - `clustering/`: BERTopic + UMAP, hierarchy levels, LLM labeling, results, cache/pipeline.
   - `plugin/`: plugin framework, models, registry, HTTP, persistence; `plugin.py` is no longer present.
   - `plugins/`: conference downloaders.
   - `mcp/`: MCP server, resources, cache, tools; `mcp_server.py` is a facade. `mcp_tools.py` is the tool registry/normalizer/formatter.
@@ -81,7 +81,7 @@ them with `--no-verify` unless explicitly asked.
 ## Architecture Notes
 
 - DB: SQLAlchemy 2.0+, SQLite default / PostgreSQL supported. Models: `Paper`, `EmbeddingsMetadata`, `ClusteringCache`.
-- Clustering: the pipeline is fixed to Agglomerative (ward linkage, distance threshold 150) + t-SNE; the other algorithms (K-Means, DBSCAN, Spectral, Fuzzy C-Means) and PCA were removed. Shared pipeline constants live in `clustering.py` (`DEFAULT_CLUSTERING_*`). LLM auto-labeling + DB-backed cache.
+- Clustering: the pipeline is fixed to BERTopic with Agglomerative clustering (ward linkage, distance threshold 0.5) on 5-D UMAP embeddings; a separate 2-D UMAP supplies visualization coordinates. Shared constants live in `clustering/constants.py` (`DEFAULT_CLUSTERING_*`). LLM labels are used for flat and merged hierarchy topics, with retry and keyword fallback. The DB caches the complete JSON payload; Plotly runs only in the browser.
 - MCP: `MCPServer` from the `mcp` package; RAG chat auto-invokes MCP tools.
 - Web UI: Flask 3.0+, 20+ API routes in `web_ui/app.py` (frontend calls from `web_ui/static/modules/`), TypeScript modules bundled by esbuild (basic Plotly build lazy-loaded on first chart), Waitress in production.
 

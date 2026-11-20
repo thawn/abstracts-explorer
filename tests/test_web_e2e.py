@@ -232,12 +232,12 @@ def test_embeddings(test_database, tmp_path_factory):
 
 def _prepopulate_clustering_cache(test_database, em, collection_name):
     """
-    Pre-populate the database with cached clustering results.
+    Pre-populate the database with cached BERTopic-style clustering results.
 
-    This mirrors the production workflow where ``abstracts-explorer cluster
-    pre-generate`` is run before the web UI is used.  With cached results
-    present, MCP tools (``get_conference_topics``, ``get_cluster_visualization``)
-    return instantly instead of running t-SNE from scratch.
+    This mirrors the production workflow where ``abstracts-explorer clustering
+    pre-generate`` is run before the web UI is used.  Results are constructed
+    directly (without running BERTopic) so the E2E suite stays fast and
+    deterministic.
 
     Parameters
     ----------
@@ -248,69 +248,59 @@ def _prepopulate_clustering_cache(test_database, em, collection_name):
     collection_name : str
         Name of the ChromaDB collection.
     """
-    from abstracts_explorer.clustering import ClusteringManager
+    import pandas as pd
+
+    from abstracts_explorer.clustering import (
+        DEFAULT_CLUSTERING_METHOD,
+        DEFAULT_CLUSTERING_PARAMS,
+        DEFAULT_REDUCTION_METHOD,
+        ClusteringManager,
+    )
+    from abstracts_explorer.clustering.results import build_clustering_results
     from abstracts_explorer.config import get_config
 
     config = get_config()
 
     set_test_db(str(test_database))
     db = DatabaseManager()
-
     db.create_tables()
 
     cm = ClusteringManager(em, db)
     cm.load_embeddings()
 
-    # Cluster on full embeddings (this is fast with only 3 test papers)
-    cm.cluster(
-        n_clusters=None,
-        distance_threshold=150.0,
-        linkage="ward",
+    paper_ids = list(cm.paper_ids or [])
+    metadatas = list(cm.metadatas or [])
+    topics = list(range(len(paper_ids)))
+    reduced = np.array([[float(i), float(i % 3)] for i in range(len(paper_ids))])
+    labels = {index: f"Topic {index}" for index in topics}
+    keywords = {index: [f"keyword{index}"] for index in topics}
+
+    results = build_clustering_results(
+        paper_ids=paper_ids,
+        reduced_embeddings=reduced,
+        metadatas=metadatas,
+        topics=topics,
+        flat_labels=labels,
+        flat_keywords=keywords,
+        hierarchical_topics=pd.DataFrame(columns=["Parent_ID", "Parent_Name", "Topics", "Distance"]),
+        parent_labels={},
+        nr_levels=10,
     )
 
-    # Assign deterministic 2-D coordinates directly instead of running a real
-    # reduction (deterministic, thread-safe, and fast).  The results are stored
-    # under the "tsne" cache key so that compute_clusters_with_cache() finds an
-    # exact cache hit when MCP tools request t-SNE reduction.  The x/y
-    # coordinates differ from a real t-SNE but are sufficient for testing the
-    # cache-lookup and topic-analysis paths.
-    cm.reduced_embeddings = np.array([[float(i), float(i % 3)] for i in range(len(cm.paper_ids or []))])
-
-    try:
-        cm.extract_cluster_keywords(n_keywords=5)
-        cm.generate_cluster_labels(use_llm=False, max_keywords=3)
-    except Exception:
-        pass  # Labels are optional
-
-    results = cm.get_clustering_results()
-
-    # Save under the t-SNE cache key so that compute_clusters_with_cache()
-    # finds it when MCP tools ask for tsne reduction.
-    db.save_clustering_cache(
-        embedding_model=config.embedding_model,
-        reduction_method="tsne",
-        n_components=2,
-        clustering_method="agglomerative",
-        results=results,
-        n_clusters=None,
-        clustering_params={"linkage": "ward", "distance_threshold": 150.0},
-        collection_name=collection_name,
-    )
-
-    # The clustering tab requests results for the selected conference/year
-    # (NeurIPS 2025 in the test data), which are cached under separate keys.
-    db.save_clustering_cache(
-        embedding_model=config.embedding_model,
-        reduction_method="tsne",
-        n_components=2,
-        clustering_method="agglomerative",
-        results=results,
-        n_clusters=None,
-        clustering_params={"linkage": "ward", "distance_threshold": 150.0},
-        conference="NeurIPS",
-        year=2025,
-        collection_name=collection_name,
-    )
+    clustering_params = dict(DEFAULT_CLUSTERING_PARAMS)
+    for conference, year in ((None, None), ("NeurIPS", 2025)):
+        db.save_clustering_cache(
+            embedding_model=config.embedding_model,
+            reduction_method=DEFAULT_REDUCTION_METHOD,
+            n_components=2,
+            clustering_method=DEFAULT_CLUSTERING_METHOD,
+            results=results,
+            n_clusters=None,
+            clustering_params=clustering_params,
+            conference=conference,
+            year=year,
+            collection_name=collection_name,
+        )
     db.close()
 
 

@@ -633,40 +633,55 @@ class TestExecuteMCPToolE2E:
     # ------------------------------------------------------------------
 
     def test_get_conference_topics_real_execution(self):
-        """get_conference_topics executes end-to-end with mocked clustering stack."""
-        import numpy as np
-
-        mock_cm = Mock()
-        mock_cm.load_embeddings.return_value = 10
-        mock_cm.get_cluster_statistics.return_value = {
-            "n_clusters": 2,
-            "n_noise": 0,
-            "cluster_sizes": {0: 3, 1: 2},
-            "total_papers": 5,
-        }
-        mock_cm.paper_ids = ["p1", "p2", "p3", "p4", "p5"]
-        mock_cm.cluster_labels = np.array([0, 0, 1, 1, 0])
-        mock_cm.cluster_label_names = None
-        mock_cm.cluster_keywords = None
-        mock_cm.metadatas = [
-            {"title": "A", "keywords": ["ml"], "session": "S1", "year": 2025},
-            {"title": "B", "keywords": ["dl"], "session": "S1", "year": 2025},
-            {"title": "C", "keywords": ["nlp"], "session": "S2", "year": 2025},
-            {"title": "D", "keywords": ["nlp"], "session": "S2", "year": 2025},
-            {"title": "E", "keywords": ["ml"], "session": "S1", "year": 2025},
+        """get_conference_topics reads the fixed hierarchy level from cache."""
+        points = [
+            {"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0, "title": "Paper 1"},
+            {"id": "p2", "cluster": 0, "x": 0.1, "y": 0.1, "title": "Paper 2"},
+            {"id": "p3", "cluster": 1, "x": 1.0, "y": 1.0, "title": "Paper 3"},
+            {"id": "p4", "cluster": 1, "x": 1.1, "y": 1.1, "title": "Paper 4"},
+            {"id": "p5", "cluster": 0, "x": 0.2, "y": 0.2, "title": "Paper 5"},
         ]
-        mock_cm.embeddings_manager = Mock()
-        mock_db = Mock()
-
-        # Mock db.get_clustering_cache to return cached results with cluster names
-        mock_db.get_clustering_cache.return_value = {
-            "points": [
-                {"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0},
-                {"id": "p2", "cluster": 0, "x": 0.1, "y": 0.1},
-                {"id": "p3", "cluster": 1, "x": 1.0, "y": 1.0},
-                {"id": "p4", "cluster": 1, "x": 1.1, "y": 1.1},
-                {"id": "p5", "cluster": 0, "x": 0.2, "y": 0.2},
+        flat_level = {
+            "level": 0,
+            "max_distance": 0.1,
+            "clusters": [
+                {
+                    "id": 0,
+                    "label": "Machine Learning",
+                    "size": 3,
+                    "keywords": ["ml", "deep"],
+                    "source_topic_count": 1,
+                },
+                {"id": 1, "label": "NLP", "size": 2, "keywords": ["nlp", "bert"], "source_topic_count": 1},
             ],
+            "mapping": {"0": 0, "1": 1},
+        }
+        levels = [dict(flat_level, level=index) for index in range(6)]
+        levels.append(
+            {
+                "level": 6,
+                "max_distance": 0.42,
+                "clusters": [
+                    {
+                        "id": 10,
+                        "label": "Machine Learning",
+                        "size": 3,
+                        "keywords": ["ml", "deep"],
+                        "source_topic_count": 1,
+                    },
+                    {
+                        "id": 11,
+                        "label": "NLP",
+                        "size": 2,
+                        "keywords": ["nlp", "bert"],
+                        "source_topic_count": 1,
+                    },
+                ],
+                "mapping": {"0": 10, "1": 11},
+            }
+        )
+        cached = {
+            "points": points,
             "statistics": {
                 "n_clusters": 2,
                 "n_noise": 0,
@@ -675,10 +690,14 @@ class TestExecuteMCPToolE2E:
             },
             "cluster_labels": {"0": "Machine Learning", "1": "NLP"},
             "cluster_keywords": {"0": ["ml", "deep"], "1": ["nlp", "bert"]},
+            "hierarchy": {"levels": levels},
         }
 
+        mock_db = Mock()
+        mock_db.get_clustering_cache.return_value = cached
+
         with (
-            patch("abstracts_explorer.mcp.resources.load_clustering_data", return_value=(mock_cm, mock_db)),
+            patch("abstracts_explorer.mcp.resources._get_shared_database", return_value=mock_db),
             patch("abstracts_explorer.mcp.shared_dependencies.get_config") as mock_cfg,
         ):
             mock_cfg.return_value = Mock(collection_name="papers", embedding_model="test-model")
@@ -686,17 +705,47 @@ class TestExecuteMCPToolE2E:
 
         data = json.loads(result)
         assert "error" not in data
-        assert "topics" in data
         assert data["n_topics"] == 2
-        # topic_sizes should use topic names sorted by size descending
+        assert data["hierarchy_level"] == 6
+        assert data["hierarchy_max_distance"] == 0.42
         assert list(data["topic_sizes"].keys()) == ["Machine Learning", "NLP"]
-        assert data["topic_sizes"]["Machine Learning"] == 3
-        assert data["topic_sizes"]["NLP"] == 2
-        # Verify topics are returned, sorted by paper_count desc
         assert data["topics"][0]["topic"] == "Machine Learning"
-        assert data["topics"][0]["keywords"] == ["ml", "deep"]
+        assert data["topics"][0]["paper_count"] == 3
+        assert data["topics"][0]["sample_titles"] == ["Paper 1", "Paper 2", "Paper 5"]
         assert data["topics"][1]["topic"] == "NLP"
-        assert data["topics"][1]["keywords"] == ["nlp", "bert"]
+        assert data["topics"][1]["source_topic_count"] == 1
+
+    def test_get_conference_topics_falls_back_to_flat(self):
+        """get_conference_topics falls back to flat clusters without hierarchy."""
+        points = [
+            {"id": "p1", "cluster": 0, "title": "Paper 1"},
+            {"id": "p2", "cluster": 1, "title": "Paper 2"},
+        ]
+        cached = {
+            "points": points,
+            "statistics": {
+                "n_clusters": 2,
+                "n_noise": 0,
+                "cluster_sizes": {0: 1, 1: 1},
+                "total_papers": 2,
+            },
+            "cluster_labels": {"0": "A", "1": "B"},
+            "cluster_keywords": {"0": ["a"], "1": ["b"]},
+        }
+        mock_db = Mock()
+        mock_db.get_clustering_cache.return_value = cached
+
+        with (
+            patch("abstracts_explorer.mcp.resources._get_shared_database", return_value=mock_db),
+            patch("abstracts_explorer.mcp.shared_dependencies.get_config") as mock_cfg,
+        ):
+            mock_cfg.return_value = Mock(collection_name="papers", embedding_model="test-model")
+            result = execute_mcp_tool("get_conference_topics", {"conferences": ["NeurIPS"]})
+
+        data = json.loads(result)
+        assert data["n_topics"] == 2
+        assert data["topics"][0]["topic"] == "A"
+        assert data["topics"][0]["sample_titles"] == ["Paper 1"]
 
     # ------------------------------------------------------------------
     # get_topic_evolution

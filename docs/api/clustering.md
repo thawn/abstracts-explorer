@@ -1,18 +1,20 @@
 # Clustering Module
 
-The clustering module provides functionality to cluster and visualize paper embeddings
-using dimensionality reduction and clustering algorithms.
+The clustering module clusters paper embeddings with BERTopic and produces a
+compact JSON payload for the web UI, MCP tools, and exports. The server never
+imports Plotly; all rendering happens in the browser.
 
 ## Features
 
-- Dimensionality reduction using PCA and t-SNE
-- Clustering using K-Means, DBSCAN, Agglomerative, Spectral, and Fuzzy C-Means
-- CLI/web/MCP pipeline fixed to Agglomerative clustering (ward, distance threshold 150) with t-SNE
-- Automatic cluster labeling using TF-IDF and LLM-based methods
-- Keyword extraction for each cluster
-- Representative paper selection based on cluster centroids
-- Hierarchical cluster structure for agglomerative clustering
-- Export clustering results to JSON for visualization
+- BERTopic with Agglomerative clustering (`distance_threshold=0.5`, ward,
+  euclidean) on 5-D UMAP embeddings
+- 2-D UMAP coordinates for visualization
+- 10 linear hierarchy levels with per-level flat-topic mappings
+- LLM-generated labels for flat and merged topics, with retry and keyword
+  fallback
+- Base c-TF-IDF keyword extraction for every flat topic
+- Compact JSON cache (points, statistics, flat labels/keywords, hierarchy levels)
+- Export clustering results to JSON
 
 ## Quick Start
 
@@ -21,26 +23,20 @@ from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.clustering import ClusteringManager
 
-# Initialize managers
 em = EmbeddingsManager()
 db = DatabaseManager()
 
-# Create clustering manager
 cm = ClusteringManager(em, db)
-
-# Load embeddings
 n_papers = cm.load_embeddings()
-print(f"Loaded {n_papers} papers")
 
-# Cluster on full embeddings, then reduce for visualization
-cm.cluster(distance_threshold=150.0, linkage="ward")
-cm.reduce_dimensions(n_components=2)
-
-# Generate labels and get results
-cm.extract_cluster_keywords()
-cm.generate_cluster_labels(use_llm=True)
-results = cm.get_clustering_results()
+results = cm.fit(use_llm_labels=True, nr_levels=10)
+print(results["statistics"])
+print(len(results["hierarchy"]["levels"]))
 ```
+
+Use `compute_clusters_with_cache()` for the CLI/web/MCP workflow. Old
+Agglomerative + t-SNE caches are invalid; regenerate them with
+`abstracts-explorer clustering pre-generate`.
 
 ## API Reference
 

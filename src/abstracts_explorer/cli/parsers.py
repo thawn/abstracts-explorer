@@ -377,8 +377,8 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         description="""
     Clustering-related commands.
 
-    Uses agglomerative clustering (ward linkage, distance threshold 150)
-    with t-SNE dimensionality reduction.
+    Uses BERTopic with Agglomerative clustering (ward linkage, distance
+    threshold 0.5) on 5-D UMAP embeddings and 2-D UMAP visualization.
 
     Sub-commands:
       run            Cluster embeddings and export results
@@ -408,7 +408,7 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         "run",
         help="Cluster embeddings for visualization",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="Perform agglomerative clustering with t-SNE dimensionality reduction on paper embeddings.",
+        description="Perform BERTopic clustering with UMAP dimensionality reduction on paper embeddings.",
     )
     cluster_parser.add_argument(
         "--collection",
@@ -427,6 +427,12 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         type=int,
         default=None,
         help="Maximum number of embeddings to process (optional)",
+    )
+    cluster_parser.add_argument(
+        "--no-llm-labels",
+        action="store_true",
+        default=False,
+        help="Use c-TF-IDF keywords instead of LLM-generated labels",
     )
 
     # clustering clear-cache
@@ -461,10 +467,10 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         help="Pre-generate clustering results for the web UI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="""
-    Pre-generate clustering results using agglomerative clustering
-    (ward linkage, distance threshold 150) with t-SNE dimensionality
-    reduction.  Results are persisted to the database cache so that
-    the web UI serves them instantly.
+    Pre-generate clustering results using BERTopic with Agglomerative
+    clustering (ward linkage, distance threshold 0.5) on 5-D UMAP
+    embeddings.  Results are persisted to the database cache so that the
+    web UI serves them instantly.
 
     Without any arguments, generates clustering for every conference in
     the database combined with each individual year.
@@ -488,8 +494,8 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
       # Force recompute
       abstracts-explorer clustering pre-generate --force
 
-      # Regenerate labels without re-clustering
-      abstracts-explorer clustering pre-generate --force-recreate-labels
+      # Use c-TF-IDF keywords instead of LLM labels
+      abstracts-explorer clustering pre-generate --no-llm-labels
         """,
     )
     pre_gen_parser.add_argument(
@@ -506,10 +512,10 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         help="Force recompute even if cache already exists",
     )
     pre_gen_parser.add_argument(
-        "--force-recreate-labels",
+        "--no-llm-labels",
         action="store_true",
         default=False,
-        help="Regenerate all flat and hierarchy labels while reusing cached clustering",
+        help="Use c-TF-IDF keywords instead of LLM-generated labels",
     )
     pre_gen_parser.add_argument(
         "--requests-per-minute",
@@ -1171,8 +1177,8 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
       # Recreate embeddings after switching embedding models, without prompting
       abstracts-explorer pre-process --ignore-embedding-model-mismatch --model my-new-model
 
-      # Regenerate labels without re-clustering
-      abstracts-explorer pre-process --force-recreate-labels
+      # Use c-TF-IDF keywords instead of LLM labels
+      abstracts-explorer pre-process --no-llm-labels
 
       # Do not overlap embeddings and clustering
       abstracts-explorer pre-process --no-overlap-post-process
@@ -1185,9 +1191,9 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         help="Force re-download and reset embeddings/clustering even if they already exist",
     )
     pre_process_parser.add_argument(
-        "--force-recreate-labels",
+        "--no-llm-labels",
         action="store_true",
-        help="Regenerate all cluster labels while reusing cached clustering",
+        help="Use c-TF-IDF keywords instead of LLM-generated labels",
     )
     pre_process_parser.add_argument(
         "--no-overlap-post-process",

@@ -7,7 +7,7 @@ working.
 """
 
 from abstracts_explorer.mcp import tools as _tools  # noqa: F401  (registers MCP tools)
-from abstracts_explorer.mcp.cache import _apply_cached_cluster_labels, _lookup_clustering_cache
+from abstracts_explorer.mcp.cache import _lookup_clustering_cache
 from abstracts_explorer.mcp.errors import ClusterAnalysisError
 from abstracts_explorer.mcp.resources import (
     _get_clustering_resources,
@@ -31,7 +31,6 @@ from abstracts_explorer.mcp.tools import (
 from abstracts_explorer.mcp.tools.topics import _get_conference_topics_for_single_conference
 
 __all__ = [
-    "_apply_cached_cluster_labels",
     "_get_clustering_resources",
     "_get_conference_topics_for_single_conference",
     "_get_mcp_resources",
