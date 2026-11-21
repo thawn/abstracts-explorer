@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class PluginRegistry:
     """Registry for managing downloader plugins."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._plugins: Dict[str, DownloaderPlugin] = {}
 
     def register(self, plugin: DownloaderPlugin) -> None:
