@@ -80,7 +80,7 @@ tools when you ask certain questions — you do not need to do anything special:
 | `get_paper_details` | Returns full metadata for a specific paper | *"Who are the authors of 'PICProp'?"* |
 | `get_conference_topics` | Lists the main research clusters at a conference | *"What are the main topics at ICLR 2025?"* |
 | `get_cluster_visualization` | Describes the 2-D cluster layout | *"Describe the cluster layout for NeurIPS 2024"* |
-| `suggest_search_terms_from_orcid` | Suggests search terms from a public ORCID record | *"My ORCID is 0000-0002-2315-9247. What should I search for?"* |
+| `suggest_search_terms_from_orcid` | Suggests search terms from a public ORCID record | *"Find papers that are interesting to me based on my ORCID record 0000-0002-2315-9247."* |
 
 See [Chat Example](chat_example.md) for a full worked example conversation.
 

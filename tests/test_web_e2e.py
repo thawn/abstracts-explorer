@@ -896,7 +896,7 @@ class TestWebUIE2E:
     @requires_lm_studio
     def test_chat_orcid_search_terms(self, web_server, page: Page):
         """
-        Test that chat can suggest search terms from a real public ORCID record.
+        Test that chat can find interesting papers from a real public ORCID record.
 
         The test uses the live ORCID API and the configured chat model.  It
         skips when either service is unavailable.
@@ -921,10 +921,7 @@ class TestWebUIE2E:
         expect(page.locator("#chat-tab")).to_be_visible()
 
         chat_input = page.locator("#chat-input")
-        chat_input.fill(
-            f"My ORCID is {_ORCID_ID}. Use the suggest_search_terms_from_orcid tool "
-            "to suggest paper search terms for me."
-        )
+        chat_input.fill(f"Find papers that are interesting to me based on my ORCID record {_ORCID_ID}.")
 
         with page.expect_response(
             lambda response: response.url.endswith("/api/chat") and response.request.method == "POST",
