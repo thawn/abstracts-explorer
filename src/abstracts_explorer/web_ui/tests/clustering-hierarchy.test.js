@@ -45,6 +45,7 @@ function buildData(levels) {
         ],
         statistics: { total_papers: 2, n_clusters: 2, n_noise: 0, cluster_sizes: { 0: 1, 1: 1 } },
         cluster_labels: { 0: 'Cat', 1: 'Dog' },
+        cluster_descriptions: { 0: 'Papers about cats.', 1: 'Papers about dogs.' },
         cluster_centers: { 0: { x: 1, y: 1 }, 1: { x: 2, y: 2 } },
         hierarchy: { levels }
     };
@@ -54,8 +55,22 @@ const flatLevel = {
     level: 0,
     max_distance: 0.1,
     clusters: [
-        { id: 0, label: 'Cat', size: 1, center: { x: 1, y: 1 }, keywords: [] },
-        { id: 1, label: 'Dog', size: 1, center: { x: 2, y: 2 }, keywords: [] }
+        {
+            id: 0,
+            label: 'Cat',
+            description: 'Papers about cats.',
+            size: 1,
+            center: { x: 1, y: 1 },
+            keywords: []
+        },
+        {
+            id: 1,
+            label: 'Dog',
+            description: 'Papers about dogs.',
+            size: 1,
+            center: { x: 2, y: 2 },
+            keywords: []
+        }
     ],
     mapping: { 0: 0, 1: 1 }
 };
@@ -63,7 +78,16 @@ const flatLevel = {
 const mergedLevel = {
     level: 1,
     max_distance: 0.2,
-    clusters: [{ id: 100, label: 'Animals', size: 2, center: { x: 1.5, y: 1.5 }, keywords: [] }],
+    clusters: [
+        {
+            id: 100,
+            label: 'Animals',
+            description: 'Papers about domestic animals.',
+            size: 2,
+            center: { x: 1.5, y: 1.5 },
+            keywords: []
+        }
+    ],
     mapping: { 0: 100, 1: 100 }
 };
 
@@ -115,6 +139,8 @@ describe('Hierarchy slider', () => {
         expect(mergedTraces[0].marker.color[0]).toBe(mergedTraces[0].marker.color[1]);
         expect(mergedTraces[1].text).toEqual(['Animals']);
         expect(mergedTraces[1].x).toEqual([1.5]);
+        expect(mergedTraces[1].customdata[0].description).toBe('Papers about domestic animals.');
+        expect(mergedTraces[1].hovertemplate).toContain('%{customdata.description}');
 
         global.Plotly.newPlot.mockClear();
         setHierarchyLevel(0);

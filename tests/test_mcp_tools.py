@@ -125,7 +125,8 @@ def test_format_conference_topics_result():
         "total_papers": 150,
         "topics": [
             {
-                "topic": "Transformers",
+                "topic": "Papers study transformer architectures and attention.",
+                "label": "Transformers",
                 "paper_count": 60,
                 "keywords": ["reinforcement learning", "policy"],
             },
@@ -143,6 +144,8 @@ def test_format_conference_topics_result():
     assert "150 papers" in result
     assert "3 topics" in result
     assert "Transformers" in result
+    assert "Papers study transformer architectures and attention." in result
+    assert "Label: Transformers" in result
     assert "60 papers" in result
     assert "reinforcement learning" in result
     assert "Attention Mechanisms" in result
@@ -665,6 +668,7 @@ class TestExecuteMCPToolE2E:
                     {
                         "id": 10,
                         "label": "Machine Learning",
+                        "description": "Papers apply learning methods to practical problems.",
                         "size": 3,
                         "keywords": ["ml", "deep"],
                         "source_topic_count": 1,
@@ -672,6 +676,7 @@ class TestExecuteMCPToolE2E:
                     {
                         "id": 11,
                         "label": "NLP",
+                        "description": "Papers study language processing models.",
                         "size": 2,
                         "keywords": ["nlp", "bert"],
                         "source_topic_count": 1,
@@ -708,11 +713,16 @@ class TestExecuteMCPToolE2E:
         assert data["n_topics"] == 2
         assert data["hierarchy_level"] == 6
         assert data["hierarchy_max_distance"] == 0.42
-        assert list(data["topic_sizes"].keys()) == ["Machine Learning", "NLP"]
-        assert data["topics"][0]["topic"] == "Machine Learning"
+        assert list(data["topic_sizes"].keys()) == [
+            "Papers apply learning methods to practical problems.",
+            "Papers study language processing models.",
+        ]
+        assert data["topics"][0]["topic"] == "Papers apply learning methods to practical problems."
+        assert data["topics"][0]["label"] == "Machine Learning"
         assert data["topics"][0]["paper_count"] == 3
         assert data["topics"][0]["sample_titles"] == ["Paper 1", "Paper 2", "Paper 5"]
-        assert data["topics"][1]["topic"] == "NLP"
+        assert data["topics"][1]["topic"] == "Papers study language processing models."
+        assert data["topics"][1]["label"] == "NLP"
         assert data["topics"][1]["source_topic_count"] == 1
 
     def test_get_conference_topics_falls_back_to_flat(self):
@@ -730,6 +740,7 @@ class TestExecuteMCPToolE2E:
                 "total_papers": 2,
             },
             "cluster_labels": {"0": "A", "1": "B"},
+            "cluster_descriptions": {"0": "Papers about A.", "1": "Papers about B."},
             "cluster_keywords": {"0": ["a"], "1": ["b"]},
         }
         mock_db = Mock()
@@ -744,7 +755,8 @@ class TestExecuteMCPToolE2E:
 
         data = json.loads(result)
         assert data["n_topics"] == 2
-        assert data["topics"][0]["topic"] == "A"
+        assert data["topics"][0]["topic"] == "Papers about A."
+        assert data["topics"][0]["label"] == "A"
         assert data["topics"][0]["sample_titles"] == ["Paper 1"]
 
     # ------------------------------------------------------------------

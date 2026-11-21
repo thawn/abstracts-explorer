@@ -165,6 +165,8 @@ def build_hierarchy(
     parent_labels: Mapping[int, str],
     nr_levels: int,
     level_scale: str = "linear",
+    flat_descriptions: Dict[int, str] | None = None,
+    parent_descriptions: Mapping[int, str] | None = None,
 ) -> Dict[str, Any]:
     """
     Build the compact hierarchy payload used by the slider and MCP.
@@ -186,9 +188,13 @@ def build_hierarchy(
     parent_labels : dict
         BERTopic parent ID to parent label mapping.
     nr_levels : int
-        Requested number of levels.
+        Requested number of hierarchy levels.
     level_scale : str, optional
         Level scaling mode (default ``"linear"``).
+    flat_descriptions : dict, optional
+        Flat topic ID to descriptive-sentence mapping.
+    parent_descriptions : dict, optional
+        Parent ID to descriptive-sentence mapping.
 
     Returns
     -------
@@ -197,6 +203,8 @@ def build_hierarchy(
     """
     level_mappings = build_level_mappings(hierarchical_topics, flat_topic_ids, nr_levels, level_scale)
     cluster_sizes = statistics.get("cluster_sizes", {})
+    flat_descriptions = flat_descriptions or {}
+    parent_descriptions = parent_descriptions or {}
 
     levels: List[Dict[str, Any]] = []
     for level_mapping in level_mappings:
@@ -219,13 +227,16 @@ def build_hierarchy(
             member_points = points_by_cluster.get(cluster_id, [])
             if cluster_id in flat_labels:
                 label = flat_labels[cluster_id]
+                description = flat_descriptions.get(cluster_id, "")
             else:
                 label = parent_labels.get(cluster_id, f"Cluster {cluster_id}").replace("_", " ")
+                description = parent_descriptions.get(cluster_id, "")
 
             clusters.append(
                 {
                     "id": int(cluster_id),
                     "label": label,
+                    "description": description,
                     "size": len(member_points) or int(sum(cluster_sizes.get(member, 0) for member in members)),
                     "center": _center_from_points(member_points),
                     "keywords": _aggregate_keywords(members, flat_keywords),
@@ -263,6 +274,8 @@ def build_clustering_results(
     parent_labels: Mapping[int, str],
     nr_levels: int,
     level_scale: str = "linear",
+    flat_descriptions: Dict[int, str] | None = None,
+    parent_descriptions: Mapping[int, str] | None = None,
 ) -> Dict[str, Any]:
     """
     Build the complete clustering result payload.
@@ -289,6 +302,10 @@ def build_clustering_results(
         Requested number of hierarchy levels.
     level_scale : str, optional
         Level scaling mode (default ``"linear"``).
+    flat_descriptions : dict, optional
+        Flat topic ID to descriptive-sentence mapping.
+    parent_descriptions : dict, optional
+        Parent ID to descriptive-sentence mapping.
 
     Returns
     -------
@@ -299,6 +316,7 @@ def build_clustering_results(
     points = build_points(paper_ids, reduced_embeddings, metadatas, topics)
     centers = build_cluster_centers(reduced_embeddings, topics)
     flat_topic_ids = sorted(cluster_id for cluster_id in statistics["cluster_sizes"] if cluster_id >= 0)
+    flat_descriptions = flat_descriptions or {}
 
     hierarchy = build_hierarchy(
         hierarchical_topics=hierarchical_topics,
@@ -310,6 +328,8 @@ def build_clustering_results(
         parent_labels=parent_labels,
         nr_levels=nr_levels,
         level_scale=level_scale,
+        flat_descriptions=flat_descriptions,
+        parent_descriptions=parent_descriptions,
     )
 
     return {
@@ -318,6 +338,7 @@ def build_clustering_results(
         "n_dimensions": int(reduced_embeddings.shape[1]),
         "cluster_centers": centers,
         "cluster_labels": flat_labels,
+        "cluster_descriptions": flat_descriptions,
         "cluster_keywords": flat_keywords,
         "hierarchy": hierarchy,
     }

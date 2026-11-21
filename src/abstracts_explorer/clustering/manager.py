@@ -20,7 +20,8 @@ from abstracts_explorer.clustering.constants import (
     DEFAULT_LEVEL_SCALE,
 )
 from abstracts_explorer.clustering.errors import ClusteringError
-from abstracts_explorer.clustering.hierarchy_levels import level_parent_labels
+from abstracts_explorer.clustering.hierarchy_levels import level_parent_descriptions, level_parent_labels
+from abstracts_explorer.clustering.labels import split_label_description
 from abstracts_explorer.clustering.loading import LoadingMixin
 from abstracts_explorer.clustering.representation import ProjectLLMRepresentation
 from abstracts_explorer.clustering.results import build_clustering_results, export_results_to_json
@@ -59,6 +60,7 @@ class ClusteringManager(LoadingMixin):
         self.results: Optional[Dict[str, Any]] = None
         self.cluster_labels: Optional[np.ndarray] = None
         self.cluster_label_names: Optional[Dict[int, str]] = None
+        self.cluster_descriptions: Optional[Dict[int, str]] = None
         self.cluster_keywords: Optional[Dict[int, List[str]]] = None
         self.cluster_hierarchy: Optional[Dict[str, Any]] = None
 
@@ -127,30 +129,31 @@ class ClusteringManager(LoadingMixin):
         topics: np.ndarray,
         flat_keywords: Dict[int, List[str]],
         use_llm_labels: bool,
-    ) -> Dict[int, str]:
-        """Return one label per flat topic."""
+    ) -> tuple[Dict[int, str], Dict[int, str]]:
+        """Return short labels and descriptions for each flat topic."""
         if self.topic_model is None:
-            return {}
+            return {}, {}
 
         labels: Dict[int, str] = {}
+        descriptions: Dict[int, str] = {}
         for topic_id in sorted(int(topic) for topic in np.unique(topics) if int(topic) >= 0):
-            label = ""
+            raw_label = ""
             if use_llm_labels:
                 try:
                     entries = self.topic_model.get_topic(topic_id)
                     if entries:
-                        label = str(entries[0][0]).strip()
+                        raw_label = str(entries[0][0])
                 except Exception as exc:
                     logger.warning("Failed to read LLM label for topic %s: %s", topic_id, exc)
 
-            label = " ".join(label.split()).strip("\"'")
-            if label.lower().startswith("topic:"):
-                label = label.split(":", 1)[1].strip()
+            label, description = split_label_description(raw_label)
             if not label:
                 keywords = flat_keywords.get(topic_id, [])
                 label = " & ".join(keywords[:3]) if keywords else f"Topic {topic_id}"
-            labels[topic_id] = label[:120]
-        return labels
+            labels[topic_id] = label
+            if description:
+                descriptions[topic_id] = description
+        return labels, descriptions
 
     def fit(
         self,
@@ -211,7 +214,7 @@ class ClusteringManager(LoadingMixin):
 
         logger.info("Extracting flat c-TF-IDF keywords...")
         flat_keywords = self._extract_flat_keywords(docs, self.topics)
-        flat_labels = self._extract_flat_labels(self.topics, flat_keywords, use_llm_labels)
+        flat_labels, flat_descriptions = self._extract_flat_labels(self.topics, flat_keywords, use_llm_labels)
 
         if use_llm_labels:
             logger.info("Labeling hierarchy topics with LLM (BERTopic merge progress bar)...")
@@ -224,6 +227,7 @@ class ClusteringManager(LoadingMixin):
 
         hierarchical_topics = topic_model.hierarchical_topics(docs, distance_function=distance_function)
         parent_labels = level_parent_labels(hierarchical_topics)
+        parent_descriptions = level_parent_descriptions(hierarchical_topics)
 
         logger.info("Reducing embeddings to 2D with UMAP...")
         reduced_embeddings = self._make_umap(2).fit_transform(self.embeddings)
@@ -235,9 +239,11 @@ class ClusteringManager(LoadingMixin):
             metadatas=self.metadatas,
             topics=topics_list,
             flat_labels=flat_labels,
+            flat_descriptions=flat_descriptions,
             flat_keywords=flat_keywords,
             hierarchical_topics=hierarchical_topics,
             parent_labels=parent_labels,
+            parent_descriptions=parent_descriptions,
             nr_levels=nr_levels,
             level_scale=level_scale,
         )
@@ -245,6 +251,7 @@ class ClusteringManager(LoadingMixin):
         self.results = results
         self.cluster_labels = self.topics
         self.cluster_label_names = flat_labels
+        self.cluster_descriptions = flat_descriptions
         self.cluster_keywords = flat_keywords
         self.cluster_hierarchy = results["hierarchy"]
         return results

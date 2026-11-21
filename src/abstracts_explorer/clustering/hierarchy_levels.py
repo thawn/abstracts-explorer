@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Mapping, Sequence
 
 import numpy as np
 
+from abstracts_explorer.clustering.labels import split_label_description
+
 logger = logging.getLogger(__name__)
 
 
@@ -170,9 +172,22 @@ def build_level_mappings(
     return levels
 
 
+def _parent_names(hierarchical_topics: Any) -> Mapping[int, str]:
+    """Return parent ID to raw parent-name mappings from hierarchy rows."""
+    if hierarchical_topics is None or len(hierarchical_topics) == 0:
+        return {}
+    return {
+        int(parent_id): str(parent_name)
+        for parent_id, parent_name in zip(
+            hierarchical_topics["Parent_ID"].astype(int),
+            hierarchical_topics["Parent_Name"],
+        )
+    }
+
+
 def level_parent_labels(hierarchical_topics: Any) -> Mapping[int, str]:
     """
-    Return parent ID to parent label mappings from BERTopic hierarchy rows.
+    Return parent ID to short parent label mappings from BERTopic hierarchy rows.
 
     Parameters
     ----------
@@ -182,14 +197,30 @@ def level_parent_labels(hierarchical_topics: Any) -> Mapping[int, str]:
     Returns
     -------
     Mapping[int, str]
-        Parent ID to ``Parent_Name`` mapping.
+        Parent ID to short label mapping.
     """
-    if hierarchical_topics is None or len(hierarchical_topics) == 0:
-        return {}
     return {
-        int(parent_id): str(parent_name)
-        for parent_id, parent_name in zip(
-            hierarchical_topics["Parent_ID"].astype(int),
-            hierarchical_topics["Parent_Name"],
-        )
+        parent_id: split_label_description(parent_name)[0]
+        for parent_id, parent_name in _parent_names(hierarchical_topics).items()
+    }
+
+
+def level_parent_descriptions(hierarchical_topics: Any) -> Mapping[int, str]:
+    """
+    Return parent ID to descriptive-sentence mappings from BERTopic hierarchy rows.
+
+    Parameters
+    ----------
+    hierarchical_topics : pandas.DataFrame
+        Output of ``topic_model.hierarchical_topics()``.
+
+    Returns
+    -------
+    Mapping[int, str]
+        Parent ID to description mapping. Descriptions are empty when the
+        hierarchy was built without LLM label descriptions.
+    """
+    return {
+        parent_id: split_label_description(parent_name)[1]
+        for parent_id, parent_name in _parent_names(hierarchical_topics).items()
     }

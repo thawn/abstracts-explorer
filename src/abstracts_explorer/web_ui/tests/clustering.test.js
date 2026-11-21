@@ -300,6 +300,10 @@ describe('Clustering Module', () => {
             ],
             statistics: { total_papers: 2, n_clusters: 2, n_noise: 0, cluster_sizes: { 0: 1, 1: 1 } },
             cluster_labels: { 0: 'Cat', 1: 'Dog' },
+            cluster_descriptions: {
+                0: 'Papers about cats.',
+                1: 'Papers about dogs.'
+            },
             cluster_centers: { 0: { x: 1, y: 1 }, 1: { x: 2, y: 2 } },
             hierarchy: {
                 levels: [
@@ -307,8 +311,22 @@ describe('Clustering Module', () => {
                         level: 0,
                         max_distance: 0.1,
                         clusters: [
-                            { id: 0, label: 'Cat', size: 1, center: { x: 1, y: 1 }, keywords: [] },
-                            { id: 1, label: 'Dog', size: 1, center: { x: 2, y: 2 }, keywords: [] }
+                            {
+                                id: 0,
+                                label: 'Cat',
+                                description: 'Papers about cats.',
+                                size: 1,
+                                center: { x: 1, y: 1 },
+                                keywords: []
+                            },
+                            {
+                                id: 1,
+                                label: 'Dog',
+                                description: 'Papers about dogs.',
+                                size: 1,
+                                center: { x: 2, y: 2 },
+                                keywords: []
+                            }
                         ],
                         mapping: { 0: 0, 1: 1 }
                     },
@@ -316,7 +334,14 @@ describe('Clustering Module', () => {
                         level: 1,
                         max_distance: 0.2,
                         clusters: [
-                            { id: 100, label: 'Animals', size: 2, center: { x: 1.5, y: 1.5 }, keywords: [] }
+                            {
+                                id: 100,
+                                label: 'Animals',
+                                description: 'Papers about domestic animals and their behaviour.',
+                                size: 2,
+                                center: { x: 1.5, y: 1.5 },
+                                keywords: []
+                            }
                         ],
                         mapping: { 0: 100, 1: 100 }
                     }
@@ -358,6 +383,11 @@ describe('Clustering Module', () => {
             expect(stars.marker.symbol).toBe('star');
             expect(stars.x).toEqual([1.5]);
             expect(stars.text).toEqual(['Animals']);
+            expect(stars.customdata[0].description).toBe('Papers about domestic animals and their behaviour.');
+            expect(stars.hovertemplate).toContain('%{customdata.description}');
+
+            const legendItem = document.querySelector('#cluster-legend [data-cluster-id]');
+            expect(legendItem.title).toContain('Papers about domestic animals and their behaviour.');
         });
 
         it('updates colors and stars when the slider changes', async () => {

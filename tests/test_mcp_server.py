@@ -327,16 +327,22 @@ class TestAnalyzeClusterTopics:
             {"title": "Paper 4", "keywords": ["nlp", "gpt"], "session": "NLP", "year": 2024},
         ]
         cm.cluster_label_names = {0: "Machine Learning", 1: "Natural Language Processing"}
+        cm.cluster_descriptions = {
+            0: "Papers apply neural networks to learning problems.",
+            1: "Papers process language with transformer models.",
+        }
         cm.cluster_keywords = {0: ["neural", "deep", "learning"], 1: ["nlp", "bert", "gpt"]}
 
         db = Mock(spec=DatabaseManager)
 
         result_0 = analyze_cluster_topics(cm, db, cluster_id=0)
-        assert result_0["topic"] == "Machine Learning"
+        assert result_0["topic"] == "Papers apply neural networks to learning problems."
+        assert result_0["label"] == "Machine Learning"
         assert result_0["keywords"] == ["neural", "deep", "learning"]
 
         result_1 = analyze_cluster_topics(cm, db, cluster_id=1)
-        assert result_1["topic"] == "Natural Language Processing"
+        assert result_1["topic"] == "Papers process language with transformer models."
+        assert result_1["label"] == "Natural Language Processing"
         assert result_1["keywords"] == ["nlp", "bert", "gpt"]
 
     def test_analyze_empty_cluster(self):
@@ -428,6 +434,10 @@ class TestMCPTools:
                 "total_papers": 4,
             },
             "cluster_labels": {"0": "Machine Learning", "1": "Natural Language Processing"},
+            "cluster_descriptions": {
+                "0": "Papers apply neural networks to learning problems.",
+                "1": "Papers process language with transformer models.",
+            },
             "cluster_keywords": {"0": ["neural", "deep"], "1": ["nlp", "bert"]},
             "hierarchy": {
                 "levels": [
@@ -438,6 +448,7 @@ class TestMCPTools:
                             {
                                 "id": 10,
                                 "label": "Machine Learning",
+                                "description": "Papers apply neural networks to learning problems.",
                                 "size": 2,
                                 "keywords": ["neural", "deep"],
                                 "source_topic_count": 1,
@@ -445,6 +456,7 @@ class TestMCPTools:
                             {
                                 "id": 11,
                                 "label": "Natural Language Processing",
+                                "description": "Papers process language with transformer models.",
                                 "size": 2,
                                 "keywords": ["nlp", "bert"],
                                 "source_topic_count": 1,
@@ -465,14 +477,16 @@ class TestMCPTools:
         assert result["total_papers"] == 4
         assert result["hierarchy_level"] == 6
         assert result["topic_sizes"] == {
-            "Machine Learning": 2,
-            "Natural Language Processing": 2,
+            "Papers apply neural networks to learning problems.": 2,
+            "Papers process language with transformer models.": 2,
         }
         assert len(result["topics"]) == 2
-        assert result["topics"][0]["topic"] == "Machine Learning"
+        assert result["topics"][0]["topic"] == "Papers apply neural networks to learning problems."
+        assert result["topics"][0]["label"] == "Machine Learning"
         assert result["topics"][0]["keywords"] == ["neural", "deep"]
         assert result["topics"][0]["sample_titles"] == ["Paper 1", "Paper 2"]
-        assert result["topics"][1]["topic"] == "Natural Language Processing"
+        assert result["topics"][1]["topic"] == "Papers process language with transformer models."
+        assert result["topics"][1]["label"] == "Natural Language Processing"
         assert result["conference"] == "NeurIPS"
         mock_db.get_clustering_cache.assert_called_once()
 

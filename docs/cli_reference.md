@@ -240,10 +240,12 @@ usage: abstracts-explorer clustering run [-h] [--collection COLLECTION]
 | `--no-llm-labels` | Use c-TF-IDF keywords instead of LLM-generated labels |
 | `--requests-per-minute REQUESTS_PER_MINUTE` | Max API requests per minute, 0 to disable rate limiting (default: 60) |
 
-LLM labels are generated for flat topics and merged hierarchy levels. Flat
-labeling shows a `Labeling clusters (LLM)` progress bar; hierarchy labeling
-uses BERTopic's per-merge progress bar. Failed or empty LLM responses are
-retried, then fall back to top c-TF-IDF keywords.
+LLM labels are generated for flat topics and merged hierarchy levels. Each
+cluster receives a short 3-6 word legend label plus a one-sentence description
+shown in the web UI hover/tooltip and used by the MCP topic tools. Flat labeling
+shows a `Labeling clusters (LLM)` progress bar; hierarchy labeling uses
+BERTopic's per-merge progress bar. Failed or empty LLM responses are retried,
+then fall back to top c-TF-IDF keywords.
 
 ### clustering clear-cache
 

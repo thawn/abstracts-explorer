@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Mapping, Tuple
 from bertopic.representation import BaseRepresentation
 from tqdm import tqdm
 
+from abstracts_explorer.clustering.labels import combine_label_description, parse_llm_label_response
 from abstracts_explorer.clustering.llm import generate_llm_label
 
 logger = logging.getLogger(__name__)
@@ -19,16 +20,20 @@ Sample papers:
 
 Top keywords: [KEYWORDS]
 
-Generate a concise, descriptive topic label of 3-6 words. Use title case.
-Return only the label, without quotes, a "topic:" prefix, or explanation."""
+Return exactly two lines:
+Label: a concise, descriptive 3-6 word title-case label for a legend
+Description: one complete sentence (max 25 words) describing the shared research theme
+
+Do not add quotes, a "topic:" prefix, or any other text."""
 
 LLM_LABEL_SYSTEM_PROMPT = (
-    "You are a research paper categorization expert. Generate concise, descriptive labels for clusters of papers."
+    "You are a research paper categorization expert. Generate a short legend label "
+    "and one descriptive sentence for each cluster of papers."
 )
 
 
 class ProjectLLMRepresentation(BaseRepresentation):
-    """Generate one short topic label per cluster with the project LLM."""
+    """Generate a short topic label and descriptive sentence per cluster."""
 
     def __init__(
         self,
@@ -77,7 +82,7 @@ class ProjectLLMRepresentation(BaseRepresentation):
         topics: Mapping[Any, List[Tuple[str, float]]],
     ) -> Mapping[Any, List[Tuple[str, float]]]:
         """
-        Generate LLM labels for the supplied topics.
+        Generate short labels and descriptive sentences for the supplied topics.
 
         Failed or empty LLM responses are retried by
         :func:`generate_llm_label`. When retries are exhausted, the label
@@ -99,7 +104,8 @@ class ProjectLLMRepresentation(BaseRepresentation):
         Returns
         -------
         dict
-            Updated topic representations mapping topic ID to one label tuple.
+            Updated topic representations mapping topic ID to one encoded
+            label/description tuple.
         """
         repr_docs_mappings, _, _, _ = topic_model._extract_representative_docs(
             c_tf_idf,
@@ -128,17 +134,20 @@ class ProjectLLMRepresentation(BaseRepresentation):
                 prompt = self.prompt.replace("[KEYWORDS]", ", ".join(keywords))
                 prompt = prompt.replace("[DOCUMENTS]", docs_text)
                 try:
-                    label = generate_llm_label(self.embeddings_manager, self.system_prompt, prompt, max_tokens=200)
+                    response = generate_llm_label(
+                        self.embeddings_manager,
+                        self.system_prompt,
+                        prompt,
+                        max_tokens=300,
+                    )
                 except Exception as exc:
                     logger.warning("LLM label failed for topic %s: %s; using keyword fallback", topic, exc)
-                    label = ""
+                    response = ""
 
-                label = " ".join(label.split()).strip("\"'")
-                if label.lower().startswith("topic:"):
-                    label = label.split(":", 1)[1].strip()
+                label, description = parse_llm_label_response(response)
                 if not label:
                     label = " & ".join(keywords[:3])
-                updated_topics[topic] = [(label[:120], 1)]
+                updated_topics[topic] = [(combine_label_description(label, description), 1)]
                 if progress is not None:
                     progress.update(1)
         finally:

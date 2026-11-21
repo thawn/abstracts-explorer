@@ -21,7 +21,14 @@ from abstracts_explorer.clustering.hierarchy_levels import (
     build_level_mapping,
     build_level_mappings,
     compute_level_max_distances,
+    level_parent_descriptions,
     level_parent_labels,
+)
+from abstracts_explorer.clustering.labels import (
+    LABEL_SEPARATOR,
+    combine_label_description,
+    parse_llm_label_response,
+    split_label_description,
 )
 from abstracts_explorer.clustering.llm import (
     _retry_after_seconds,
@@ -72,6 +79,45 @@ def sample_hierarchy() -> pd.DataFrame:
         },
     ]
     return pd.DataFrame(rows).sort_values("Parent_ID", ascending=False)
+
+
+class TestLabels:
+    """Tests for short-label and description helpers."""
+
+    def test_parse_two_line_response(self):
+        label, description = parse_llm_label_response(
+            "Label: Medical Image Uncertainty\nDescription: Papers quantify uncertainty in medical imaging."
+        )
+        assert label == "Medical Image Uncertainty"
+        assert description == "Papers quantify uncertainty in medical imaging."
+
+    def test_parse_json_response(self):
+        label, description = parse_llm_label_response(
+            '{"label": "Graph Neural Networks", "description": "Papers study message passing on graphs."}'
+        )
+        assert label == "Graph Neural Networks"
+        assert description == "Papers study message passing on graphs."
+
+    def test_parse_markdown_response(self):
+        label, description = parse_llm_label_response(
+            "**Label:** Graph Neural Networks\n- **Description:** Papers study graphs."
+        )
+        assert label == "Graph Neural Networks"
+        assert description == "Papers study graphs."
+
+    def test_parse_legacy_single_line_response(self):
+        label, description = parse_llm_label_response(" 'Topic: Nice Label' ")
+        assert label == "Nice Label"
+        assert description == ""
+
+    def test_parse_empty_response(self):
+        assert parse_llm_label_response("") == ("", "")
+
+    def test_combine_and_split_roundtrip(self):
+        encoded = combine_label_description("Short Label", "A longer descriptive sentence.")
+        assert encoded == f"Short Label{LABEL_SEPARATOR}A longer descriptive sentence."
+        assert split_label_description(encoded) == ("Short Label", "A longer descriptive sentence.")
+        assert split_label_description("Short Label") == ("Short Label", "")
 
 
 class TestConstants:
@@ -140,6 +186,16 @@ class TestHierarchyLevels:
         assert labels == {4: "alpha_beta", 5: "gamma_delta", 6: "alpha_beta_gamma_delta"}
         assert level_parent_labels(None) == {}
 
+    def test_level_parent_descriptions(self):
+        hierarchy = sample_hierarchy().copy()
+        hierarchy.loc[hierarchy["Parent_ID"] == 4, "Parent_Name"] = combine_label_description(
+            "Alpha Beta", "Papers about alpha and beta."
+        )
+        descriptions = level_parent_descriptions(hierarchy)
+        assert descriptions[4] == "Papers about alpha and beta."
+        assert descriptions[5] == ""
+        assert level_parent_descriptions(None) == {}
+
 
 class TestResults:
     """Tests for result assembly."""
@@ -180,10 +236,12 @@ class TestResults:
             hierarchical_topics=sample_hierarchy(),
             flat_topic_ids=[0, 1, 2, 3],
             flat_labels={0: "A", 1: "B", 2: "C", 3: "D"},
+            flat_descriptions={0: "Papers about A.", 1: "Papers about B."},
             flat_keywords={0: ["a"], 1: ["b"], 2: ["c"], 3: ["d"]},
             statistics=stats,
             points=points,
             parent_labels=level_parent_labels(sample_hierarchy()),
+            parent_descriptions={4: "Papers about alpha and beta."},
             nr_levels=3,
         )
         assert hierarchy["method"] == "bertopic"
@@ -195,6 +253,7 @@ class TestResults:
         assert len(level0["clusters"]) == 3
         merged = next(cluster for cluster in level0["clusters"] if cluster["id"] == 4)
         assert merged["label"] == "alpha beta"
+        assert merged["description"] == "Papers about alpha and beta."
         assert merged["size"] == 2
         assert merged["source_topic_count"] == 2
         assert merged["center"] == {"x": 1.0, "y": 1.0}
@@ -229,9 +288,11 @@ class TestResults:
             metadatas=[{"title": f"T{i}"} for i in range(4)],
             topics=[0, 1, 2, 3],
             flat_labels={0: "A", 1: "B", 2: "C", 3: "D"},
+            flat_descriptions={0: "Papers about A."},
             flat_keywords={0: ["a"], 1: ["b"], 2: ["c"], 3: ["d"]},
             hierarchical_topics=sample_hierarchy(),
             parent_labels=level_parent_labels(sample_hierarchy()),
+            parent_descriptions={4: "Papers about A and B."},
             nr_levels=3,
         )
         assert set(results) == {
@@ -240,11 +301,13 @@ class TestResults:
             "n_dimensions",
             "cluster_centers",
             "cluster_labels",
+            "cluster_descriptions",
             "cluster_keywords",
             "hierarchy",
         }
         json.dumps(results)
         assert results["n_dimensions"] == 2
+        assert results["cluster_descriptions"] == {0: "Papers about A."}
         assert len(results["points"]) == 4
 
     def test_export_results(self, tmp_path):
@@ -472,6 +535,19 @@ class TestRepresentation:
         assert updated[1] == [("Nice Label", 1)]
         assert label.call_count == 2
 
+    def test_extract_topics_parses_label_and_description(self, mocker):
+        model = self._topic_model()
+        representation = ProjectLLMRepresentation(mocker.Mock())
+        mocker.patch(
+            "abstracts_explorer.clustering.representation.generate_llm_label",
+            return_value="Label: Nice Label\nDescription: Papers about nice things.",
+        )
+
+        topics = {0: [("alpha", 1.0)], 1: [("beta", 1.0)]}
+        updated = representation.extract_topics(model, ["d"], None, topics)
+
+        assert updated[0] == [(combine_label_description("Nice Label", "Papers about nice things."), 1)]
+
     def test_extract_topics_falls_back_to_keywords(self, mocker):
         model = self._topic_model()
         representation = ProjectLLMRepresentation(mocker.Mock())
@@ -630,6 +706,50 @@ class TestClusteringManager:
         assert manager.get_cluster_statistics()["total_papers"] == 4
         assert manager.get_clustering_results() is results
         assert len(results["hierarchy"]["levels"]) == 1
+
+    def test_fit_collects_descriptions(self, mocker):
+        manager = self._manager()
+        fake_model = self._fake_topic_model()
+        fake_model.get_topic.side_effect = lambda topic: [
+            (
+                combine_label_description(
+                    "Alpha Topic" if topic == 0 else "Beta Topic",
+                    f"Papers about topic {topic}.",
+                ),
+                1.0,
+            )
+        ]
+        fake_model.hierarchical_topics.return_value = pd.DataFrame(
+            [
+                {
+                    "Parent_ID": 2,
+                    "Parent_Name": combine_label_description("Alpha Beta", "Papers spanning both topics."),
+                    "Topics": [0, 1],
+                    "Child_Left_ID": 0,
+                    "Child_Right_ID": 1,
+                    "Distance": 0.1,
+                }
+            ]
+        )
+        mocker.patch("bertopic.BERTopic", return_value=fake_model)
+        mocker.patch.object(
+            manager,
+            "_make_umap",
+            return_value=Mock(
+                fit_transform=Mock(return_value=np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]))
+            ),
+        )
+
+        results = manager.fit(use_llm_labels=True, nr_levels=2)
+
+        assert results["cluster_labels"] == {0: "Alpha Topic", 1: "Beta Topic"}
+        assert results["cluster_descriptions"] == {
+            0: "Papers about topic 0.",
+            1: "Papers about topic 1.",
+        }
+        assert manager.cluster_descriptions == results["cluster_descriptions"]
+        merged = results["hierarchy"]["levels"][0]["clusters"][0]
+        assert merged["description"] == "Papers spanning both topics."
 
     def test_fit_passes_show_progress_to_representation(self, mocker):
         manager = self._manager()

@@ -236,6 +236,7 @@ function _buildLevelState() {
 
     const flatCenters = (clusterData && clusterData.cluster_centers) || {};
     const flatLabels = (clusterData && clusterData.cluster_labels) || {};
+    const flatDescriptions = (clusterData && clusterData.cluster_descriptions) || {};
     const groups = {};
     const points = (clusterData && clusterData.points) || [];
 
@@ -266,10 +267,15 @@ function _buildLevelState() {
             || flatLabels[String(id)]
             || flatLabels[id]
             || `Cluster ${id}`;
+        const description = meta.description
+            || flatDescriptions[String(id)]
+            || flatDescriptions[id]
+            || '';
         return {
             id,
             points: clusterPoints,
             label,
+            description,
             size: meta.size !== undefined ? meta.size : clusterPoints.length,
             color: PLOTLY_COLORS[index % PLOTLY_COLORS.length],
             center
@@ -315,9 +321,24 @@ function _buildLevelState() {
         starX.push(entry.center.x);
         starY.push(entry.center.y);
         starText.push(entry.label);
-        starCustomdata.push({ cluster_id: entry.id, size: entry.size, label: entry.label });
+        starCustomdata.push({
+            cluster_id: entry.id,
+            size: entry.size,
+            label: entry.label,
+            description: entry.description
+        });
         starColors.push(entry.color);
     });
+
+    const hasDescriptions = entries.some(entry => Boolean(entry.description));
+    const starHoverTemplate = hasDescriptions
+        ? '<b>%{text}</b><br>' +
+          '%{customdata.description}<br>' +
+          '%{customdata.size} papers<br>' +
+          '<extra></extra>'
+        : '<b>%{text}</b><br>' +
+          '%{customdata.size} papers<br>' +
+          '<extra></extra>';
 
     return {
         level,
@@ -333,7 +354,8 @@ function _buildLevelState() {
         starY,
         starText,
         starCustomdata,
-        starColors
+        starColors,
+        starHoverTemplate
     };
 }
 
@@ -434,9 +456,7 @@ export function renderCurrentLevel() {
                 width: 2
             }
         },
-        hovertemplate: '<b>%{text}</b><br>' +
-                      '%{customdata.size} papers<br>' +
-                      '<extra></extra>',
+        hovertemplate: state.starHoverTemplate,
         showlegend: false
     };
 
@@ -458,6 +478,7 @@ export function renderCurrentLevel() {
             y: [state.starY],
             text: [state.starText],
             customdata: [state.starCustomdata],
+            hovertemplate: [state.starHoverTemplate],
             'marker.color': [state.starColors]
         }, [1]);
         _bindClusterClickHandler(plotElement);
@@ -559,7 +580,12 @@ function applySelectionToPlot() {
         x: [visibleEntries.map(entry => entry.center.x)],
         y: [visibleEntries.map(entry => entry.center.y)],
         text: [visibleEntries.map(entry => entry.label)],
-        customdata: [visibleEntries.map(entry => ({ cluster_id: entry.id, size: entry.size, label: entry.label }))],
+        customdata: [visibleEntries.map(entry => ({
+            cluster_id: entry.id,
+            size: entry.size,
+            label: entry.label,
+            description: entry.description
+        }))],
         'marker.color': [visibleEntries.map(entry => entry.color)]
     }, [1]);
 
@@ -654,7 +680,9 @@ function createLevelLegend(state) {
         const item = document.createElement('div');
         item.className = 'flex items-center gap-2 p-2 rounded cursor-pointer transition-all';
         item.dataset.clusterId = String(entry.id);
-        item.title = `${entry.label} (${entry.size} papers)`;
+        item.title = entry.description
+            ? `${entry.label} (${entry.size} papers)\n${entry.description}`
+            : `${entry.label} (${entry.size} papers)`;
         item.style.opacity = '1';
         item.style.backgroundColor = 'rgb(249 250 251)';
 

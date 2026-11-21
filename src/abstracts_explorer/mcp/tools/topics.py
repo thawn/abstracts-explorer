@@ -39,19 +39,22 @@ def analyze_cluster_topics(
     Returns
     -------
     dict
-        Dictionary containing ``topic``, ``paper_count``, ``keywords``, and
+        Dictionary containing ``topic`` (descriptive sentence when available),
+        ``label`` (short legend label), ``paper_count``, ``keywords``, and
         ``sample_titles``.
     """
     if cm.cluster_labels is None or cm.paper_ids is None or cm.metadatas is None:
         raise ClusterAnalysisError("Clustering data not loaded. Call load_embeddings() and fit() first.")
 
     label_names = cm.cluster_label_names or {}
+    label_descriptions = getattr(cm, "cluster_descriptions", None) or {}
     cluster_kws = cm.cluster_keywords or {}
 
     cluster_indices = [i for i, label in enumerate(cm.cluster_labels) if label == cluster_id]
     if not cluster_indices:
+        fields = _topic_fields(label_names.get(cluster_id), label_descriptions.get(cluster_id))
         return {
-            "topic": label_names.get(cluster_id),
+            **fields,
             "paper_count": 0,
             "keywords": cluster_kws.get(cluster_id, []),
             "sample_titles": [],
@@ -65,11 +68,22 @@ def analyze_cluster_topics(
         if title:
             sample_titles.append(title)
 
+    fields = _topic_fields(label_names.get(cluster_id), label_descriptions.get(cluster_id))
     return {
-        "topic": label_names.get(cluster_id),
+        **fields,
         "paper_count": len(cluster_indices),
         "keywords": cluster_kws.get(cluster_id, []),
         "sample_titles": sample_titles,
+    }
+
+
+def _topic_fields(label: Any, description: Any) -> Dict[str, Any]:
+    """Build the primary topic text plus the short label fallback."""
+    short_label = str(label) if label else None
+    long_label = str(description).strip() if description else ""
+    return {
+        "topic": long_label or short_label,
+        "label": short_label,
     }
 
 
@@ -116,9 +130,13 @@ def _build_hierarchy_topics(cached: Dict[str, Any], level: Dict[str, Any]) -> Li
     for cluster in level.get("clusters", []):
         cluster_id = int(cluster.get("id", -1))
         cluster_points = points_by_cluster.get(cluster_id, [])
+        fields = _topic_fields(
+            cluster.get("label") or f"Topic {cluster_id}",
+            cluster.get("description"),
+        )
         topics.append(
             {
-                "topic": cluster.get("label") or f"Topic {cluster_id}",
+                **fields,
                 "paper_count": int(cluster.get("size", len(cluster_points))),
                 "keywords": list(cluster.get("keywords") or []),
                 "sample_titles": _sample_titles(cluster_points),
@@ -135,6 +153,7 @@ def _build_flat_topics(cached: Dict[str, Any]) -> List[Dict[str, Any]]:
     stats = cached.get("statistics") or {}
     cluster_sizes = stats.get("cluster_sizes") or {}
     labels = cached.get("cluster_labels") or {}
+    descriptions = cached.get("cluster_descriptions") or {}
     keywords = cached.get("cluster_keywords") or {}
 
     topics: List[Dict[str, Any]] = []
@@ -144,9 +163,11 @@ def _build_flat_topics(cached: Dict[str, Any]) -> List[Dict[str, Any]]:
         except (TypeError, ValueError):
             continue
         cluster_points = points_by_cluster.get(cluster_id_int, [])
+        label = labels.get(str(cluster_id), labels.get(cluster_id_int, f"Topic {cluster_id_int}"))
+        description = descriptions.get(str(cluster_id), descriptions.get(cluster_id_int, ""))
         topics.append(
             {
-                "topic": labels.get(str(cluster_id), labels.get(cluster_id_int, f"Topic {cluster_id_int}")),
+                **_topic_fields(label, description),
                 "paper_count": int(size),
                 "keywords": list(keywords.get(str(cluster_id), keywords.get(cluster_id_int, [])) or []),
                 "sample_titles": _sample_titles(cluster_points),
