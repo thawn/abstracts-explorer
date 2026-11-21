@@ -21,6 +21,70 @@ logger = logging.getLogger(__name__)
 class ClusteringCacheMixin(SessionMixin):
     """Clustering result cache repository."""
 
+    def _find_clustering_cache_row(
+        self,
+        embedding_model: str,
+        clustering_method: str,
+        n_clusters: Optional[int] = None,
+        clustering_params: Optional[Dict[str, Any]] = None,
+        reduction_method: Optional[str] = None,
+        n_components: Optional[int] = None,
+        conference: Optional[str] = None,
+        year: Optional[int] = None,
+        collection_name: Optional[str] = None,
+    ) -> Optional[ClusteringCache]:
+        """Return the most recent matching cache row."""
+        if collection_name is not None:
+            clustering_params = dict(clustering_params or {})
+            clustering_params["__collection__"] = collection_name
+
+        stmt = select(ClusteringCache).where(
+            and_(
+                ClusteringCache.embedding_model == embedding_model,
+                ClusteringCache.clustering_method == clustering_method,
+            )
+        )
+
+        if reduction_method is not None:
+            stmt = stmt.where(ClusteringCache.reduction_method == reduction_method)
+        if n_components is not None:
+            stmt = stmt.where(ClusteringCache.n_components == n_components)
+        if n_clusters is not None:
+            stmt = stmt.where(ClusteringCache.n_clusters == n_clusters)
+
+        if conference is not None:
+            stmt = stmt.where(ClusteringCache.conference == conference)
+        else:
+            stmt = stmt.where(ClusteringCache.conference.is_(None))
+
+        if year is not None:
+            stmt = stmt.where(ClusteringCache.year == year)
+        else:
+            stmt = stmt.where(ClusteringCache.year.is_(None))
+
+        stmt = stmt.order_by(ClusteringCache.created_at.desc())
+        results = self.session.execute(stmt).scalars().all()
+        if not results:
+            return None
+
+        if clustering_params is None:
+            for result in results:
+                if result.clustering_params is not None:
+                    continue
+                return result
+            return None
+
+        params_json = json.dumps(clustering_params, sort_keys=True)
+        for result in results:
+            if result.clustering_params is None:
+                continue
+            cached_params = json.loads(str(result.clustering_params))
+            cached_params_json = json.dumps(cached_params, sort_keys=True)
+            if cached_params_json == params_json:
+                return result
+
+        return None
+
     def get_clustering_cache(
         self,
         embedding_model: str,
@@ -80,73 +144,117 @@ class ClusteringCacheMixin(SessionMixin):
         DatabaseError
             If query fails.
         """
-        if collection_name is not None:
-            clustering_params = dict(clustering_params or {})
-            clustering_params["__collection__"] = collection_name
-
         try:
-            # Build query conditions
-            stmt = select(ClusteringCache).where(
-                and_(
-                    ClusteringCache.embedding_model == embedding_model,
-                    ClusteringCache.clustering_method == clustering_method,
-                )
+            result = self._find_clustering_cache_row(
+                embedding_model=embedding_model,
+                clustering_method=clustering_method,
+                n_clusters=n_clusters,
+                clustering_params=clustering_params,
+                reduction_method=reduction_method,
+                n_components=n_components,
+                conference=conference,
+                year=year,
+                collection_name=collection_name,
             )
-
-            # Optionally filter by reduction method / n_components
-            if reduction_method is not None:
-                stmt = stmt.where(ClusteringCache.reduction_method == reduction_method)
-            if n_components is not None:
-                stmt = stmt.where(ClusteringCache.n_components == n_components)
-
-            # Add n_clusters condition if provided
-            if n_clusters is not None:
-                stmt = stmt.where(ClusteringCache.n_clusters == n_clusters)
-
-            # Filter by conference/year columns
-            if conference is not None:
-                stmt = stmt.where(ClusteringCache.conference == conference)
-            else:
-                stmt = stmt.where(ClusteringCache.conference.is_(None))
-
-            if year is not None:
-                stmt = stmt.where(ClusteringCache.year == year)
-            else:
-                stmt = stmt.where(ClusteringCache.year.is_(None))
-
-            # Get all matching results (we'll filter by params in Python)
-            stmt = stmt.order_by(ClusteringCache.created_at.desc())
-            results = self.session.execute(stmt).scalars().all()
-
-            if not results:
-                return None
-
-            # When no clustering_params are requested, find the first entry whose
-            # stored clustering_params is also NULL.
-            # Entries that have extra params stored (e.g. distance_threshold) are
-            # skipped here because they represent different clustering runs.
-            if clustering_params is None:
-                for result in results:
-                    if result.clustering_params is not None:
-                        continue  # entry has extra params – not a match for a no-param query
-                    return json.loads(result.results_json)
-                return None
-
-            # Filter by clustering_params
-            params_json = json.dumps(clustering_params, sort_keys=True)
-            for result in results:
-                if result.clustering_params is None:
-                    continue
-                # Compare params (normalize by sorting keys)
-                cached_params = json.loads(result.clustering_params)
-                cached_params_json = json.dumps(cached_params, sort_keys=True)
-                if cached_params_json == params_json:
-                    return json.loads(result.results_json)
-
-            return None
-
+            return json.loads(str(result.results_json)) if result is not None else None
         except Exception as e:
             raise self._db_error("Failed to get clustering cache", e)
+
+    def get_clustering_cache_entry(
+        self,
+        embedding_model: str,
+        clustering_method: str,
+        n_clusters: Optional[int] = None,
+        clustering_params: Optional[Dict[str, Any]] = None,
+        reduction_method: Optional[str] = None,
+        n_components: Optional[int] = None,
+        conference: Optional[str] = None,
+        year: Optional[int] = None,
+        collection_name: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get a cached clustering result together with its row ID.
+
+        This mirrors :meth:`get_clustering_cache` and is used when the caller
+        needs to update the same cache row in place.
+
+        Parameters
+        ----------
+        embedding_model : str
+            Name of the embedding model.
+        clustering_method : str
+            Clustering algorithm used.
+        n_clusters : int, optional
+            Number of clusters to match.
+        clustering_params : dict, optional
+            Additional clustering parameters.
+        reduction_method : str, optional
+            Dimensionality reduction method.
+        n_components : int, optional
+            Number of components after reduction.
+        conference : str, optional
+            Conference name to filter by.
+        year : int, optional
+            Conference year to filter by.
+        collection_name : str, optional
+            ChromaDB collection the cached results were computed from.
+
+        Returns
+        -------
+        dict or None
+            ``{"id": int, "results": dict}`` when found, otherwise ``None``.
+
+        Raises
+        ------
+        DatabaseError
+            If query fails.
+        """
+        try:
+            row = self._find_clustering_cache_row(
+                embedding_model=embedding_model,
+                clustering_method=clustering_method,
+                n_clusters=n_clusters,
+                clustering_params=clustering_params,
+                reduction_method=reduction_method,
+                n_components=n_components,
+                conference=conference,
+                year=year,
+                collection_name=collection_name,
+            )
+            if row is None:
+                return None
+            return {"id": int(row.id), "results": json.loads(str(row.results_json))}
+        except Exception as e:
+            raise self._db_error("Failed to get clustering cache entry", e)
+
+    def update_clustering_cache_results(self, cache_id: int, results: Dict[str, Any]) -> None:
+        """
+        Replace the stored results of an existing cache row.
+
+        Parameters
+        ----------
+        cache_id : int
+            Primary key of the cache row to update.
+        results : dict
+            New clustering results payload.
+
+        Raises
+        ------
+        DatabaseError
+            If the row does not exist or the update fails.
+        """
+        try:
+            stmt = (
+                update(ClusteringCache).where(ClusteringCache.id == cache_id).values(results_json=json.dumps(results))
+            )
+            result = self.session.execute(stmt)
+            rowcount = getattr(result, "rowcount", 0) or 0
+            if rowcount == 0:
+                raise ValueError(f"Clustering cache entry {cache_id} not found")
+            self.session.commit()
+            logger.info("Updated clustering cache entry %s with backfilled labels", cache_id)
+        except Exception as e:
+            raise self._db_error(f"Failed to update clustering cache entry {cache_id}", e)
 
     def save_clustering_cache(
         self,

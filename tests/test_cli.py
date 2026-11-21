@@ -2867,6 +2867,7 @@ class TestCLI:
             assert kw["nr_levels"] == 10
             assert kw["use_llm_labels"] is True
             assert kw["show_progress"] is True
+            assert kw["backfill_missing_labels"] is True
         mock_em.close.assert_called_once()
 
     def test_pre_generate_clustering_no_conferences_in_db(self, tmp_path, capsys, monkeypatch):

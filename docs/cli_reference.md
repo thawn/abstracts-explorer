@@ -283,8 +283,18 @@ the web UI serves them instantly.
   conference/year only.
 
 The clustering cache stores the complete BERTopic result atomically. A cache
-hit avoids all LLM calls. `--force` recomputes clustering and labels; there is
-no separate resumable label cache.
+hit avoids recomputing clusters and reuses successful labels. `--force`
+recomputes clustering and labels; there is no separate resumable label cache.
+
+A cache hit also repairs labels whose LLM attempt failed. A failed attempt is
+identified by a missing descriptive sentence, so only flat clusters and merged
+hierarchy clusters without a description are retried. Existing successful labels
+are reused through the same BERTopic representation pipeline, without
+re-clustering and without LLM calls. A fully labeled cache is a no-op, and
+`--no-llm-labels` (c-TF-IDF) cache entries are never modified. Repaired results
+are written back to the existing cache row. If the paper metadata needed to
+rebuild representative documents is unavailable, the command reports an error
+instead of falling back to truncated cached titles.
 
 ```text
 usage: abstracts-explorer clustering pre-generate [-h] [--collection COLLECTION]

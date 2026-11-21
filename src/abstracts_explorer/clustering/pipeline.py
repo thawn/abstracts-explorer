@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+from abstracts_explorer.clustering.backfill import backfill_missing_labels as _backfill_missing_labels
 from abstracts_explorer.clustering.constants import (
     DEFAULT_CLUSTERING_METHOD,
     DEFAULT_CLUSTERING_PARAMS,
@@ -161,6 +162,7 @@ def compute_clusters_with_cache(
     nr_levels: int = DEFAULT_NR_LEVELS,
     level_scale: str = DEFAULT_LEVEL_SCALE,
     cluster_n_components: int = DEFAULT_CLUSTER_N_COMPONENTS,
+    backfill_missing_labels: bool = False,
     **clustering_kwargs: Any,
 ) -> Dict[str, Any]:
     """
@@ -193,6 +195,9 @@ def compute_clusters_with_cache(
         Level scaling mode (default ``"linear"``).
     cluster_n_components : int, optional
         UMAP components used before clustering (default 5).
+    backfill_missing_labels : bool, optional
+        Repair cached clusters without descriptions by reusing successful
+        labels and retrying only missing ones (default False).
     **clustering_kwargs
         Additional clustering parameters used in the cache key.
 
@@ -212,19 +217,39 @@ def compute_clusters_with_cache(
     params = _effective_params(use_llm_labels, nr_levels, level_scale, clustering_kwargs)
 
     if not force and not limit:
-        cached = database.get_clustering_cache(
-            embedding_model=embedding_model,
-            reduction_method=DEFAULT_REDUCTION_METHOD,
-            n_components=DEFAULT_N_COMPONENTS,
-            clustering_method=DEFAULT_CLUSTERING_METHOD,
-            n_clusters=None,
-            clustering_params=params,
-            conference=cache_conference,
-            year=cache_year,
-            collection_name=cache_collection,
-        )
+        should_backfill = backfill_missing_labels and use_llm_labels
+        cached_entry = None
+        if should_backfill:
+            cached_entry = database.get_clustering_cache_entry(
+                embedding_model=embedding_model,
+                reduction_method=DEFAULT_REDUCTION_METHOD,
+                n_components=DEFAULT_N_COMPONENTS,
+                clustering_method=DEFAULT_CLUSTERING_METHOD,
+                n_clusters=None,
+                clustering_params=params,
+                conference=cache_conference,
+                year=cache_year,
+                collection_name=cache_collection,
+            )
+            cached = cached_entry["results"] if cached_entry else None
+        else:
+            cached = database.get_clustering_cache(
+                embedding_model=embedding_model,
+                reduction_method=DEFAULT_REDUCTION_METHOD,
+                n_components=DEFAULT_N_COMPONENTS,
+                clustering_method=DEFAULT_CLUSTERING_METHOD,
+                n_clusters=None,
+                clustering_params=params,
+                conference=cache_conference,
+                year=cache_year,
+                collection_name=cache_collection,
+            )
         if cached:
             logger.info("Using cached BERTopic clustering results")
+            if should_backfill and cached_entry is not None:
+                report = _backfill_missing_labels(cached, embeddings_manager, database)
+                if report["flat_updated"] or report["hierarchy_updated"]:
+                    database.update_clustering_cache_results(cached_entry["id"], cached)
             return cached
 
     logger.info("Computing new BERTopic clustering results...")

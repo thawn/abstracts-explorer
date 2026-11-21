@@ -74,6 +74,25 @@ class ProjectLLMRepresentation(BaseRepresentation):
         self.doc_length = doc_length
         self.show_progress = show_progress
 
+    def _resolve_cached_label(self, topic: Any, documents: Any) -> str | None:
+        """
+        Return a previously generated label for *topic* when available.
+
+        Parameters
+        ----------
+        topic : Any
+            Topic identifier passed by BERTopic.
+        documents : Any
+            Documents DataFrame associated with the topic batch.
+
+        Returns
+        -------
+        str or None
+            Encoded label/description to reuse, or ``None`` to generate a new
+            label.
+        """
+        return None
+
     def extract_topics(
         self,
         topic_model: Any,
@@ -129,6 +148,13 @@ class ProjectLLMRepresentation(BaseRepresentation):
         )
         try:
             for topic, docs in repr_docs_mappings.items():
+                cached_label = self._resolve_cached_label(topic, documents)
+                if cached_label is not None:
+                    updated_topics[topic] = [(cached_label, 1)]
+                    if progress is not None:
+                        progress.update(1)
+                    continue
+
                 keywords = [word for word, _ in topics[topic][:10]]
                 docs_text = "\n".join(f"- {doc[: self.doc_length]}" for doc in docs)
                 prompt = self.prompt.replace("[KEYWORDS]", ", ".join(keywords))

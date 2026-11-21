@@ -270,6 +270,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
                             use_llm_labels=not getattr(args, "no_llm_labels", False),
                             show_progress=True,
                             nr_levels=DEFAULT_NR_LEVELS,
+                            backfill_missing_labels=True,
                         )
 
                     stats = results.get("statistics", {})

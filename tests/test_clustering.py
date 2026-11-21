@@ -840,6 +840,76 @@ class TestPipeline:
         assert result is cached
         manager_class.assert_not_called()
 
+    def test_cache_hit_backfills_and_updates_entry(self, mocker):
+        embeddings, database = self._deps()
+        cached = _fake_results()
+        database.get_clustering_cache_entry.return_value = {"id": 42, "results": cached}
+        backfill = mocker.patch(
+            "abstracts_explorer.clustering.pipeline._backfill_missing_labels",
+            return_value={"flat_updated": 1, "hierarchy_updated": 0},
+        )
+        manager_class = mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager")
+
+        result = compute_clusters_with_cache(
+            embeddings,
+            database,
+            "model",
+            conferences=["A"],
+            years=[2024],
+            backfill_missing_labels=True,
+        )
+
+        assert result is cached
+        backfill.assert_called_once_with(cached, embeddings, database)
+        database.update_clustering_cache_results.assert_called_once_with(42, cached)
+        database.save_clustering_cache.assert_not_called()
+        manager_class.assert_not_called()
+
+    def test_cache_hit_backfill_noop_does_not_update_entry(self, mocker):
+        embeddings, database = self._deps()
+        cached = _fake_results()
+        database.get_clustering_cache_entry.return_value = {"id": 42, "results": cached}
+        mocker.patch(
+            "abstracts_explorer.clustering.pipeline._backfill_missing_labels",
+            return_value={"flat_updated": 0, "hierarchy_updated": 0},
+        )
+
+        compute_clusters_with_cache(embeddings, database, "model", backfill_missing_labels=True)
+
+        database.update_clustering_cache_results.assert_not_called()
+
+    def test_cache_miss_does_not_backfill(self, mocker):
+        embeddings, database = self._deps()
+        database.get_clustering_cache_entry.return_value = None
+        manager = mocker.Mock()
+        manager.fit.return_value = _fake_results()
+        mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager", return_value=manager)
+        backfill = mocker.patch("abstracts_explorer.clustering.pipeline._backfill_missing_labels")
+
+        compute_clusters_with_cache(embeddings, database, "model", backfill_missing_labels=True)
+
+        backfill.assert_not_called()
+        database.update_clustering_cache_results.assert_not_called()
+        database.save_clustering_cache.assert_called_once()
+
+    def test_ctfidf_cache_hit_does_not_backfill(self, mocker):
+        embeddings, database = self._deps()
+        cached = _fake_results()
+        database.get_clustering_cache.return_value = cached
+        backfill = mocker.patch("abstracts_explorer.clustering.pipeline._backfill_missing_labels")
+
+        result = compute_clusters_with_cache(
+            embeddings,
+            database,
+            "model",
+            use_llm_labels=False,
+            backfill_missing_labels=True,
+        )
+
+        assert result is cached
+        backfill.assert_not_called()
+        database.get_clustering_cache_entry.assert_not_called()
+
     def test_cache_miss_fits_and_saves(self, mocker):
         embeddings, database = self._deps()
         results = _fake_results()
