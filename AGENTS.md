@@ -17,6 +17,10 @@ Guidance for AI coding agents working on **abstracts-explorer** (Python package 
 - NumPy-style docstrings on all public functions/classes/methods.
 - No comments unless asked.
 
+## Test Driven Development
+
+- Write a failing test first, then implement the feature/bugfix, then run tests to verify.
+
 ## Lint and Format Before Tests
 
 Run the same checks as the git hooks (`.githooks/pre-commit`) before running
