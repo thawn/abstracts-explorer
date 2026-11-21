@@ -17,10 +17,12 @@ from pathlib import Path
 from playwright.sync_api import Page, TimeoutError, expect
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.mcp import close_mcp_resources
+from abstracts_explorer.orcid import OrcidError, fetch_orcid_record
 from abstracts_explorer.rag import shutdown_tool_executor
 from tests.helpers import (
     raw_query,
     find_free_port,
+    requires_lm_studio,
     stop_test_server,
 )
 from tests.conftest import set_test_db
@@ -30,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 # Constants for E2E tests
 MOCK_EMBEDDING_DIMENSION = 4096  # Standard dimension for test embeddings
+_ORCID_ID = "0000-0002-2315-9247"
 
 # The compiled web UI bundle is required for browser interactions.
 _WEB_UI_BUNDLE = Path(__file__).parent.parent / "src/abstracts_explorer/web_ui/static/dist/app.js"
@@ -889,6 +892,59 @@ class TestWebUIE2E:
             chat_input_after = page.locator("#chat-input")
             # Input should be cleared after sending
             assert chat_input_after.input_value() == ""
+
+    @requires_lm_studio
+    def test_chat_orcid_search_terms(self, web_server, page: Page):
+        """
+        Test that chat can suggest search terms from a real public ORCID record.
+
+        The test uses the live ORCID API and the configured chat model.  It
+        skips when either service is unavailable.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        page : playwright.sync_api.Page
+            Playwright page
+        """
+        base_url, _ = web_server
+
+        try:
+            record = fetch_orcid_record(_ORCID_ID, timeout=30)
+        except OrcidError as exc:
+            pytest.skip(f"ORCID public API unavailable: {exc}")
+        assert record["works"], "Expected public works on the ORCID record"
+
+        page.goto(base_url)
+        page.locator("#tab-chat").click()
+        expect(page.locator("#chat-tab")).to_be_visible()
+
+        chat_input = page.locator("#chat-input")
+        chat_input.fill(
+            f"My ORCID is {_ORCID_ID}. Use the suggest_search_terms_from_orcid tool "
+            "to suggest paper search terms for me."
+        )
+
+        with page.expect_response(
+            lambda response: response.url.endswith("/api/chat") and response.request.method == "POST",
+            timeout=120000,
+        ) as response_info:
+            chat_input.press("Enter")
+
+        response = response_info.value
+        if response.status != 200:
+            pytest.skip(f"Chat backend unavailable (HTTP {response.status})")
+
+        payload = response.json().get("response")
+        assert isinstance(payload, dict), "Chat response should contain structured RAG output"
+
+        tools_executed = payload.get("metadata", {}).get("tools_executed", [])
+        assert "suggest_search_terms_from_orcid" in tools_executed
+
+        assistant_text = payload.get("response")
+        assert isinstance(assistant_text, str)
+        assert assistant_text.strip()
 
     def test_chat_reset_conversation(self, web_server, page: Page):
         """

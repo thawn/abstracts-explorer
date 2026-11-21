@@ -269,6 +269,13 @@ class TestRAGChatInstructions:
         assert "[Paper-1](#paper-1)" in instructions
         assert "<a href" not in instructions
 
+    def test_build_base_instructions_mentions_orcid_tool(self, mock_embeddings_manager, mock_database):
+        """The assistant should know when to use the ORCID search-term tool."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        instructions = chat._build_base_instructions()
+        assert "suggest_search_terms_from_orcid" in instructions
+        assert "do not guess an ORCID iD" in instructions
+
     def test_build_instructions_with_conference_and_year(self, mock_embeddings_manager, mock_database):
         """Test instructions include selected conference and year."""
         chat = RAGChat(mock_embeddings_manager, mock_database)

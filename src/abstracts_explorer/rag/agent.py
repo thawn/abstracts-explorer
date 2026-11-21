@@ -152,6 +152,8 @@ class AgentMixin:
             "use the summarize_interesting_papers or recommend_related_papers tools; their ratings "
             "are provided automatically by the web UI, so do not ask for paper IDs. "
             "When the user asks who to meet, talk to, or network with, use suggest_authors_to_meet. "
+            "When the user provides an ORCID iD or asks for search terms based on their ORCID record, "
+            "use suggest_search_terms_from_orcid; do not guess an ORCID iD. "
             f"Today's date is {format_timestamp(datetime.now(), '%Y-%m-%d')}. "
             "When referencing specific papers, cite them using local markdown links: "
             "[Paper-1](#paper-1), [Paper-2](#paper-2), etc. "

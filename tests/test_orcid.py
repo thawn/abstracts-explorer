@@ -197,6 +197,41 @@ class TestFetchOrcidRecord:
         assert record["keywords"] == []
         assert record["name"] is None
 
+    @patch("abstracts_explorer.orcid.requests.get")
+    def test_strips_html_and_entities_from_record_text(self, mock_get):
+        works = {
+            "group": [
+                {
+                    "work-summary": [
+                        {
+                            "title": {
+                                "title": {
+                                    "value": "<b>Data Management</b> Makes &amp; Machine Learning Easier",
+                                }
+                            },
+                            "publication-date": {"year": {"value": "2024"}},
+                            "journal-title": "<i>Journal</i> &amp; Letters",
+                        }
+                    ]
+                }
+            ]
+        }
+        keywords = {"keyword": [{"content": "<i>bio</i>computation"}]}
+        person = {
+            "name": {
+                "given-names": {"value": "<b>Till</b>"},
+                "family-name": {"value": "Korten &amp; Co"},
+            }
+        }
+        mock_get.side_effect = _mock_orcid_get(works=works, keywords=keywords, person=person)
+
+        record = fetch_orcid_record("0000-0002-1825-0097")
+
+        assert record["works"][0]["title"] == "Data Management Makes & Machine Learning Easier"
+        assert record["works"][0]["journal"] == "Journal & Letters"
+        assert record["keywords"] == ["biocomputation"]
+        assert record["name"] == "Till Korten & Co"
+
 
 class TestSuggestSearchTerms:
     """Tests for LLM-generated ORCID search terms."""
