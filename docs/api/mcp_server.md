@@ -39,7 +39,7 @@ results = search_papers(
 )
 
 # Suggest search terms from a public ORCID record
-terms = suggest_search_terms_from_orcid("0000-0002-1825-0097")
+terms = suggest_search_terms_from_orcid("0000-0002-2315-9247")
 ```
 
 See the [MCP Server Guide](../mcp_server.md) for usage with LLM assistants.

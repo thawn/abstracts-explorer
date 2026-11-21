@@ -199,7 +199,7 @@ phrases extracted from work titles.
 The ORCID record must be public; private works are not returned by the API.
 
 **Parameters:**
-- `orcid` (str): ORCID iD or profile URL (e.g., `"0000-0002-1825-0097"` or `"https://orcid.org/0000-0002-1825-0097"`)
+- `orcid` (str): ORCID iD or profile URL (e.g., `"0000-0002-2315-9247"` or `"https://orcid.org/0000-0002-2315-9247"`)
 - `max_terms` (int, optional): Maximum number of search terms (default: 15, capped at 50)
 - `min_year` (int, optional): Only consider works published in or after this year
 - `max_works` (int, optional): Maximum works sent to the LLM (default: 100, capped at 500)
@@ -212,7 +212,7 @@ The ORCID record must be public; private works are not returned by the API.
 - Up to ten recent work titles
 - A warning when no terms could be derived
 
-**Example use case:** "My ORCID is 0000-0002-1825-0097. What should I search for at ICLR?"
+**Example use case:** "My ORCID is 0000-0002-2315-9247. What should I search for at ICLR?"
 
 ## Starting the MCP Server
 

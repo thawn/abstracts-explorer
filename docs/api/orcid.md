@@ -17,7 +17,7 @@ and keywords into concise paper search terms. The MCP tool
 ```python
 from abstracts_explorer.orcid import suggest_search_terms_from_orcid
 
-result = suggest_search_terms_from_orcid("0000-0002-1825-0097", max_terms=10)
+result = suggest_search_terms_from_orcid("0000-0002-2315-9247", max_terms=10)
 for item in result["suggested_terms"]:
     print(item["term"], "-", item["reason"])
 ```

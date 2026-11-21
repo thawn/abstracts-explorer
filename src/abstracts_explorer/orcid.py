@@ -83,10 +83,10 @@ def normalize_orcid_id(value: str) -> str:
 
     Examples
     --------
-    >>> normalize_orcid_id("https://orcid.org/0000-0002-1825-0097")
-    '0000-0002-1825-0097'
-    >>> normalize_orcid_id("0000-0002-1825-009x")
-    '0000-0002-1825-009X'
+    >>> normalize_orcid_id("https://orcid.org/0000-0002-2315-9247")
+    '0000-0002-2315-9247'
+    >>> normalize_orcid_id("0000-0002-2315-924x")
+    '0000-0002-2315-924X'
     """
     if not isinstance(value, str):
         raise OrcidError("An ORCID iD must be provided as a string.")
@@ -100,7 +100,7 @@ def normalize_orcid_id(value: str) -> str:
 
     candidate = candidate.upper()
     if not ORCID_ID_PATTERN.match(candidate):
-        raise OrcidError(f"Invalid ORCID iD: {value!r}. Expected a form like 0000-0002-1825-0097.")
+        raise OrcidError(f"Invalid ORCID iD: {value!r}. Expected a form like 0000-0002-2315-9247.")
 
     return candidate
 

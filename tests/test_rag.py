@@ -2210,7 +2210,7 @@ def test_tool_suggest_search_terms_from_orcid_forwards_args():
     with patch("abstracts_explorer.rag.tools._run_rag_tool", return_value="ok") as mock_run:
         result = _tool_suggest_search_terms_from_orcid(
             ctx,
-            "https://orcid.org/0000-0002-1825-0097",
+            "https://orcid.org/0000-0002-2315-9247",
             max_terms=5,
             min_year=2020,
         )
@@ -2220,7 +2220,7 @@ def test_tool_suggest_search_terms_from_orcid_forwards_args():
     assert args[0] is ctx
     assert args[1] == "suggest_search_terms_from_orcid"
     assert args[3] == {
-        "orcid": "https://orcid.org/0000-0002-1825-0097",
+        "orcid": "https://orcid.org/0000-0002-2315-9247",
         "max_terms": 5,
         "min_year": 2020,
     }

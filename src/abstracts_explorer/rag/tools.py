@@ -509,7 +509,7 @@ def _tool_suggest_search_terms_from_orcid(
     ctx : RunContext[RAGToolContext]
         Agent context with dependencies.
     orcid : str
-        ORCID iD or ORCID profile URL (e.g. "0000-0002-1825-0097").
+        ORCID iD or ORCID profile URL (e.g. "0000-0002-2315-9247").
     max_terms : int, optional
         Maximum number of search terms to return (default: 15).
     min_year : int, optional

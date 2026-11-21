@@ -1568,7 +1568,7 @@ def test_format_suggest_authors_to_meet_result():
 def test_normalize_suggest_search_terms_from_orcid_args():
     """ORCID aliases and scalar/list shapes are normalized."""
     args = {
-        "orcid_id": ["https://orcid.org/0000-0002-1825-0097"],
+        "orcid_id": ["https://orcid.org/0000-0002-2315-9247"],
         "n_terms": "5",
         "min_year": ["2020"],
         "n_works": 20,
@@ -1577,7 +1577,7 @@ def test_normalize_suggest_search_terms_from_orcid_args():
     result = _normalize_args(args, SUGGEST_SEARCH_TERMS_FROM_ORCID_RULES)
 
     assert result == {
-        "orcid": "https://orcid.org/0000-0002-1825-0097",
+        "orcid": "https://orcid.org/0000-0002-2315-9247",
         "max_terms": 5,
         "min_year": 2020,
         "max_works": 20,
@@ -1592,17 +1592,17 @@ def test_execute_mcp_tool_suggest_search_terms_from_orcid():
 
         result = execute_mcp_tool(
             "suggest_search_terms_from_orcid",
-            {"orcid_id": "0000-0002-1825-0097", "n_terms": 3},
+            {"orcid_id": "0000-0002-2315-9247", "n_terms": 3},
         )
 
         assert result == mock_result
-        mock_tool.assert_called_once_with(orcid="0000-0002-1825-0097", max_terms=3)
+        mock_tool.assert_called_once_with(orcid="0000-0002-2315-9247", max_terms=3)
 
 
 def test_format_suggest_search_terms_from_orcid_result():
     """Test formatting ORCID search-term suggestions for the LLM."""
     data = {
-        "orcid": "0000-0002-1825-0097",
+        "orcid": "0000-0002-2315-9247",
         "name": "Jane Doe",
         "works_found": 4,
         "works_used": 2,
@@ -1619,7 +1619,7 @@ def test_format_suggest_search_terms_from_orcid_result():
     result = _format_suggest_search_terms_from_orcid_result(data)
 
     assert "Jane Doe" in result
-    assert "0000-0002-1825-0097" in result
+    assert "0000-0002-2315-9247" in result
     assert "4 found, 2 used" in result
     assert "deep learning" in result
     assert "Author keyword" in result
@@ -1630,7 +1630,7 @@ def test_format_suggest_search_terms_from_orcid_result_empty():
     """Test formatting an empty ORCID suggestion result."""
     result = _format_suggest_search_terms_from_orcid_result(
         {
-            "orcid": "0000-0002-1825-0097",
+            "orcid": "0000-0002-2315-9247",
             "name": None,
             "works_found": 0,
             "works_used": 0,

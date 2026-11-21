@@ -58,7 +58,7 @@ TOOL_ARGUMENT_EXAMPLES: Dict[str, str] = {
     "summarize_interesting_papers": '{"conference": "ICLR", "years": [2026]}',
     "recommend_related_papers": '{"conferences": ["ICLR"], "years": [2026], "limit": 10}',
     "suggest_authors_to_meet": '{"conferences": ["ICLR"], "years": [2026], "limit": 10, "paper_limit": 50}',
-    "suggest_search_terms_from_orcid": '{"orcid": "0000-0002-1825-0097", "max_terms": 15}',
+    "suggest_search_terms_from_orcid": '{"orcid": "0000-0002-2315-9247", "max_terms": 15}',
 }
 
 

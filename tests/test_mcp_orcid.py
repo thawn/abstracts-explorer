@@ -18,7 +18,7 @@ class TestSuggestSearchTermsFromOrcidTool:
     @patch("abstracts_explorer.mcp.tools.orcid._suggest_search_terms_from_orcid")
     def test_returns_json_result(self, mock_suggest):
         mock_suggest.return_value = {
-            "orcid": "0000-0002-1825-0097",
+            "orcid": "0000-0002-2315-9247",
             "name": "Jane Doe",
             "works_found": 2,
             "works_used": 2,
@@ -31,17 +31,17 @@ class TestSuggestSearchTermsFromOrcidTool:
 
         result = json.loads(
             suggest_search_terms_from_orcid(
-                "https://orcid.org/0000-0002-1825-0097",
+                "https://orcid.org/0000-0002-2315-9247",
                 max_terms=5,
                 min_year=2020,
                 max_works=20,
             )
         )
 
-        assert result["orcid"] == "0000-0002-1825-0097"
+        assert result["orcid"] == "0000-0002-2315-9247"
         assert result["suggested_terms"][0]["term"] == "deep learning"
         mock_suggest.assert_called_once_with(
-            "https://orcid.org/0000-0002-1825-0097",
+            "https://orcid.org/0000-0002-2315-9247",
             max_terms=5,
             min_year=2020,
             max_works=20,
@@ -59,4 +59,4 @@ class TestSuggestSearchTermsFromOrcidTool:
         mock_suggest.side_effect = RuntimeError("boom")
 
         with pytest.raises(ToolError, match="ORCID search-term suggestion failed"):
-            suggest_search_terms_from_orcid("0000-0002-1825-0097")
+            suggest_search_terms_from_orcid("0000-0002-2315-9247")

@@ -110,17 +110,17 @@ class TestNormaliseOrcidId:
     @pytest.mark.parametrize(
         "value",
         [
-            "0000-0002-1825-0097",
-            "https://orcid.org/0000-0002-1825-0097",
-            "http://orcid.org/0000-0002-1825-0097/",
-            "orcid.org/0000-0002-1825-0097",
+            "0000-0002-2315-9247",
+            "https://orcid.org/0000-0002-2315-9247",
+            "http://orcid.org/0000-0002-2315-9247/",
+            "orcid.org/0000-0002-2315-9247",
         ],
     )
     def test_accepts_valid_forms(self, value):
-        assert normalize_orcid_id(value) == "0000-0002-1825-0097"
+        assert normalize_orcid_id(value) == "0000-0002-2315-9247"
 
     def test_uppercases_check_digit(self):
-        assert normalize_orcid_id("0000-0002-1825-009x") == "0000-0002-1825-009X"
+        assert normalize_orcid_id("0000-0002-2315-924x") == "0000-0002-2315-924X"
 
     @pytest.mark.parametrize("value", ["", "not-an-orcid", "0000-0002-1825", None, 123])
     def test_rejects_invalid_forms(self, value):
@@ -135,9 +135,9 @@ class TestFetchOrcidRecord:
     def test_parses_works_keywords_and_name(self, mock_get):
         mock_get.side_effect = _mock_orcid_get()
 
-        record = fetch_orcid_record("https://orcid.org/0000-0002-1825-0097")
+        record = fetch_orcid_record("https://orcid.org/0000-0002-2315-9247")
 
-        assert record["orcid"] == "0000-0002-1825-0097"
+        assert record["orcid"] == "0000-0002-2315-9247"
         assert record["name"] == "Jane Doe"
         assert record["keywords"] == ["deep learning", "reinforcement learning"]
         assert len(record["works"]) == 3
@@ -152,8 +152,8 @@ class TestFetchOrcidRecord:
     def test_uses_cache_for_repeated_fetches(self, mock_get):
         mock_get.side_effect = _mock_orcid_get()
 
-        fetch_orcid_record("0000-0002-1825-0097")
-        fetch_orcid_record("https://orcid.org/0000-0002-1825-0097")
+        fetch_orcid_record("0000-0002-2315-9247")
+        fetch_orcid_record("https://orcid.org/0000-0002-2315-9247")
 
         assert mock_get.call_count == 3
 
@@ -162,21 +162,21 @@ class TestFetchOrcidRecord:
         mock_get.return_value = _response({}, status_code=404)
 
         with pytest.raises(OrcidError, match="not found"):
-            fetch_orcid_record("0000-0002-1825-0097")
+            fetch_orcid_record("0000-0002-2315-9247")
 
     @patch("abstracts_explorer.orcid.requests.get")
     def test_raises_on_server_error(self, mock_get):
         mock_get.return_value = _response({}, status_code=503)
 
         with pytest.raises(OrcidError, match="503"):
-            fetch_orcid_record("0000-0002-1825-0097")
+            fetch_orcid_record("0000-0002-2315-9247")
 
     @patch("abstracts_explorer.orcid.requests.get")
     def test_raises_on_network_error(self, mock_get):
         mock_get.side_effect = requests.ConnectionError("boom")
 
         with pytest.raises(OrcidError, match="Could not reach"):
-            fetch_orcid_record("0000-0002-1825-0097")
+            fetch_orcid_record("0000-0002-2315-9247")
 
     @patch("abstracts_explorer.orcid.requests.get")
     def test_raises_on_malformed_json(self, mock_get):
@@ -185,13 +185,13 @@ class TestFetchOrcidRecord:
         mock_get.return_value = response
 
         with pytest.raises(OrcidError, match="malformed"):
-            fetch_orcid_record("0000-0002-1825-0097")
+            fetch_orcid_record("0000-0002-2315-9247")
 
     @patch("abstracts_explorer.orcid.requests.get")
     def test_handles_empty_record(self, mock_get):
         mock_get.side_effect = _mock_orcid_get(works={}, keywords={}, person={})
 
-        record = fetch_orcid_record("0000-0002-1825-0097")
+        record = fetch_orcid_record("0000-0002-2315-9247")
 
         assert record["works"] == []
         assert record["keywords"] == []
@@ -225,7 +225,7 @@ class TestFetchOrcidRecord:
         }
         mock_get.side_effect = _mock_orcid_get(works=works, keywords=keywords, person=person)
 
-        record = fetch_orcid_record("0000-0002-1825-0097")
+        record = fetch_orcid_record("0000-0002-2315-9247")
 
         assert record["works"][0]["title"] == "Data Management Makes & Machine Learning Easier"
         assert record["works"][0]["journal"] == "Journal & Letters"
@@ -240,7 +240,7 @@ class TestSuggestSearchTerms:
     @patch("abstracts_explorer.orcid.fetch_orcid_record")
     def test_returns_llm_terms(self, mock_fetch, mock_chat):
         mock_fetch.return_value = {
-            "orcid": "0000-0002-1825-0097",
+            "orcid": "0000-0002-2315-9247",
             "name": "Jane Doe",
             "keywords": ["deep learning"],
             "works": [
@@ -256,9 +256,9 @@ class TestSuggestSearchTerms:
             }
         )
 
-        result = suggest_search_terms_from_orcid("0000-0002-1825-0097", client=Mock())
+        result = suggest_search_terms_from_orcid("0000-0002-2315-9247", client=Mock())
 
-        assert result["orcid"] == "0000-0002-1825-0097"
+        assert result["orcid"] == "0000-0002-2315-9247"
         assert result["source"] == "llm"
         assert result["warning"] is None
         assert [item["term"] for item in result["suggested_terms"]] == [
@@ -273,7 +273,7 @@ class TestSuggestSearchTerms:
     @patch("abstracts_explorer.orcid.fetch_orcid_record")
     def test_parses_json_inside_code_fences(self, mock_fetch, mock_chat):
         mock_fetch.return_value = {
-            "orcid": "0000-0002-1825-0097",
+            "orcid": "0000-0002-2315-9247",
             "name": "Jane Doe",
             "keywords": [],
             "works": [
@@ -282,7 +282,7 @@ class TestSuggestSearchTerms:
         }
         mock_chat.return_value = 'Here you go:\n```json\n{"search_terms": ["deep learning"]}\n```'
 
-        result = suggest_search_terms_from_orcid("0000-0002-1825-0097", client=Mock())
+        result = suggest_search_terms_from_orcid("0000-0002-2315-9247", client=Mock())
 
         assert result["suggested_terms"][0]["term"] == "deep learning"
 
@@ -290,7 +290,7 @@ class TestSuggestSearchTerms:
     @patch("abstracts_explorer.orcid.fetch_orcid_record")
     def test_falls_back_to_keywords_and_titles(self, mock_fetch, mock_chat):
         mock_fetch.return_value = {
-            "orcid": "0000-0002-1825-0097",
+            "orcid": "0000-0002-2315-9247",
             "name": "Jane Doe",
             "keywords": ["deep learning"],
             "works": [
@@ -300,7 +300,7 @@ class TestSuggestSearchTerms:
         }
         mock_chat.side_effect = RuntimeError("backend down")
 
-        result = suggest_search_terms_from_orcid("0000-0002-1825-0097", client=Mock())
+        result = suggest_search_terms_from_orcid("0000-0002-2315-9247", client=Mock())
 
         assert result["source"] == "fallback"
         assert result["warning"] and "backend down" in result["warning"]
@@ -312,7 +312,7 @@ class TestSuggestSearchTerms:
     @patch("abstracts_explorer.orcid.fetch_orcid_record")
     def test_falls_back_on_invalid_llm_output(self, mock_fetch, mock_chat):
         mock_fetch.return_value = {
-            "orcid": "0000-0002-1825-0097",
+            "orcid": "0000-0002-2315-9247",
             "name": "Jane Doe",
             "keywords": ["deep learning"],
             "works": [
@@ -321,7 +321,7 @@ class TestSuggestSearchTerms:
         }
         mock_chat.return_value = "no json here"
 
-        result = suggest_search_terms_from_orcid("0000-0002-1825-0097", client=Mock())
+        result = suggest_search_terms_from_orcid("0000-0002-2315-9247", client=Mock())
 
         assert result["source"] == "fallback"
         assert result["suggested_terms"]
@@ -330,7 +330,7 @@ class TestSuggestSearchTerms:
     @patch("abstracts_explorer.orcid.fetch_orcid_record")
     def test_filters_works_by_min_year(self, mock_fetch, mock_chat):
         mock_fetch.return_value = {
-            "orcid": "0000-0002-1825-0097",
+            "orcid": "0000-0002-2315-9247",
             "name": "Jane Doe",
             "keywords": [],
             "works": [
@@ -340,7 +340,7 @@ class TestSuggestSearchTerms:
         }
         mock_chat.return_value = json.dumps({"search_terms": ["new work"]})
 
-        result = suggest_search_terms_from_orcid("0000-0002-1825-0097", min_year=2020, client=Mock())
+        result = suggest_search_terms_from_orcid("0000-0002-2315-9247", min_year=2020, client=Mock())
 
         user_prompt = mock_chat.call_args.kwargs["user_prompt"]
         assert "New Work" in user_prompt
@@ -351,7 +351,7 @@ class TestSuggestSearchTerms:
     @patch("abstracts_explorer.orcid.fetch_orcid_record")
     def test_limits_terms(self, mock_fetch, mock_chat):
         mock_fetch.return_value = {
-            "orcid": "0000-0002-1825-0097",
+            "orcid": "0000-0002-2315-9247",
             "name": "Jane Doe",
             "keywords": [],
             "works": [
@@ -360,7 +360,7 @@ class TestSuggestSearchTerms:
         }
         mock_chat.return_value = json.dumps({"search_terms": [f"term {i}" for i in range(10)]})
 
-        result = suggest_search_terms_from_orcid("0000-0002-1825-0097", max_terms=3, client=Mock())
+        result = suggest_search_terms_from_orcid("0000-0002-2315-9247", max_terms=3, client=Mock())
 
         assert [item["term"] for item in result["suggested_terms"]] == ["term 0", "term 1", "term 2"]
 
@@ -368,13 +368,13 @@ class TestSuggestSearchTerms:
     @patch("abstracts_explorer.orcid.fetch_orcid_record")
     def test_returns_empty_for_empty_record(self, mock_fetch, mock_chat):
         mock_fetch.return_value = {
-            "orcid": "0000-0002-1825-0097",
+            "orcid": "0000-0002-2315-9247",
             "name": "Jane Doe",
             "keywords": [],
             "works": [],
         }
 
-        result = suggest_search_terms_from_orcid("0000-0002-1825-0097", client=Mock())
+        result = suggest_search_terms_from_orcid("0000-0002-2315-9247", client=Mock())
 
         assert result["suggested_terms"] == []
         assert result["source"] == "none"

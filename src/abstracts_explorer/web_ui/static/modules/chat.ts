@@ -88,6 +88,10 @@ export function buildMcpToolsHintHtml(): string {
                     <i class="fas fa-users text-teal-400 mt-0.5 flex-shrink-0"></i>
                     <span><em>"Who should I meet based on my interesting papers?"</em></span>
                 </li>
+                <li class="flex items-start gap-2">
+                    <i class="fas fa-id-card text-cyan-400 mt-0.5 flex-shrink-0"></i>
+                    <span><em>"Suggest search terms based on the ORCID record 0000-0002-2315-9247."</em></span>
+                </li>
             </ul>
         </div>`;
 }
