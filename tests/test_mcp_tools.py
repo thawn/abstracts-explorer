@@ -218,6 +218,32 @@ def test_format_search_papers_result_more_than_five_papers():
         assert f"{i}. Paper Number {i} (2024)" in result
 
 
+def test_format_search_papers_result_uses_global_citation_numbers():
+    """Global paper numbers replace local result numbering."""
+    data = {
+        "topic": "LLMs",
+        "papers": [
+            {"uid": "a", "title": "GPT-4 Architecture", "year": 2024},
+            {"uid": "b", "title": "Scaling Laws for LLMs", "year": 2024},
+        ],
+    }
+
+    result = _format_search_papers_result(data, paper_numbers={"a": 3, "b": 7})
+
+    assert "Paper-3: GPT-4 Architecture (2024)" in result
+    assert "Paper-7: Scaling Laws for LLMs (2024)" in result
+    assert "1. GPT-4 Architecture" not in result
+
+
+def test_format_tool_result_for_llm_passes_global_citation_numbers():
+    """The public formatter forwards the citation mapping to tool formatters."""
+    data = {"papers": [{"uid": "a", "title": "Paper A", "year": 2024}]}
+
+    result = format_tool_result_for_llm("search_papers", json.dumps(data), paper_numbers={"a": 5})
+
+    assert "Paper-5: Paper A (2024)" in result
+
+
 def test_format_visualization_result():
     """Test formatting visualization result for LLM."""
     data = {
@@ -1494,6 +1520,47 @@ def test_format_recommend_related_papers_result():
     assert "Recommended Papers" in formatted
     assert "Paper B" in formatted
     assert "Shares keywords" in formatted
+
+
+def test_format_recommend_related_papers_uses_global_citation_numbers():
+    """Recommendations use the conversation-wide paper labels."""
+    data = {
+        "papers": [
+            {
+                "uid": "b",
+                "title": "Paper B",
+                "conference": "ICLR",
+                "year": 2026,
+                "recommendation_score": 0.87,
+            }
+        ]
+    }
+
+    formatted = format_tool_result_for_llm("recommend_related_papers", json.dumps(data), paper_numbers={"b": 4})
+
+    assert "Paper-4: Paper B" in formatted
+
+
+def test_format_summarize_interesting_papers_uses_global_citation_numbers():
+    """The interesting-paper summary labels rated papers with global numbers."""
+    data = {
+        "total_interesting": 1,
+        "top_rated_papers": [{"uid": "c", "title": "Paper C", "priority": 5}],
+        "papers": [
+            {
+                "uid": "c",
+                "title": "Paper C",
+                "conference": "ICLR",
+                "year": 2026,
+                "priority": 5,
+                "searchTerm": "llms",
+            }
+        ],
+    }
+
+    formatted = format_tool_result_for_llm("summarize_interesting_papers", json.dumps(data), paper_numbers={"c": 9})
+
+    assert formatted.count("Paper-9: Paper C") == 2
 
 
 def test_execute_mcp_tool_suggest_authors_to_meet():

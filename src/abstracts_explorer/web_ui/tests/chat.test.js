@@ -207,6 +207,14 @@ describe('Chat Module', () => {
             const papers = document.getElementById('chat-papers');
             expect(papers.innerHTML).toContain('Using cached papers');
         });
+
+        it('should use citation_number for the card number and anchor', () => {
+            displayChatPapers([{ uid: 'p1', title: 'Paper', authors: [], citation_number: 4 }]);
+
+            const papers = document.getElementById('chat-papers');
+            expect(papers.innerHTML).toContain('#4');
+            expect(papers.innerHTML).toContain('id="paper-4"');
+        });
     });
 
     describe('addChatMessage', () => {

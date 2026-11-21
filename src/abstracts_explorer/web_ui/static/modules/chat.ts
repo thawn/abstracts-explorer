@@ -285,10 +285,11 @@ export function displayChatPapers(papers: Paper[], metadata: ChatMetadata = {}):
     }
 
     papers.forEach((paper, index) => {
+        const citationNumber = typeof paper.citation_number === 'number' ? paper.citation_number : index + 1;
         html += formatPaperCard(paper, {
             compact: true,
-            showNumber: index + 1,
-            idPrefix: `paper-${index + 1}`
+            showNumber: citationNumber,
+            idPrefix: `paper-${citationNumber}`
         });
     });
 

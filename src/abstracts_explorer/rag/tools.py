@@ -63,7 +63,7 @@ def _run_rag_tool(
             parsed = json.loads(cached)
             is_error = isinstance(parsed, dict) and "error" in parsed
         except (TypeError, ValueError):
-            pass
+            parsed = None
         if is_error:
             note = (
                 "\n\nNote: this identical tool call already ran and returned an error. "
@@ -71,7 +71,8 @@ def _run_rag_tool(
             )
         else:
             note = "\n\nNote: identical tool call reused from this query's cache."
-        return format_tool_result_for_llm(tool_name, cached) + note
+        paper_numbers = ctx.deps.citations.register(tool_name, parsed)
+        return format_tool_result_for_llm(tool_name, cached, paper_numbers) + note
 
     logger.info("Tool call: %s(keys=%s)", tool_name, sorted(kwargs))
     try:
@@ -82,7 +83,12 @@ def _run_rag_tool(
     with ctx.deps.tool_cache_lock:
         ctx.deps.tool_cache[cache_key] = raw
     ctx.deps.tool_results.append({"name": tool_name, "raw_result": raw})
-    return format_tool_result_for_llm(tool_name, raw)
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        parsed = None
+    paper_numbers = ctx.deps.citations.register(tool_name, parsed)
+    return format_tool_result_for_llm(tool_name, raw, paper_numbers)
 
 
 def _tool_search_papers(

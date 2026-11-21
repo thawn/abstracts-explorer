@@ -58,6 +58,11 @@ Retrieval-Augmented Generation (RAG).
 4. Ask follow-up questions — the assistant remembers the conversation.
 5. Click **Reset** to start a fresh conversation.
 
+Citation links such as `[Paper-3]` keep the same number for the whole
+conversation, even when the assistant runs several searches in the background.
+The Relevant Papers panel accumulates papers from all searches until you reset
+the conversation.
+
 Chat histories are kept in server memory, are not persisted, and expire after
 24 hours of inactivity by default (`CHAT_HISTORY_TTL`).
 

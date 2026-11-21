@@ -267,6 +267,8 @@ class TestRAGChatInstructions:
         chat = RAGChat(mock_embeddings_manager, mock_database)
         instructions = chat._build_base_instructions()
         assert "[Paper-1](#paper-1)" in instructions
+        assert "exact Paper-N labels" in instructions
+        assert "Do not renumber" in instructions
         assert "<a href" not in instructions
 
     def test_build_base_instructions_mentions_orcid_tool(self, mock_embeddings_manager, mock_database):
@@ -451,6 +453,77 @@ class TestRAGToolQueue:
         assert mcp_func.call_count == 1
         assert len(ctx.deps.tool_results) == 1
         assert "do not repeat" in second.lower()
+
+
+class TestCitationRegistry:
+    """Papers keep one global citation number across tool calls and turns."""
+
+    def test_multiple_tool_calls_use_global_numbers(self):
+        """Separate search results continue the same citation sequence."""
+        from abstracts_explorer.rag import _run_rag_tool, RAGToolContext
+
+        ctx = Mock()
+        ctx.deps = RAGToolContext()
+        mcp_func = Mock(
+            side_effect=[
+                json.dumps({"papers": [{"uid": "a", "title": "Paper A"}]}),
+                json.dumps(
+                    {
+                        "papers": [
+                            {"uid": "b", "title": "Paper B"},
+                            {"uid": "a", "title": "Paper A"},
+                        ]
+                    }
+                ),
+            ]
+        )
+
+        first = _run_rag_tool(ctx, "search_papers", mcp_func, {"topic_keywords": "one"})
+        second = _run_rag_tool(ctx, "search_papers", mcp_func, {"topic_keywords": "two"})
+
+        assert "Paper-1: Paper A" in first
+        assert "Paper-2: Paper B" in second
+        assert "Paper-1: Paper A" in second
+        assert [paper["title"] for paper in ctx.deps.citations.papers] == ["Paper A", "Paper B"]
+        assert ctx.deps.citations.papers[0]["citation_number"] == 1
+
+    def test_cached_tool_call_keeps_global_number(self):
+        """A cache hit reuses the number assigned when the result first ran."""
+        from abstracts_explorer.rag import _run_rag_tool, RAGToolContext
+
+        ctx = Mock()
+        ctx.deps = RAGToolContext()
+        mcp_func = Mock(return_value=json.dumps({"papers": [{"uid": "a", "title": "Paper A"}]}))
+
+        first = _run_rag_tool(ctx, "search_papers", mcp_func, {"topic_keywords": "one"})
+        second = _run_rag_tool(ctx, "search_papers", mcp_func, {"topic_keywords": "one"})
+
+        assert "Paper-1: Paper A" in first
+        assert "Paper-1: Paper A" in second
+        assert mcp_func.call_count == 1
+        assert len(ctx.deps.citations.papers) == 1
+
+    def test_query_returns_cumulative_papers(self, mock_embeddings_manager, mock_database, mock_search_papers):
+        """Papers from earlier turns remain available with stable numbers."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        chat._citations.register("search_papers", {"papers": [{"uid": "prior", "title": "Prior Paper"}]})
+
+        with chat.agent.override(model=TestModel()):
+            result = chat.query("What is attention mechanism?")
+
+        titles = [paper["title"] for paper in result["papers"]]
+        assert titles[0] == "Prior Paper"
+        assert len(titles) == 4
+        assert result["papers"][0]["citation_number"] == 1
+
+    def test_reset_conversation_clears_citations(self, mock_embeddings_manager, mock_database):
+        """Resetting the conversation clears the citation registry."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        chat._citations.register("search_papers", {"papers": [{"uid": "a", "title": "Paper A"}]})
+
+        chat.reset_conversation()
+
+        assert chat._citations.papers == []
 
 
 class TestRAGChatQuery:
