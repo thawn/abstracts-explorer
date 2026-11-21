@@ -18,6 +18,7 @@ export interface Paper {
     distance?: number;
     searchTerm?: string;
     priority?: number;
+    citation_number?: number;
     [key: string]: unknown;
 }
 

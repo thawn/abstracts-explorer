@@ -28,6 +28,7 @@ from abstracts_explorer.mcp_server import (
     suggest_authors_to_meet,
     suggest_search_terms_from_orcid,
 )
+from abstracts_explorer.paper_utils import paper_citation_key
 from abstracts_explorer.utils.paper_presentation import truncate_abstract
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,20 @@ def _identity(value: Any) -> Any:
 def _as_list(value: Any) -> List[Any]:
     """Wrap a scalar in a list; keep lists unchanged."""
     return value if isinstance(value, list) else [value]
+
+
+def _paper_citation_label(paper: Dict[str, Any], paper_numbers: Optional[Dict[str, int]]) -> Optional[str]:
+    """Return the global ``Paper-N`` label for *paper*, when assigned."""
+    if not paper_numbers:
+        return None
+    number = paper_numbers.get(paper_citation_key(paper))
+    return f"Paper-{number}" if number is not None else None
+
+
+def _paper_prefix(paper: Dict[str, Any], paper_numbers: Optional[Dict[str, int]], index: int) -> str:
+    """Return a global citation prefix or a local list number with a period."""
+    label = _paper_citation_label(paper, paper_numbers)
+    return f"{label}:" if label else f"{index}."
 
 
 def _join_list(value: Any) -> Any:
@@ -419,7 +434,7 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
         return json.dumps(error_result, indent=2)
 
 
-def format_tool_result_for_llm(tool_name: str, result: str) -> str:
+def format_tool_result_for_llm(tool_name: str, result: str, paper_numbers: Optional[Dict[str, int]] = None) -> str:
     """
     Format tool execution result for LLM consumption.
 
@@ -432,6 +447,10 @@ def format_tool_result_for_llm(tool_name: str, result: str) -> str:
         Name of the tool that was executed
     result : str
         Raw tool result (JSON string)
+    paper_numbers : dict, optional
+        Mapping from paper identifier to its conversation-wide citation
+        number.  When provided, paper-list tools label entries as
+        ``Paper-N`` instead of restarting local numbering at 1.
 
     Returns
     -------
@@ -447,21 +466,21 @@ def format_tool_result_for_llm(tool_name: str, result: str) -> str:
 
         # Format based on tool type
         if tool_name == "analyze_topic_relevance":
-            return _format_topic_relevance_result(result_data)
+            return _format_topic_relevance_result(result_data, paper_numbers)
         elif tool_name == "get_conference_topics":
             return _format_conference_topics_result(result_data)
         elif tool_name == "get_topic_evolution":
             return _format_topic_evolution_result(result_data)
         elif tool_name == "search_papers":
-            return _format_search_papers_result(result_data)
+            return _format_search_papers_result(result_data, paper_numbers)
         elif tool_name == "get_cluster_visualization":
             return _format_visualization_result(result_data)
         elif tool_name == "get_paper_details":
-            return _format_paper_details_result(result_data)
+            return _format_paper_details_result(result_data, paper_numbers)
         elif tool_name == "summarize_interesting_papers":
-            return _format_summarize_interesting_papers_result(result_data)
+            return _format_summarize_interesting_papers_result(result_data, paper_numbers)
         elif tool_name == "recommend_related_papers":
-            return _format_recommend_related_papers_result(result_data)
+            return _format_recommend_related_papers_result(result_data, paper_numbers)
         elif tool_name == "suggest_authors_to_meet":
             return _format_suggest_authors_to_meet_result(result_data)
         elif tool_name == "suggest_search_terms_from_orcid":
@@ -475,7 +494,7 @@ def format_tool_result_for_llm(tool_name: str, result: str) -> str:
         return result
 
 
-def _format_topic_relevance_result(data: Dict[str, Any]) -> str:
+def _format_topic_relevance_result(data: Dict[str, Any], paper_numbers: Optional[Dict[str, int]] = None) -> str:
     """Format topic relevance result for LLM."""
     lines = [f"Topic Relevance Analysis for '{data.get('topic', 'unknown')}':\n"]
 
@@ -509,7 +528,8 @@ def _format_topic_relevance_result(data: Dict[str, Any]) -> str:
             for i, paper in enumerate(sample_papers[:3], 1):
                 title = paper.get("title", "Unknown")
                 dist = paper.get("distance", 0)
-                lines.append(f"  {i}. {title} (distance: {dist:.3f})")
+                prefix = _paper_prefix(paper, paper_numbers, i)
+                lines.append(f"  {prefix} {title} (distance: {dist:.3f})")
 
         closest = data.get("closest_distance")
         if closest is not None:
@@ -566,7 +586,7 @@ def _format_topic_evolution_result(data: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _format_search_papers_result(data: Dict[str, Any]) -> str:
+def _format_search_papers_result(data: Dict[str, Any], paper_numbers: Optional[Dict[str, int]] = None) -> str:
     """Format search papers result for LLM."""
     lines = [f"Search Results for '{data.get('topic', 'unknown')}':\n"]
 
@@ -575,11 +595,14 @@ def _format_search_papers_result(data: Dict[str, Any]) -> str:
     if years_filter:
         lines.append(f"Filtered by years: {years_filter}")
     lines.append(f"Found {len(papers)} papers:\n")
+    if paper_numbers:
+        lines.append("Cite papers as [Paper-N](#paper-N) using the labels shown below.\n")
 
     for i, paper in enumerate(papers, 1):
         title = paper.get("title", "Unknown")
         year = paper.get("year", "")
-        lines.append(f"{i}. {title} ({year})")
+        prefix = _paper_prefix(paper, paper_numbers, i)
+        lines.append(f"{prefix} {title} ({year})")
 
         # Add abstract snippet if available
         abstract = paper.get("abstract", "")
@@ -607,7 +630,7 @@ def _format_visualization_result(data: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _format_paper_details_result(data: Dict[str, Any]) -> str:
+def _format_paper_details_result(data: Dict[str, Any], paper_numbers: Optional[Dict[str, int]] = None) -> str:
     """Format paper details result for LLM."""
     papers = data.get("papers", [])
     lines = [f"Paper Details ({len(papers)} found):\n"]
@@ -620,7 +643,8 @@ def _format_paper_details_result(data: Dict[str, Any]) -> str:
         title = paper.get("title", "Unknown")
         year = paper.get("year", "")
         conference = paper.get("conference", "")
-        lines.append(f"\n{i}. {title} ({conference} {year})")
+        prefix = _paper_prefix(paper, paper_numbers, i)
+        lines.append(f"\n{prefix} {title} ({conference} {year})")
 
         authors = paper.get("authors") or []
         if authors:
@@ -656,7 +680,9 @@ def _format_paper_details_result(data: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _format_summarize_interesting_papers_result(data: Dict[str, Any]) -> str:
+def _format_summarize_interesting_papers_result(
+    data: Dict[str, Any], paper_numbers: Optional[Dict[str, int]] = None
+) -> str:
     """Format an interesting-paper summary for the LLM."""
     total = data.get("total_interesting", 0)
     filters = data.get("filters", {})
@@ -705,14 +731,18 @@ def _format_summarize_interesting_papers_result(data: Dict[str, Any]) -> str:
 
     lines.append("\nHighest-rated papers:")
     for paper in data.get("top_rated_papers", [])[:5]:
-        lines.append(f"  - {paper.get('title')} ({paper.get('priority')}/5)")
+        label = _paper_citation_label(paper, paper_numbers)
+        prefix = f"{label}: " if label else ""
+        lines.append(f"  - {prefix}{paper.get('title')} ({paper.get('priority')}/5)")
 
     papers = data.get("papers", [])
     if papers:
         lines.append("\nPaper list:")
         for paper in papers:
+            label = _paper_citation_label(paper, paper_numbers)
+            prefix = f"{label}: " if label else ""
             lines.append(
-                f"  - {paper.get('title')} — {paper.get('conference')} {paper.get('year')} "
+                f"  - {prefix}{paper.get('title')} — {paper.get('conference')} {paper.get('year')} "
                 f"({paper.get('priority')}/5, search term: {paper.get('searchTerm')})"
             )
         if data.get("papers_truncated"):
@@ -721,7 +751,9 @@ def _format_summarize_interesting_papers_result(data: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _format_recommend_related_papers_result(data: Dict[str, Any]) -> str:
+def _format_recommend_related_papers_result(
+    data: Dict[str, Any], paper_numbers: Optional[Dict[str, int]] = None
+) -> str:
     """Format related-paper recommendations for the LLM."""
     papers = data.get("papers", [])
     lines = [f"Recommended Papers ({len(papers)} found):\n"]
@@ -738,8 +770,9 @@ def _format_recommend_related_papers_result(data: Dict[str, Any]) -> str:
 
     for index, paper in enumerate(papers, 1):
         score = paper.get("recommendation_score", 0)
+        prefix = _paper_prefix(paper, paper_numbers, index)
         lines.append(
-            f"\n{index}. {paper.get('title')} ({paper.get('conference')} {paper.get('year')}) "
+            f"\n{prefix} {paper.get('title')} ({paper.get('conference')} {paper.get('year')}) "
             f"— relevance: {score}"
         )
         reasons = paper.get("recommendation_reasons", [])

@@ -2226,6 +2226,50 @@ class TestSessionScopedChatHistory:
         assert chats[0] is not chats[1]
         assert _chat_sessions["same-session"].history == ["assistant", "user"]
 
+    def test_citation_registry_is_shared_between_requests(self):
+        """Citation numbers persist across requests and reset with the chat."""
+        from abstracts_explorer.web_ui.app import app
+        from abstracts_explorer.web_ui.request_services import (
+            _chat_sessions,
+            _reset_rag_chat_local,
+            chat_session,
+        )
+
+        _reset_rag_chat_local()
+        _chat_sessions.clear()
+
+        mock_config = Mock()
+        mock_config.llm_backend_url = "http://localhost"
+        mock_config.chat_model = "test"
+
+        def factory(*args, message_history=None, citation_registry=None, **kwargs):
+            chat = Mock()
+            chat.message_history = list(message_history or [])
+            chat.citation_registry = citation_registry
+            return chat
+
+        with (
+            patch("abstracts_explorer.web_ui.request_services.RAGChat", side_effect=factory),
+            patch("abstracts_explorer.web_ui.request_services.get_database"),
+            patch("abstracts_explorer.web_ui.request_services.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.request_services.get_config", return_value=mock_config),
+        ):
+            with app.test_request_context():
+                from flask import session as flask_session
+
+                flask_session["_session_id"] = "citations-session"
+
+                with chat_session() as first:
+                    first.citation_registry.register("search_papers", {"papers": [{"uid": "a", "title": "Paper A"}]})
+
+                with chat_session() as second:
+                    assert [paper["uid"] for paper in second.citation_registry.papers] == ["a"]
+
+                with chat_session(reset=True) as third:
+                    assert third.citation_registry.papers == []
+
+        assert _chat_sessions["citations-session"].citations.papers == []
+
     def test_different_sessions_get_isolated_history(self):
         """Two distinct sessions must not see each other's messages."""
         from abstracts_explorer.web_ui.app import app

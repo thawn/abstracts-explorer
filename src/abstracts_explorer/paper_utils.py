@@ -23,6 +23,28 @@ class PaperFormattingError(Exception):
     pass
 
 
+def paper_citation_key(paper: Dict[str, Any]) -> str:
+    """
+    Return a stable key used to deduplicate papers for citations.
+
+    Parameters
+    ----------
+    paper : dict
+        Paper record returned by a search or database tool.
+
+    Returns
+    -------
+    str
+        First non-empty identifier among ``uid``, ``id``, ``original_id``, and
+        ``title``; an empty string when no identifier is available.
+    """
+    for field in ("uid", "id", "original_id", "title"):
+        value = paper.get(field)
+        if value:
+            return str(value)
+    return ""
+
+
 def format_search_results(
     search_results: Dict[str, Any],
     database,

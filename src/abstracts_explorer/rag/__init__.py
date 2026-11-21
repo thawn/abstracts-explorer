@@ -7,6 +7,7 @@ The public API is re-exported here so ``from abstracts_explorer.rag import
 """
 
 from abstracts_explorer.rag.tool_context import RAGToolContext
+from abstracts_explorer.rag.citations import PaperCitationRegistry
 from abstracts_explorer.rag.errors import RAGError
 from abstracts_explorer.rag.manager import RAGChat
 from abstracts_explorer.rag.agent import shutdown_tool_executor
@@ -28,6 +29,7 @@ __all__ = [
     "RAGChat",
     "RAGError",
     "RAGToolContext",
+    "PaperCitationRegistry",
     "shutdown_tool_executor",
     "_run_rag_tool",
     "_tool_search_papers",
