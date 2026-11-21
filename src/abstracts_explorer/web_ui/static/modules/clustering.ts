@@ -292,8 +292,9 @@ function _buildLevelState() {
     const texts = [];
     const customdata = [];
     const colors = [];
+    const ids = [];
     const clusterIdsByPoint = [];
-    points.forEach(point => {
+    points.forEach((point, index) => {
         const rawCluster = Number(point.cluster);
         const mapped = mapping[String(rawCluster)];
         const clusterId = Number(mapped !== undefined ? mapped : rawCluster);
@@ -301,6 +302,7 @@ function _buildLevelState() {
         ys.push(point.y);
         texts.push(point.title || point.id);
         clusterIdsByPoint.push(clusterId);
+        ids.push(point.id !== undefined && point.id !== null ? String(point.id) : `point-${index}`);
         customdata.push({
             id: point.id,
             title: point.title || '',
@@ -317,10 +319,12 @@ function _buildLevelState() {
     const starText = [];
     const starCustomdata = [];
     const starColors = [];
+    const starIds = [];
     entries.forEach(entry => {
         starX.push(entry.center.x);
         starY.push(entry.center.y);
         starText.push(entry.label);
+        starIds.push(String(entry.id));
         starCustomdata.push({
             cluster_id: entry.id,
             size: entry.size,
@@ -350,11 +354,13 @@ function _buildLevelState() {
         texts,
         customdata,
         colors,
+        ids,
         starX,
         starY,
         starText,
         starCustomdata,
         starColors,
+        starIds,
         starHoverTemplate
     };
 }
@@ -422,6 +428,7 @@ export function renderCurrentLevel() {
         name: 'Papers',
         text: state.texts,
         customdata: state.customdata,
+        ids: state.ids,
         marker: {
             color: state.colors,
             size: 8,
@@ -446,6 +453,7 @@ export function renderCurrentLevel() {
         name: 'Clusters',
         text: state.starText,
         customdata: state.starCustomdata,
+        ids: state.starIds,
         marker: {
             color: state.starColors,
             symbol: 'star',
@@ -572,6 +580,7 @@ function applySelectionToPlot() {
         y: [visibleIndices.map(index => state.ys[index])],
         text: [visibleIndices.map(index => state.texts[index])],
         customdata: [visibleIndices.map(index => state.customdata[index])],
+        ids: [visibleIndices.map(index => state.ids[index])],
         'marker.color': [visibleIndices.map(index => state.colors[index])]
     }, [0]);
 
@@ -586,6 +595,7 @@ function applySelectionToPlot() {
             label: entry.label,
             description: entry.description
         }))],
+        ids: [visibleEntries.map(entry => String(entry.id))],
         'marker.color': [visibleEntries.map(entry => entry.color)]
     }, [1]);
 

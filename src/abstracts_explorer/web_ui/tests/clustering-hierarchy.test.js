@@ -161,6 +161,18 @@ describe('Hierarchy slider', () => {
         expect(document.getElementById('hierarchy-level-slider').value).toBe('0');
     });
 
+    it('assigns stable ids to document and star traces', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildData([flatLevel, mergedLevel]) });
+
+        await loadClusters();
+        setHierarchyLevel(0);
+        await flushPromises();
+
+        const traces = global.Plotly.newPlot.mock.calls.at(-1)[1];
+        expect(traces[0].ids).toEqual(['p1', 'p2']);
+        expect(traces[1].ids).toEqual(['0', '1']);
+    });
+
     it('hides cluster points when toggled off and restores them when toggled on', async () => {
         global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildData([flatLevel, mergedLevel]) });
 
@@ -182,10 +194,14 @@ describe('Hierarchy slider', () => {
         expect(hiddenCall[1].x[0]).toEqual([2]);
         expect(hiddenCall[1].y[0]).toEqual([2]);
         expect(hiddenCall[1].text[0]).toEqual(['Paper 2']);
+        expect(hiddenCall[1].ids[0]).toEqual(['p2']);
         expect(hiddenCall[1].customdata[0]).toHaveLength(1);
         expect(hiddenCall[1].customdata[0][0].id).toBe('p2');
         expect(hiddenCall[1]['marker.color'][0]).toEqual(['#ff7f0e']);
         expect(hiddenCall[1]['marker.color'][0]).not.toContain('#e5e7eb');
+
+        const starHiddenCall = getStarRestyleCall();
+        expect(starHiddenCall[1].ids[0]).toEqual(['1']);
 
         global.Plotly.restyle.mockClear();
         items[0].click();
@@ -193,6 +209,7 @@ describe('Hierarchy slider', () => {
         const restoredCall = getDocumentRestyleCall();
         expect(restoredCall[1].x[0]).toEqual([1, 2]);
         expect(restoredCall[1].text[0]).toEqual(['Paper 1', 'Paper 2']);
+        expect(restoredCall[1].ids[0]).toEqual(['p1', 'p2']);
         expect(restoredCall[1]['marker.color'][0]).toEqual(['#1f77b4', '#ff7f0e']);
     });
 
@@ -223,6 +240,7 @@ describe('Hierarchy slider', () => {
 
         const hiddenCall = getDocumentRestyleCall();
         expect(hiddenCall[1].customdata[0].map(point => point.id)).toEqual(['p2', 'noise-1']);
+        expect(hiddenCall[1].ids[0]).toEqual(['p2', 'noise-1']);
 
         const noneButton = Array.from(document.querySelectorAll('#cluster-legend button'))
             .find(button => button.textContent === 'None');
@@ -232,6 +250,7 @@ describe('Hierarchy slider', () => {
 
         const clearedCall = getDocumentRestyleCall();
         expect(clearedCall[1].x[0]).toEqual([]);
+        expect(clearedCall[1].ids[0]).toEqual([]);
         expect(clearedCall[1].customdata[0]).toEqual([]);
     });
 });
@@ -242,9 +261,17 @@ async function flushPromises() {
 }
 
 function getDocumentRestyleCall() {
+    return getRestyleCall(0);
+}
+
+function getStarRestyleCall() {
+    return getRestyleCall(1);
+}
+
+function getRestyleCall(traceIndex) {
     return global.Plotly.restyle.mock.calls.find(call => (
         Array.isArray(call[2])
-        && call[2][0] === 0
+        && call[2][0] === traceIndex
         && call[1]
         && Array.isArray(call[1].x)
     ));
