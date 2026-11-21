@@ -12,7 +12,7 @@ import sys
 import logging
 import json
 from pathlib import Path
-from flask import Flask, render_template, request, jsonify, send_file, abort
+from flask import Flask, Response, render_template, request, jsonify, send_file, abort
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from abstracts_explorer.database import normalize_model_name
@@ -373,7 +373,7 @@ def get_filters():
 
 @app.route("/api/available-filters")
 @api_error_handler
-def get_available_filters_endpoint():
+def get_available_filters_endpoint() -> Response:
     """
     Get available conferences and years from the database.
 
@@ -396,7 +396,7 @@ def get_available_filters_endpoint():
     db_conference_years = database.get_conference_years_from_db()
 
     conferences = sorted(db_conference_years.keys())
-    all_years: set = set()
+    all_years: set[int] = set()
     for years in db_conference_years.values():
         all_years.update(years)
     years_sorted = sorted(all_years, reverse=True)

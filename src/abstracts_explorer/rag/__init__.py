@@ -20,6 +20,7 @@ from abstracts_explorer.rag.tools import (
     _tool_recommend_related_papers,
     _tool_search_papers,
     _tool_suggest_authors_to_meet,
+    _tool_suggest_search_terms_from_orcid,
     _tool_summarize_interesting_papers,
 )
 
@@ -38,4 +39,5 @@ __all__ = [
     "_tool_summarize_interesting_papers",
     "_tool_recommend_related_papers",
     "_tool_suggest_authors_to_meet",
+    "_tool_suggest_search_terms_from_orcid",
 ]

@@ -802,6 +802,9 @@ describe('Chat Module', () => {
             expect(html).toContain('suggest other papers');
             // Authors to meet
             expect(html).toContain('Who should I meet');
+            // ORCID search terms
+            expect(html).toContain('ORCID');
+            expect(html).toContain('0000-0002-2315-9247');
         });
 
         it('removeMcpToolsHint should add hide class when hint exists', () => {

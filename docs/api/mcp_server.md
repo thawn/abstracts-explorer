@@ -19,6 +19,7 @@ from abstracts_explorer.mcp_server import (
     get_conference_topics,
     get_topic_evolution,
     search_papers,
+    suggest_search_terms_from_orcid,
 )
 
 # Get main topics across conferences
@@ -36,6 +37,9 @@ results = search_papers(
     topic_keywords="reinforcement learning",
     limit=10,
 )
+
+# Suggest search terms from a public ORCID record
+terms = suggest_search_terms_from_orcid("0000-0002-2315-9247")
 ```
 
 See the [MCP Server Guide](../mcp_server.md) for usage with LLM assistants.

@@ -26,6 +26,7 @@ from abstracts_explorer.mcp_server import (
     summarize_interesting_papers,
     recommend_related_papers,
     suggest_authors_to_meet,
+    suggest_search_terms_from_orcid,
 )
 from abstracts_explorer.utils.paper_presentation import truncate_abstract
 
@@ -44,6 +45,7 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
     "summarize_interesting_papers": "Summarize the papers the user marked as interesting.",
     "recommend_related_papers": "Recommend further papers based on the user's interesting papers.",
     "suggest_authors_to_meet": "Suggest authors to meet based on the user's interesting papers.",
+    "suggest_search_terms_from_orcid": ("Suggest paper search terms based on a researcher's public ORCID record."),
 }
 
 TOOL_ARGUMENT_EXAMPLES: Dict[str, str] = {
@@ -56,6 +58,7 @@ TOOL_ARGUMENT_EXAMPLES: Dict[str, str] = {
     "summarize_interesting_papers": '{"conference": "ICLR", "years": [2026]}',
     "recommend_related_papers": '{"conferences": ["ICLR"], "years": [2026], "limit": 10}',
     "suggest_authors_to_meet": '{"conferences": ["ICLR"], "years": [2026], "limit": 10, "paper_limit": 50}',
+    "suggest_search_terms_from_orcid": '{"orcid": "0000-0002-2315-9247", "max_terms": 15}',
 }
 
 
@@ -205,6 +208,18 @@ ANALYZE_TOPIC_RELEVANCE_RULES = [
 GET_PAPER_DETAILS_RULES = [
     NormRule("year", (), _first_int_or_none),
     NormRule("conference", (), _first_or_none),
+]
+
+SUGGEST_SEARCH_TERMS_FROM_ORCID_RULES = [
+    NormRule("orcid", ("orcid_id", "orcidId", "id"), _first_or_none),
+    NormRule(
+        "max_terms",
+        ("limit", "n_terms", "num_terms", "max_results"),
+        int,
+        drop_on_error=True,
+    ),
+    NormRule("min_year", (), _first_int_or_none),
+    NormRule("max_works", ("n_works", "num_works"), int, drop_on_error=True),
 ]
 
 
@@ -384,6 +399,12 @@ def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
                 arguments,
                 INTERESTING_PAPER_ARRAY_RULES,
             )
+        elif tool_name == "suggest_search_terms_from_orcid":
+            result = _execute_tool(
+                suggest_search_terms_from_orcid,
+                arguments,
+                SUGGEST_SEARCH_TERMS_FROM_ORCID_RULES,
+            )
         else:
             # Return error JSON for unknown tools
             error_result = {"error": f"Unknown MCP tool: {tool_name}"}
@@ -443,6 +464,8 @@ def format_tool_result_for_llm(tool_name: str, result: str) -> str:
             return _format_recommend_related_papers_result(result_data)
         elif tool_name == "suggest_authors_to_meet":
             return _format_suggest_authors_to_meet_result(result_data)
+        elif tool_name == "suggest_search_terms_from_orcid":
+            return _format_suggest_search_terms_from_orcid_result(result_data)
         else:
             # Return raw result for unknown tools
             return result
@@ -783,5 +806,40 @@ def _format_suggest_authors_to_meet_result(data: Dict[str, Any]) -> str:
                 f"({paper.get('conference')} {paper.get('year')})"
                 f"{_format_author_location(paper)}"
             )
+
+    return "\n".join(lines)
+
+
+def _format_suggest_search_terms_from_orcid_result(data: Dict[str, Any]) -> str:
+    """Format ORCID search-term suggestions for the LLM."""
+    orcid_id = data.get("orcid", "unknown")
+    name = data.get("name") or "Unknown researcher"
+    works_found = data.get("works_found", 0)
+    works_used = data.get("works_used", works_found)
+    lines = [f"Suggested Search Terms for {name} ({orcid_id}):\n"]
+    lines.append(f"Public ORCID works: {works_found} found, {works_used} used")
+
+    keywords = data.get("keywords") or []
+    if keywords:
+        lines.append("ORCID keywords: " + ", ".join(keywords[:15]))
+
+    if data.get("warning"):
+        lines.append(f"Note: {data['warning']}")
+
+    terms = data.get("suggested_terms") or []
+    if terms:
+        lines.append("\nSuggested search terms:")
+        for index, item in enumerate(terms, 1):
+            reason = item.get("reason") or ""
+            suffix = f" — {reason}" if reason else ""
+            lines.append(f"  {index}. {item.get('term')}{suffix}")
+    else:
+        lines.append("\nNo search terms could be derived from this ORCID record.")
+
+    titles = data.get("recent_titles") or []
+    if titles:
+        lines.append("\nRecent work titles:")
+        for title in titles[:10]:
+            lines.append(f"  - {title}")
 
     return "\n".join(lines)

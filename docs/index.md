@@ -108,6 +108,7 @@ api/mcp_server
 api/mcp_tools
 api/export_utils
 api/paper_utils
+api/orcid
 api/db_models
 api/evaluation
 ```

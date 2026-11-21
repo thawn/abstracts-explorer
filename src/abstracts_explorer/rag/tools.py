@@ -17,6 +17,7 @@ from abstracts_explorer.mcp import (
     recommend_related_papers as mcp_recommend_related_papers,
     search_papers as mcp_search_papers,
     suggest_authors_to_meet as mcp_suggest_authors_to_meet,
+    suggest_search_terms_from_orcid as mcp_suggest_search_terms_from_orcid,
     summarize_interesting_papers as mcp_summarize_interesting_papers,
 )
 from abstracts_explorer.mcp.errors import ToolError
@@ -488,3 +489,39 @@ def _tool_suggest_authors_to_meet(
         kwargs["years"] = resolved_years
 
     return _run_rag_tool(ctx, "suggest_authors_to_meet", mcp_suggest_authors_to_meet, kwargs)
+
+
+def _tool_suggest_search_terms_from_orcid(
+    ctx: RunContext[RAGToolContext],
+    orcid: str,
+    max_terms: int = 15,
+    min_year: Optional[int] = None,
+) -> str:
+    """Suggest paper search terms based on the user's public ORCID record.
+
+    Use this tool when the user provides an ORCID iD or profile URL and asks
+    what to search for at the conference. If the user has not provided an ORCID
+    iD, ask them for it; do not guess. The tool reads public ORCID works and
+    keywords and returns concise search terms.
+
+    Parameters
+    ----------
+    ctx : RunContext[RAGToolContext]
+        Agent context with dependencies.
+    orcid : str
+        ORCID iD or ORCID profile URL (e.g. "0000-0002-2315-9247").
+    max_terms : int, optional
+        Maximum number of search terms to return (default: 15).
+    min_year : int, optional
+        Only consider works published in or after this year.
+    """
+    kwargs: Dict[str, Any] = {"orcid": orcid, "max_terms": max_terms}
+    if min_year is not None:
+        kwargs["min_year"] = min_year
+
+    return _run_rag_tool(
+        ctx,
+        "suggest_search_terms_from_orcid",
+        mcp_suggest_search_terms_from_orcid,
+        kwargs,
+    )
