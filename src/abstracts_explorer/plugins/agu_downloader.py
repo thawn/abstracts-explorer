@@ -15,12 +15,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set
 
-from bs4 import BeautifulSoup
 from pydantic import ValidationError
 from tqdm import tqdm
 
 from abstracts_explorer.plugin import HTTPDownloaderPlugin, LightweightPaper, sanitize_author_names
 from abstracts_explorer.plugin.persistence import append_jsonl, clear_directory, load_json, load_jsonl, save_json
+from abstracts_explorer.utils.text_utils import html_to_text
 
 logger = logging.getLogger(__name__)
 
@@ -937,7 +937,7 @@ class AGUDownloaderPlugin(HTTPDownloaderPlugin):
     ) -> Optional[LightweightPaper]:
         """Convert an m-anage paper record into the lightweight schema."""
         title = str(paper_data.get("Title") or "").strip()
-        abstract = BeautifulSoup(str(paper_data.get("Abstract") or ""), "html.parser").get_text(" ", strip=True)
+        abstract = html_to_text(paper_data.get("Abstract"))
         if not title or not abstract:
             return None
 

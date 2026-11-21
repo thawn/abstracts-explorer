@@ -7,7 +7,6 @@ unavailable or returns unusable output, the service falls back to ORCID author
 keywords and TF-IDF phrases extracted from work titles.
 """
 
-import html
 import json
 import logging
 import re
@@ -21,13 +20,13 @@ from abstracts_explorer.embeddings.models import ModelMixin
 from abstracts_explorer.llm_utils import chat_completion_text
 from abstracts_explorer.metadata_cache import MetadataCache
 from abstracts_explorer.paper_utils import extract_top_keywords
+from abstracts_explorer.utils.text_utils import html_to_text
 
 logger = logging.getLogger(__name__)
 
 ORCID_API_BASE = "https://pub.orcid.org/v3.0"
 ORCID_ID_PATTERN = re.compile(r"^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$")
 ORCID_USER_AGENT = "abstracts-explorer ORCID client"
-_HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 
 _ORCID_CACHE = MetadataCache()
 
@@ -46,15 +45,6 @@ Rules:
 
 class OrcidError(Exception):
     """Exception raised for ORCID lookup and parsing failures."""
-
-
-def _clean_text(value: Any) -> str:
-    """Unescape HTML entities, strip tags, and normalize whitespace."""
-    if value is None:
-        return ""
-    text = html.unescape(str(value))
-    text = _HTML_TAG_PATTERN.sub("", text)
-    return " ".join(text.split())
 
 
 class _OrcidLlmProvider(ModelMixin):
@@ -159,7 +149,7 @@ def _parse_works(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     for group in payload.get("group") or []:
         for summary in group.get("work-summary") or []:
-            title = _clean_text(((summary.get("title") or {}).get("title") or {}).get("value"))
+            title = html_to_text(((summary.get("title") or {}).get("title") or {}).get("value"))
             if not title:
                 continue
 
@@ -180,7 +170,7 @@ def _parse_works(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "year": year,
                     "type": summary.get("type"),
                     "doi": _extract_doi(summary),
-                    "journal": _clean_text(summary.get("journal-title")) or None,
+                    "journal": html_to_text(summary.get("journal-title")) or None,
                 }
             )
 
@@ -192,7 +182,7 @@ def _parse_keywords(payload: Dict[str, Any]) -> List[str]:
     keywords: List[str] = []
     seen: set[str] = set()
     for item in payload.get("keyword") or []:
-        content = _clean_text(item.get("content"))
+        content = html_to_text(item.get("content"))
         key = content.casefold()
         if content and key not in seen:
             seen.add(key)
@@ -203,12 +193,12 @@ def _parse_keywords(payload: Dict[str, Any]) -> List[str]:
 def _parse_name(payload: Dict[str, Any]) -> Optional[str]:
     """Parse an ORCID ``/person`` response into a display name."""
     name = payload.get("name") or {}
-    credit_name = _clean_text((name.get("credit-name") or {}).get("value"))
+    credit_name = html_to_text((name.get("credit-name") or {}).get("value"))
     if credit_name:
         return credit_name
 
-    given = _clean_text((name.get("given-names") or {}).get("value"))
-    family = _clean_text((name.get("family-name") or {}).get("value"))
+    given = html_to_text((name.get("given-names") or {}).get("value"))
+    family = html_to_text((name.get("family-name") or {}).get("value"))
     return " ".join(part for part in (given, family) if part) or None
 
 

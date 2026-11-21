@@ -216,7 +216,7 @@ class TestFetchOrcidRecord:
                 }
             ]
         }
-        keywords = {"keyword": [{"content": "<i>bio</i>computation"}]}
+        keywords = {"keyword": [{"content": "<i>bioinformatics</i>"}]}
         person = {
             "name": {
                 "given-names": {"value": "<b>Till</b>"},
@@ -229,7 +229,7 @@ class TestFetchOrcidRecord:
 
         assert record["works"][0]["title"] == "Data Management Makes & Machine Learning Easier"
         assert record["works"][0]["journal"] == "Journal & Letters"
-        assert record["keywords"] == ["biocomputation"]
+        assert record["keywords"] == ["bioinformatics"]
         assert record["name"] == "Till Korten & Co"
 
 

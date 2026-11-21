@@ -16,6 +16,7 @@ from abstracts_explorer.plugin import (
     sanitize_author_names,
 )
 from abstracts_explorer.plugin.persistence import FailureSidecar
+from abstracts_explorer.utils.text_utils import html_to_text
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +172,7 @@ class AAAIDownloaderPlugin(HTTPDownloaderPlugin):
                     heading.decompose()
                 abstract = abstract_tag.get_text(" ", strip=True)
         # Some OJS descriptions include HTML even inside the meta attribute.
-        abstract = BeautifulSoup(abstract, "html.parser").get_text(" ", strip=True)
+        abstract = html_to_text(abstract)
         article_id = _ARTICLE_VIEW_RE.search(url)
         pdf_url = first("citation_pdf_url")
         keywords = metadata.get("DC.Subject", [])
