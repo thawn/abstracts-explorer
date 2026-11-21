@@ -23,6 +23,9 @@ from abstracts_explorer.mcp.tools.relevance import (
 from abstracts_explorer.mcp.tools.visualization import (
     get_cluster_visualization,
 )
+from abstracts_explorer.mcp.tools.orcid import (
+    suggest_search_terms_from_orcid,
+)
 
 __all__ = [
     "analyze_cluster_topics",
@@ -36,4 +39,5 @@ __all__ = [
     "suggest_authors_to_meet",
     "analyze_topic_relevance",
     "get_cluster_visualization",
+    "suggest_search_terms_from_orcid",
 ]

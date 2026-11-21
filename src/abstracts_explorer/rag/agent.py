@@ -28,6 +28,7 @@ from abstracts_explorer.rag.tools import (
     _tool_recommend_related_papers,
     _tool_search_papers,
     _tool_suggest_authors_to_meet,
+    _tool_suggest_search_terms_from_orcid,
     _tool_summarize_interesting_papers,
 )
 from abstracts_explorer.utils.http_utils import build_llm_timeout
@@ -266,6 +267,11 @@ class AgentMixin:
                         _tool_suggest_authors_to_meet,
                         takes_ctx=True,
                         name="suggest_authors_to_meet",
+                    ),
+                    Tool(
+                        _tool_suggest_search_terms_from_orcid,
+                        takes_ctx=True,
+                        name="suggest_search_terms_from_orcid",
                     ),
                 ]
             )

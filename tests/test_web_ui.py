@@ -801,6 +801,20 @@ class TestExtractTopKeywords:
             result = extract_top_keywords(papers, n_keywords=n)
             assert len(result) <= n
 
+    def test_supports_custom_ngram_range(self):
+        """Should honor a custom n-gram range such as unigrams and bigrams."""
+        from abstracts_explorer.paper_utils import extract_top_keywords
+
+        papers = [
+            {"title": "Deep Learning for Vision"},
+            {"title": "Deep Learning at Scale"},
+        ]
+
+        result = extract_top_keywords(papers, n_keywords=5, ngram_range=(1, 2))
+
+        assert result
+        assert all(len(keyword.split()) <= 2 for keyword in result)
+
     def test_search_response_includes_related_topics(self, client):
         """Test that search response includes related_topics field."""
         from unittest.mock import MagicMock, patch

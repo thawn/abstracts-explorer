@@ -11,7 +11,7 @@ analysis tools to answer questions about conference topics, trends, and
 developments during RAG chat sessions. It also exposes
 `summarize_interesting_papers`, `recommend_related_papers`, and
 `suggest_authors_to_meet`, which use the paper ratings forwarded from the web
-UI.
+UI, and `suggest_search_terms_from_orcid`, which reads a public ORCID record.
 
 ## Quick Start
 

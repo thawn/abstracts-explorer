@@ -965,6 +965,7 @@ class TestMCPServerIntegration:
             "summarize_interesting_papers",
             "recommend_related_papers",
             "suggest_authors_to_meet",
+            "suggest_search_terms_from_orcid",
         }
 
 

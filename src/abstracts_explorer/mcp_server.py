@@ -24,6 +24,7 @@ from abstracts_explorer.mcp import (
     run_mcp_server,
     search_papers,
     suggest_authors_to_meet,
+    suggest_search_terms_from_orcid,
     summarize_interesting_papers,
 )
 
@@ -47,4 +48,5 @@ __all__ = [
     "suggest_authors_to_meet",
     "analyze_topic_relevance",
     "get_cluster_visualization",
+    "suggest_search_terms_from_orcid",
 ]

@@ -2189,3 +2189,42 @@ def test_shutdown_tool_executor_resets_shared_executor():
         assert replacement is not executor
     finally:
         shutdown_tool_executor()
+
+
+def test_tool_suggest_search_terms_from_orcid_forwards_args():
+    """The RAG wrapper forwards the ORCID iD and optional filters to the MCP tool."""
+    from unittest.mock import Mock, patch
+
+    from abstracts_explorer.rag import RAGToolContext, _tool_suggest_search_terms_from_orcid
+
+    ctx = Mock()
+    ctx.deps = RAGToolContext()
+
+    with patch("abstracts_explorer.rag.tools._run_rag_tool", return_value="ok") as mock_run:
+        result = _tool_suggest_search_terms_from_orcid(
+            ctx,
+            "https://orcid.org/0000-0002-1825-0097",
+            max_terms=5,
+            min_year=2020,
+        )
+
+    assert result == "ok"
+    args = mock_run.call_args.args
+    assert args[0] is ctx
+    assert args[1] == "suggest_search_terms_from_orcid"
+    assert args[3] == {
+        "orcid": "https://orcid.org/0000-0002-1825-0097",
+        "max_terms": 5,
+        "min_year": 2020,
+    }
+
+
+def test_suggest_search_terms_from_orcid_in_agent_tools(mock_embeddings_manager, mock_database):
+    """The ORCID search-term tool is registered when MCP tools are enabled."""
+    chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+    tool_names = list(chat.agent._function_toolset.tools.keys())
+    assert "suggest_search_terms_from_orcid" in tool_names
+
+    chat_without_mcp = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=False)
+    tool_names_without_mcp = list(chat_without_mcp.agent._function_toolset.tools.keys())
+    assert "suggest_search_terms_from_orcid" not in tool_names_without_mcp
