@@ -507,10 +507,13 @@ def _format_conference_topics_result(data: Dict[str, Any]) -> str:
     topics = data.get("topics", [])
     for topic in topics[:10]:  # Limit to top 10 topics
         name = topic.get("topic") or "Unnamed"
+        label = topic.get("label")
         paper_count = topic.get("paper_count", 0)
         keywords = topic.get("keywords", [])
 
         lines.append(f"\n{name} ({paper_count} papers):")
+        if label and label != name:
+            lines.append(f"  Label: {label}")
         if keywords:
             lines.append(f"  Keywords: {', '.join(keywords[:8])}")
 

@@ -1,15 +1,19 @@
 """
-End-to-end clustering pipelines (uncached and cached).
+End-to-end BERTopic clustering pipelines (uncached and cached).
 """
 
-import hashlib
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+from abstracts_explorer.clustering.backfill import backfill_missing_labels as _backfill_missing_labels
 from abstracts_explorer.clustering.constants import (
     DEFAULT_CLUSTERING_METHOD,
+    DEFAULT_CLUSTERING_PARAMS,
+    DEFAULT_CLUSTER_N_COMPONENTS,
+    DEFAULT_LEVEL_SCALE,
     DEFAULT_N_COMPONENTS,
+    DEFAULT_NR_LEVELS,
     DEFAULT_REDUCTION_METHOD,
 )
 from abstracts_explorer.clustering.errors import ClusteringError
@@ -20,307 +24,253 @@ from abstracts_explorer.embeddings import EmbeddingsManager
 logger = logging.getLogger(__name__)
 
 
-def _run_pipeline(
-    cm: ClusteringManager,
-    *,
-    n_components: int,
-    n_clusters: Optional[int],
-    random_state: int,
-    limit: Optional[int] = None,
-    conferences: Optional[List[str]] = None,
-    years: Optional[List[int]] = None,
+def _effective_params(
+    use_llm_labels: bool,
+    nr_levels: int,
+    level_scale: str,
     clustering_kwargs: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Build the effective parameter dictionary used as the cache key."""
+    params = dict(DEFAULT_CLUSTERING_PARAMS)
+    for key, value in (clustering_kwargs or {}).items():
+        if key in params:
+            params[key] = value
+    params["nr_levels"] = int(nr_levels)
+    params["level_scale"] = level_scale
+    params["representation"] = "llm" if use_llm_labels else "ctfidf"
+    return params
+
+
+def _save_clustering_results(
+    database: DatabaseManager,
+    embedding_model: str,
+    results: Dict[str, Any],
+    clustering_params: Dict[str, Any],
+    conference: Optional[str],
+    year: Optional[int],
+    collection: Optional[str],
 ) -> None:
-    """
-    Run the shared clustering pipeline on *cm* in place.
-
-    Loads embeddings, clusters on the full embeddings, reduces dimensions with
-    t-SNE, and generates cluster labels (best effort).
-
-    Parameters
-    ----------
-    cm : ClusteringManager
-        Manager to populate.
-    n_components : int
-        Number of t-SNE components.
-    n_clusters : int, optional
-        Fixed cluster count; ``None`` uses the distance threshold or an
-        automatically calculated count.
-    random_state : int
-        Random state for the t-SNE reduction.
-    limit : int, optional
-        Maximum number of embeddings to load.
-    conferences : list of str, optional
-        Filter by conferences.
-    years : list of int, optional
-        Filter by years.
-    clustering_kwargs : dict, optional
-        Extra Agglomerative parameters (e.g. ``distance_threshold``).
-    """
-    kwargs = dict(clustering_kwargs or {})
-
-    logger.info("Loading embeddings...")
-    cm.load_embeddings(limit=limit, conferences=conferences, years=years)
-
-    logger.info("Clustering using Agglomerative on full embeddings...")
-    cm.cluster(n_clusters=n_clusters, **kwargs)
-
-    logger.info("Reducing dimensions using t-SNE for visualization...")
-    cm.reduce_dimensions(n_components=n_components, random_state=random_state)
-
-    logger.info("Generating cluster labels...")
-    try:
-        cm.extract_cluster_keywords(n_keywords=10)
-        cm.generate_cluster_labels(use_llm=True, max_keywords=5)
-    except Exception as e:
-        logger.warning(f"Failed to generate cluster labels: {e}")
+    """Save clustering results to the database cache."""
+    database.save_clustering_cache(
+        embedding_model=embedding_model,
+        reduction_method=DEFAULT_REDUCTION_METHOD,
+        n_components=DEFAULT_N_COMPONENTS,
+        clustering_method=DEFAULT_CLUSTERING_METHOD,
+        results=results,
+        n_clusters=None,
+        clustering_params=clustering_params,
+        conference=conference,
+        year=year,
+        collection_name=collection,
+    )
 
 
 def perform_clustering(
     collection_name: str = "papers",
     n_components: int = DEFAULT_N_COMPONENTS,
-    n_clusters: Optional[int] = None,
     output_path: Optional[Union[str, Path]] = None,
-    random_state: int = 42,
     limit: Optional[int] = None,
-    **kwargs,
+    show_progress: bool = False,
+    conferences: Optional[List[str]] = None,
+    years: Optional[List[int]] = None,
+    use_llm_labels: bool = True,
+    nr_levels: int = DEFAULT_NR_LEVELS,
+    level_scale: str = DEFAULT_LEVEL_SCALE,
+    cluster_n_components: int = DEFAULT_CLUSTER_N_COMPONENTS,
+    requests_per_minute: Optional[int] = None,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """
-    Perform complete clustering pipeline and optionally export results.
-
-    Handles the full workflow: load embeddings, cluster on full embeddings
-    (Agglomerative), reduce with t-SNE for visualization, and export if
-    requested.
+    Perform the complete BERTopic clustering pipeline.
 
     Parameters
     ----------
     collection_name : str, optional
-        Name of the ChromaDB collection, by default "papers"
+        Name of the ChromaDB collection (default ``"papers"``).
     n_components : int, optional
-        Number of components for dimensionality reduction, by default 2
-    n_clusters : int, optional
-        Number of clusters. Can be None if ``distance_threshold`` is provided
-        in *kwargs*. If both are None, automatically calculated as
-        n_papers / 100, clamped to [2, 500].
+        Number of visualization dimensions (default 2).
     output_path : str or Path, optional
-        Path to export JSON results. If None, don't export.
-    random_state : int, optional
-        Random state for reproducibility, by default 42
+        Path to export JSON results.
     limit : int, optional
-        Maximum number of embeddings to process. If None, process all.
+        Maximum number of embeddings to process.
+    show_progress : bool, optional
+        Enable BERTopic verbose output.
+    conferences : list of str, optional
+        Filter by conferences.
+    years : list of int, optional
+        Filter by years.
+    use_llm_labels : bool, optional
+        Whether to use LLM labels (default True).
+    nr_levels : int, optional
+        Number of hierarchy levels (default 10).
+    level_scale : str, optional
+        Level scaling mode (default ``"linear"``).
+    cluster_n_components : int, optional
+        UMAP components used before clustering (default 5).
+    requests_per_minute : int, optional
+        Maximum embedding/LLM API requests per minute. ``None`` uses the
+        configured default; ``0`` disables rate limiting.
     **kwargs
-        Additional arguments passed to the clustering algorithm
-        (e.g. distance_threshold, linkage)
+        Ignored compatibility parameters.
 
     Returns
     -------
     dict
-        Clustering results dictionary
+        Clustering results.
 
     Raises
     ------
     ClusteringError
-        If any step fails
-
-    Examples
-    --------
-    >>> results = perform_clustering(
-    ...     n_clusters=5,
-    ...     output_path="clusters.json"
-    ... )
-    >>> print(f"Found {results['statistics']['n_clusters']} clusters")
+        If any step fails.
     """
     try:
-        with DatabaseManager() as db, EmbeddingsManager(collection_name=collection_name) as em:
+        with (
+            DatabaseManager() as db,
+            EmbeddingsManager(
+                collection_name=collection_name,
+                requests_per_minute=requests_per_minute,
+            ) as em,
+        ):
             cm = ClusteringManager(em, db)
-            _run_pipeline(
-                cm,
-                n_components=n_components,
-                n_clusters=n_clusters,
-                random_state=random_state,
-                limit=limit,
-                clustering_kwargs=kwargs,
+            cm.load_embeddings(limit=limit, conferences=conferences, years=years)
+            results = cm.fit(
+                nr_levels=nr_levels,
+                level_scale=level_scale,
+                use_llm_labels=use_llm_labels,
+                show_progress=show_progress,
+                cluster_n_components=cluster_n_components,
             )
-            results = cm.get_clustering_results()
             if output_path:
-                logger.info(f"Exporting results to {output_path}...")
                 cm.export_to_json(output_path)
             return results
-    except Exception as e:
-        raise ClusteringError(f"Clustering pipeline failed: {str(e)}") from e
+    except ClusteringError:
+        raise
+    except Exception as exc:
+        raise ClusteringError(f"Clustering pipeline failed: {exc}") from exc
 
 
 def compute_clusters_with_cache(
     embeddings_manager: EmbeddingsManager,
     database: DatabaseManager,
     embedding_model: str,
-    n_components: int = DEFAULT_N_COMPONENTS,
-    n_clusters: Optional[int] = None,
     limit: Optional[int] = None,
     force: bool = False,
     conferences: Optional[List[str]] = None,
     years: Optional[List[int]] = None,
-    **clustering_kwargs,
+    use_llm_labels: bool = True,
+    show_progress: bool = False,
+    nr_levels: int = DEFAULT_NR_LEVELS,
+    level_scale: str = DEFAULT_LEVEL_SCALE,
+    cluster_n_components: int = DEFAULT_CLUSTER_N_COMPONENTS,
+    backfill_missing_labels: bool = False,
+    **clustering_kwargs: Any,
 ) -> Dict[str, Any]:
     """
-    Compute clusters with caching support.
-
-    Checks the cache first and returns cached results if available. On a cache
-    miss or forced recompute, runs the Agglomerative + t-SNE pipeline, applies
-    hierarchical labels, and saves the result to the cache.
+    Compute BERTopic clusters with database caching.
 
     Parameters
     ----------
     embeddings_manager : EmbeddingsManager
-        Embeddings manager instance
+        Embeddings manager instance.
     database : DatabaseManager
-        Database manager for cache operations
+        Database manager for cache operations.
     embedding_model : str
-        Current embedding model name
-    n_components : int, optional
-        Number of components for the t-SNE reduction, by default 2
-    n_clusters : int, optional
-        Number of clusters. Can be None if ``distance_threshold`` is provided
-        in *clustering_kwargs*. If both are None, auto-calculated based on
-        data size.
+        Current embedding model name.
     limit : int, optional
-        Maximum number of embeddings to process
+        Maximum number of embeddings to process. Results are not cached when
+        a limit is set.
     force : bool, optional
-        Force recompute even if cache exists, by default False
+        Force recomputation even when a cache entry exists.
     conferences : list of str, optional
-        Filter to only cluster papers from these conferences.
+        Filter to conferences.
     years : list of int, optional
-        Filter to only cluster papers from these years.
+        Filter to years.
+    use_llm_labels : bool, optional
+        Whether to use LLM labels (default True).
+    show_progress : bool, optional
+        Enable BERTopic verbose output.
+    nr_levels : int, optional
+        Number of hierarchy levels (default 10).
+    level_scale : str, optional
+        Level scaling mode (default ``"linear"``).
+    cluster_n_components : int, optional
+        UMAP components used before clustering (default 5).
+    backfill_missing_labels : bool, optional
+        Repair cached clusters without descriptions by reusing successful
+        labels and retrying only missing ones (default False).
     **clustering_kwargs
-        Additional clustering parameters (e.g., distance_threshold, linkage)
+        Additional clustering parameters used in the cache key.
 
     Returns
     -------
     dict
-        Clustering results with points, statistics, and metadata
+        Clustering results.
 
     Raises
     ------
     ClusteringError
-        If clustering fails
-
-    Examples
-    --------
-    >>> results = compute_clusters_with_cache(
-    ...     em, db, "text-embedding-model",
-    ...     distance_threshold=150.0,
-    ...     linkage="ward"
-    ... )
+        If clustering fails.
     """
     cache_conference = conferences[0] if conferences and len(conferences) == 1 else None
     cache_year = years[0] if years and len(years) == 1 else None
     cache_collection = getattr(embeddings_manager, "collection_name", None)
+    params = _effective_params(use_llm_labels, nr_levels, level_scale, clustering_kwargs)
 
     if not force and not limit:
-        cache_n_clusters: Optional[int] = n_clusters
-        cache_params = dict(clustering_kwargs)
-        if "distance_threshold" in cache_params:
-            cache_n_clusters = None
-
-        exact_cached = database.get_clustering_cache(
-            embedding_model=embedding_model,
-            reduction_method=DEFAULT_REDUCTION_METHOD,
-            n_components=n_components,
-            clustering_method=DEFAULT_CLUSTERING_METHOD,
-            n_clusters=cache_n_clusters,
-            clustering_params=cache_params or None,
-            conference=cache_conference,
-            year=cache_year,
-            collection_name=cache_collection,
-        )
-        if exact_cached:
-            logger.info("Using exact cached clustering results (including reduction)")
-            return exact_cached
-
-    logger.info("Computing new clustering results...")
-    cm = ClusteringManager(embeddings_manager, database)
-    _run_pipeline(
-        cm,
-        n_components=n_components,
-        n_clusters=n_clusters,
-        random_state=42,
-        limit=limit,
-        conferences=conferences,
-        years=years,
-        clustering_kwargs=clustering_kwargs,
-    )
-
-    if cm.cluster_hierarchy is not None:
-        linkage_method = clustering_kwargs.get("linkage", "ward")
-        use_llm = clustering_kwargs.get("use_llm_labels", True)
-        fingerprint = hashlib.sha256("\n".join(str(uid) for uid in (cm.paper_ids or [])).encode("utf-8")).hexdigest()[
-            :16
-        ]
-        label_scope = "|".join(
-            [
-                str(cache_collection or ""),
-                str(cache_conference or ""),
-                str(cache_year if cache_year is not None else ""),
-                linkage_method,
-                fingerprint,
-            ]
-        )
-
-        cached_hier_labels = database.get_hierarchical_label_cache(
-            embedding_model=embedding_model,
-            linkage=linkage_method,
-            scope=label_scope,
-        )
-
-        if cached_hier_labels:
-            logger.info(f"Using cached hierarchical labels ({len(cached_hier_labels)} nodes)")
-            hierarchical_labels = cached_hier_labels
-        else:
-            logger.info("Generating hierarchical labels for agglomerative clustering...")
-            try:
-                hierarchical_labels = cm.generate_hierarchical_labels(use_llm=use_llm, max_keywords=5)
-                if not limit:
-                    try:
-                        database.save_hierarchical_label_cache(
-                            embedding_model=embedding_model,
-                            labels=hierarchical_labels,
-                            linkage=linkage_method,
-                            scope=label_scope,
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to save hierarchical label cache: {e}")
-            except Exception as e:
-                logger.warning(f"Failed to generate hierarchical labels: {e}")
-                hierarchical_labels = {}
-
-        if hierarchical_labels and "tree" in cm.cluster_hierarchy and "nodes" in cm.cluster_hierarchy["tree"]:
-            for node_id, label in hierarchical_labels.items():
-                node_id_int = int(node_id)
-                if node_id_int in cm.cluster_hierarchy["tree"]["nodes"]:
-                    cm.cluster_hierarchy["tree"]["nodes"][node_id_int]["label"] = label
-        logger.info(
-            f"Applied {len(hierarchical_labels)} hierarchical labels "
-            f"(LLM: {use_llm}, cached: {cached_hier_labels is not None})"
-        )
-
-    results = cm.get_clustering_results()
-
-    if not limit:
-        try:
-            save_params = dict(clustering_kwargs)
-            database.save_clustering_cache(
+        should_backfill = backfill_missing_labels and use_llm_labels
+        cached_entry = None
+        if should_backfill:
+            cached_entry = database.get_clustering_cache_entry(
                 embedding_model=embedding_model,
                 reduction_method=DEFAULT_REDUCTION_METHOD,
-                n_components=n_components,
+                n_components=DEFAULT_N_COMPONENTS,
                 clustering_method=DEFAULT_CLUSTERING_METHOD,
-                results=results,
-                n_clusters=n_clusters,
-                clustering_params=save_params or None,
+                n_clusters=None,
+                clustering_params=params,
                 conference=cache_conference,
                 year=cache_year,
                 collection_name=cache_collection,
             )
-        except Exception as e:
-            logger.warning(f"Failed to save clustering cache: {e}")
+            cached = cached_entry["results"] if cached_entry else None
+        else:
+            cached = database.get_clustering_cache(
+                embedding_model=embedding_model,
+                reduction_method=DEFAULT_REDUCTION_METHOD,
+                n_components=DEFAULT_N_COMPONENTS,
+                clustering_method=DEFAULT_CLUSTERING_METHOD,
+                n_clusters=None,
+                clustering_params=params,
+                conference=cache_conference,
+                year=cache_year,
+                collection_name=cache_collection,
+            )
+        if cached:
+            logger.info("Using cached BERTopic clustering results")
+            if should_backfill and cached_entry is not None:
+                report = _backfill_missing_labels(cached, embeddings_manager, database)
+                if report["flat_updated"] or report["hierarchy_updated"]:
+                    database.update_clustering_cache_results(cached_entry["id"], cached)
+            return cached
 
+    logger.info("Computing new BERTopic clustering results...")
+    cm = ClusteringManager(embeddings_manager, database)
+    cm.load_embeddings(limit=limit, conferences=conferences, years=years)
+    results = cm.fit(
+        nr_levels=nr_levels,
+        level_scale=level_scale,
+        use_llm_labels=use_llm_labels,
+        show_progress=show_progress,
+        cluster_n_components=cluster_n_components,
+    )
+
+    if not limit:
+        _save_clustering_results(
+            database,
+            embedding_model,
+            results,
+            params,
+            cache_conference,
+            cache_year,
+            cache_collection,
+        )
     return results

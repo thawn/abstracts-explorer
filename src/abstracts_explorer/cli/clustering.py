@@ -15,8 +15,7 @@ from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.clustering import (
     perform_clustering,
     compute_clusters_with_cache,
-    DEFAULT_CLUSTERING_PARAMS,
-    DEFAULT_N_COMPONENTS,
+    DEFAULT_NR_LEVELS,
     ClusteringError,
 )
 
@@ -35,8 +34,8 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
     """
     Cluster embeddings and optionally export results.
 
-    Uses agglomerative clustering with ward linkage, distance threshold 150,
-    and t-SNE dimensionality reduction.
+    Uses BERTopic with Agglomerative clustering (ward linkage, distance
+    threshold 0.5) on 5-D UMAP embeddings and 2-D UMAP visualization.
 
     Parameters
     ----------
@@ -57,12 +56,15 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
     if not _validate_embeddings_db(config):
         return 1
 
+    requests_per_minute = getattr(args, "requests_per_minute", config.requests_per_minute)
+    rate_limit_str = f"{requests_per_minute} req/min" if requests_per_minute > 0 else "disabled"
     _print_header(
         "Clustering",
         f"Embeddings: {config.embedding_db}",
         f"Collection: {args.collection}",
-        "Reduction: tsne (n_components=2)",
-        "Clustering: agglomerative (linkage=ward, distance_threshold=150)",
+        "Reduction: umap (2 components for visualization)",
+        "Clustering: BERTopic + agglomerative (ward, distance_threshold=0.5)",
+        f"Rate limit: {rate_limit_str}",
         f"Limit: {args.limit} papers" if args.limit else None,
     )
 
@@ -71,11 +73,11 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
         print("\n🚀 Starting clustering pipeline...")
         results = perform_clustering(
             collection_name=args.collection,
-            n_components=DEFAULT_N_COMPONENTS,
-            n_clusters=None,
             output_path=args.output,
             limit=args.limit,
-            **DEFAULT_CLUSTERING_PARAMS,
+            show_progress=True,
+            use_llm_labels=not getattr(args, "no_llm_labels", False),
+            requests_per_minute=requests_per_minute,
         )
 
         # Display statistics
@@ -152,9 +154,10 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     """
     Pre-generate clustering results for one or all conference/year combinations.
 
-    Uses agglomerative clustering with ward linkage, distance threshold 150,
-    and t-SNE dimensionality reduction.  Results are persisted to the database
-    cache so that the web UI can serve them instantly.
+    Uses BERTopic with Agglomerative clustering (ward linkage, distance
+    threshold 0.5) on 5-D UMAP embeddings and 2-D UMAP visualization.
+    Results are persisted to the database cache so that the web UI can serve
+    them instantly.
 
     Without ``--conference`` or ``--year``, generates clustering for every
     conference in the database combined with each individual year.
@@ -224,8 +227,8 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
         "Pre-generate Clustering",
         f"Embeddings: {config.embedding_db}",
         f"Collection: {args.collection}",
-        "Clustering: agglomerative (linkage=ward, distance_threshold=150)",
-        "Reduction: tsne",
+        "Clustering: BERTopic + agglomerative (ward, distance_threshold=0.5)",
+        "Reduction: umap",
         f"Rate limit: {rate_limit_str}",
         *extra_lines,
     )
@@ -260,13 +263,14 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
                             embeddings_manager=em,
                             database=db,
                             embedding_model=config.embedding_model,
-                            n_components=DEFAULT_N_COMPONENTS,
-                            n_clusters=None,
                             limit=None,
                             force=args.force,
                             conferences=c_conferences,
                             years=c_years,
-                            **DEFAULT_CLUSTERING_PARAMS,
+                            use_llm_labels=not getattr(args, "no_llm_labels", False),
+                            show_progress=True,
+                            nr_levels=DEFAULT_NR_LEVELS,
+                            backfill_missing_labels=True,
                         )
 
                     stats = results.get("statistics", {})

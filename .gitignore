@@ -41,6 +41,7 @@ pip-log.txt
 pip-delete-this-directory.txt
 
 # Unit test / coverage reports
+coverage/
 htmlcov/
 .tox/
 .nox/
@@ -61,6 +62,7 @@ coverage.xml
 .env.blablador
 .env.hzdr
 .venv
+.venv-poc/
 env/
 venv/
 ENV/

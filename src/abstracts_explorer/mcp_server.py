@@ -7,7 +7,6 @@ as a stable import path.
 
 from abstracts_explorer.mcp import (
     ClusterAnalysisError,
-    _apply_cached_cluster_labels,
     _get_clustering_resources,
     _get_conference_topics_for_single_conference,
     _get_mcp_resources,
@@ -29,7 +28,6 @@ from abstracts_explorer.mcp import (
 )
 
 __all__ = [
-    "_apply_cached_cluster_labels",
     "_get_clustering_resources",
     "_get_conference_topics_for_single_conference",
     "_get_mcp_resources",

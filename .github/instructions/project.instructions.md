@@ -61,7 +61,7 @@ src/abstracts_explorer/
 ├── database.py          # Database manager (SQLAlchemy)
 ├── db_models.py         # Paper, EmbeddingsMetadata, ClusteringCache
 ├── embeddings.py        # ChromaDB embeddings
-├── clustering.py        # Clustering, reduction, labeling
+├── clustering/          # BERTopic pipeline, hierarchy levels, labeling
 ├── rag.py               # RAG chat (pydantic-ai)
 ├── mcp_server.py        # MCP server (mcp MCPServer)
 ├── mcp_tools.py         # MCP tool schemas and execution
@@ -167,10 +167,11 @@ them from `static/modules/`.
 - **Embeddings**: ChromaDB stores paper UIDs, vectors, and SHA-256 content
   hashes only. The SQL database is the single source of truth for paper
   metadata; filters resolve to UIDs in SQL and are passed to ChromaDB as IDs.
-- **Clustering**: CLI/web/MCP pipeline is fixed to Agglomerative (ward, distance
-  threshold 150) + t-SNE. `clustering.py` still exposes K-Means, DBSCAN,
-  Agglomerative, Spectral, Fuzzy C-Means and PCA/t-SNE; UMAP was removed.
-  LLM auto-labeling uses TF-IDF keywords; results are cached in the database.
+- **Clustering**: CLI/web/MCP pipeline is fixed to BERTopic with Agglomerative
+  clustering (ward, distance threshold 0.5) on 5-D UMAP embeddings; a separate
+  2-D UMAP supplies visualization coordinates. LLM labels are used for flat and
+  merged hierarchy topics, with retry and keyword fallback. The complete JSON
+  payload is cached in the database; Plotly runs only in the browser.
 - **RAG**: `pydantic-ai` agent against an OpenAI-compatible backend; it can
   auto-invoke MCP tools.
 - **MCP**: `MCPServer` from the `mcp` package. Tools include topic relevance,

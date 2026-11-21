@@ -1,5 +1,5 @@
 """
-Clustering cache lookups and label restoration helpers.
+Clustering cache lookups.
 """
 
 import logging
@@ -14,44 +14,6 @@ from abstracts_explorer.clustering import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _apply_cached_cluster_labels(
-    cm: shared_dependencies.ClusteringManager,
-    cached_results: Dict[str, Any],
-) -> None:
-    """
-    Restore ``cluster_labels``, ``cluster_label_names``, and
-    ``cluster_keywords`` on *cm* from cached clustering results.
-
-    Parameters
-    ----------
-    cm : shared_dependencies.ClusteringManager
-        Clustering manager with embeddings already loaded
-        (``cm.paper_ids`` must be populated).
-    cached_results : dict
-        Cached results dict containing a ``"points"`` list where each
-        element has ``"id"`` (or ``"paper_id"``) and ``"cluster"`` keys.
-        May also contain ``"cluster_labels"`` (cluster name dict) and
-        ``"cluster_keywords"`` (TF-IDF keyword dict).
-    """
-    import numpy as np
-
-    point_id_to_cluster: Dict[str, int] = {}
-    for point in cached_results.get("points", []):
-        pid = point.get("id") or point.get("paper_id", "")
-        point_id_to_cluster[pid] = point.get("cluster", -1)
-
-    current_ids = cm.paper_ids or []
-    cm.cluster_labels = np.array([point_id_to_cluster.get(pid, -1) for pid in current_ids])
-
-    # Restore cluster label names (LLM-generated or TF-IDF-based names)
-    if cached_results.get("cluster_labels"):
-        cm.cluster_label_names = {int(k): v for k, v in cached_results["cluster_labels"].items()}
-
-    # Restore TF-IDF cluster keywords
-    if cached_results.get("cluster_keywords"):
-        cm.cluster_keywords = {int(k): v for k, v in cached_results["cluster_keywords"].items()}
 
 
 def _lookup_clustering_cache(
