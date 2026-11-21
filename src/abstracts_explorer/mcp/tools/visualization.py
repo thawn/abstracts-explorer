@@ -69,7 +69,7 @@ def get_cluster_visualization(
                 elif extracted_year not in vis_years:
                     vis_years = sorted(vis_years + [extracted_year])
 
-            with resources._get_clustering_resources(collection_name) as (_, db):
+            with resources._get_mcp_resources(with_embeddings=False) as (_, db):
                 cached = cache._lookup_clustering_cache(db, config, parsed_conf, vis_years, collection_name)
 
             if not cached:

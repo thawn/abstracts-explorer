@@ -1,896 +1,1011 @@
 """
-Tests for clustering module.
-
-This module tests the clustering and dimensionality reduction functionality.
+Tests for the BERTopic clustering pipeline.
 """
 
-import pytest
+import json
+from unittest.mock import Mock
+
 import numpy as np
+import pandas as pd
+import pytest
+
 from abstracts_explorer.clustering import (
-    ClusteringManager,
+    DEFAULT_CLUSTERING_METHOD,
+    DEFAULT_CLUSTERING_PARAMS,
+    DEFAULT_NR_LEVELS,
+    DEFAULT_REDUCTION_METHOD,
     ClusteringError,
-    calculate_default_clusters,
+    clustering_params_for,
 )
-from abstracts_explorer.clustering.tfidf import compute_tfidf_keywords as _compute_tfidf_keywords
+from abstracts_explorer.clustering.hierarchy_levels import (
+    build_level_mapping,
+    build_level_mappings,
+    compute_level_max_distances,
+    level_parent_descriptions,
+    level_parent_labels,
+)
+from abstracts_explorer.clustering.labels import (
+    LABEL_SEPARATOR,
+    combine_label_description,
+    parse_llm_label_response,
+    split_label_description,
+)
+from abstracts_explorer.clustering.llm import (
+    _retry_after_seconds,
+    generate_llm_label,
+    is_retryable_llm_error,
+)
+from abstracts_explorer.clustering.manager import ClusteringManager
+from abstracts_explorer.clustering.pipeline import compute_clusters_with_cache, perform_clustering
+from abstracts_explorer.clustering.representation import ProjectLLMRepresentation
+from abstracts_explorer.clustering.results import (
+    build_cluster_centers,
+    build_clustering_results,
+    build_hierarchy,
+    build_points,
+    build_statistics,
+    export_results_to_json,
+    results_have_flat_labels,
+)
+from abstracts_explorer.rate_limiter import RateLimitCooldown
 
 
-class TestCalculateDefaultClusters:
-    """Test suite for calculate_default_clusters function."""
+def sample_hierarchy() -> pd.DataFrame:
+    """Return a small BERTopic-style hierarchy sorted like BERTopic output."""
+    rows = [
+        {
+            "Parent_ID": 4,
+            "Parent_Name": "alpha_beta",
+            "Topics": [0, 1],
+            "Child_Left_ID": 0,
+            "Child_Right_ID": 1,
+            "Distance": 0.1,
+        },
+        {
+            "Parent_ID": 5,
+            "Parent_Name": "gamma_delta",
+            "Topics": [2, 3],
+            "Child_Left_ID": 2,
+            "Child_Right_ID": 3,
+            "Distance": 0.2,
+        },
+        {
+            "Parent_ID": 6,
+            "Parent_Name": "alpha_beta_gamma_delta",
+            "Topics": [0, 1, 2, 3],
+            "Child_Left_ID": 4,
+            "Child_Right_ID": 5,
+            "Distance": 0.3,
+        },
+    ]
+    return pd.DataFrame(rows).sort_values("Parent_ID", ascending=False)
 
-    def test_calculate_default_clusters_small(self):
-        """Test calculation with small number of papers."""
-        # Less than 100 papers should give minimum clusters
-        assert calculate_default_clusters(50) == 2
-        assert calculate_default_clusters(100) == 2
-        assert calculate_default_clusters(199) == 2
 
-    def test_calculate_default_clusters_medium(self):
-        """Test calculation with medium number of papers."""
-        assert calculate_default_clusters(500) == 5
-        assert calculate_default_clusters(1000) == 10
-        assert calculate_default_clusters(2500) == 25
+class TestLabels:
+    """Tests for short-label and description helpers."""
 
-    def test_calculate_default_clusters_large(self):
-        """Test calculation with large number of papers."""
-        # Should be capped at max_clusters (default 50)
-        assert calculate_default_clusters(50000) == 500
-        assert calculate_default_clusters(100000) == 500
-        assert calculate_default_clusters(1000000) == 500
+    def test_parse_two_line_response(self):
+        label, description = parse_llm_label_response(
+            "Label: Medical Image Uncertainty\nDescription: Papers quantify uncertainty in medical imaging."
+        )
+        assert label == "Medical Image Uncertainty"
+        assert description == "Papers quantify uncertainty in medical imaging."
 
-    def test_calculate_default_clusters_custom_limits(self):
-        """Test calculation with custom min/max limits."""
-        assert calculate_default_clusters(500, min_clusters=5, max_clusters=20) == 5
-        assert calculate_default_clusters(3000, min_clusters=5, max_clusters=20) == 20
+    def test_parse_json_response(self):
+        label, description = parse_llm_label_response(
+            '{"label": "Graph Neural Networks", "description": "Papers study message passing on graphs."}'
+        )
+        assert label == "Graph Neural Networks"
+        assert description == "Papers study message passing on graphs."
 
-    def test_calculate_default_clusters_edge_cases(self):
-        """Test edge cases."""
-        assert calculate_default_clusters(0) == 2
-        assert calculate_default_clusters(-10) == 2
+    def test_parse_markdown_response(self):
+        label, description = parse_llm_label_response(
+            "**Label:** Graph Neural Networks\n- **Description:** Papers study graphs."
+        )
+        assert label == "Graph Neural Networks"
+        assert description == "Papers study graphs."
+
+    def test_parse_legacy_single_line_response(self):
+        label, description = parse_llm_label_response(" 'Topic: Nice Label' ")
+        assert label == "Nice Label"
+        assert description == ""
+
+    def test_parse_empty_response(self):
+        assert parse_llm_label_response("") == ("", "")
+
+    def test_combine_and_split_roundtrip(self):
+        encoded = combine_label_description("Short Label", "A longer descriptive sentence.")
+        assert encoded == f"Short Label{LABEL_SEPARATOR}A longer descriptive sentence."
+        assert split_label_description(encoded) == ("Short Label", "A longer descriptive sentence.")
+        assert split_label_description("Short Label") == ("Short Label", "")
+
+
+class TestConstants:
+    """Tests for clustering constants and cache parameters."""
+
+    def test_defaults(self):
+        assert DEFAULT_CLUSTERING_METHOD == "bertopic-agglomerative"
+        assert DEFAULT_REDUCTION_METHOD == "umap"
+        assert DEFAULT_NR_LEVELS == 10
+        assert DEFAULT_CLUSTERING_PARAMS["distance_threshold"] == 0.5
+        assert DEFAULT_CLUSTERING_PARAMS["pipeline_version"] == 2
+
+    def test_clustering_params_for(self):
+        llm_params = clustering_params_for(True, nr_levels=7)
+        ctfidf_params = clustering_params_for(False)
+        assert llm_params["representation"] == "llm"
+        assert llm_params["nr_levels"] == 7
+        assert ctfidf_params["representation"] == "ctfidf"
+        assert DEFAULT_CLUSTERING_PARAMS["nr_levels"] == 10
+        llm_params["nr_levels"] = 99
+        assert DEFAULT_CLUSTERING_PARAMS["nr_levels"] == 10
+
+
+class TestHierarchyLevels:
+    """Tests for the BERTopic hierarchy-level adapter."""
+
+    def test_compute_level_max_distances_linear(self):
+        distances = compute_level_max_distances(sample_hierarchy(), 3, "linear")
+        assert distances == [0.1, 0.2, 0.3]
+
+    def test_compute_level_max_distances_clamps_levels(self):
+        distances = compute_level_max_distances(sample_hierarchy(), 10, "linear")
+        assert distances == [0.1, 0.2, 0.3]
+
+    def test_compute_level_max_distances_log(self):
+        distances = compute_level_max_distances(sample_hierarchy(), 2, "log")
+        assert len(distances) == 2
+        assert distances == sorted(distances)
+
+    def test_compute_level_max_distances_empty(self):
+        assert compute_level_max_distances(pd.DataFrame({"Distance": []}), 3) == []
+        assert compute_level_max_distances(sample_hierarchy(), 0) == []
+
+    def test_compute_level_max_distances_invalid_scale(self):
+        with pytest.raises(ValueError):
+            compute_level_max_distances(sample_hierarchy(), 3, "quadratic")
+
+    def test_build_level_mapping_transitive(self):
+        mapping = build_level_mapping(sample_hierarchy(), 0.3, [0, 1, 2, 3])
+        assert mapping == {0: 6, 1: 6, 2: 6, 3: 6}
+
+    def test_build_level_mapping_partial(self):
+        mapping = build_level_mapping(sample_hierarchy(), 0.1, [0, 1, 2, 3])
+        assert mapping == {0: 4, 1: 4, 2: 2, 3: 3}
+
+    def test_build_level_mapping_empty(self):
+        assert build_level_mapping(None, 0.5, [0, 1]) == {0: 0, 1: 1}
+
+    def test_build_level_mappings(self):
+        levels = build_level_mappings(sample_hierarchy(), [0, 1, 2, 3], 3, "linear")
+        assert [level["level"] for level in levels] == [0, 1, 2]
+        assert [level["max_distance"] for level in levels] == [0.1, 0.2, 0.3]
+
+    def test_level_parent_labels(self):
+        labels = level_parent_labels(sample_hierarchy())
+        assert labels == {4: "alpha_beta", 5: "gamma_delta", 6: "alpha_beta_gamma_delta"}
+        assert level_parent_labels(None) == {}
+
+    def test_level_parent_descriptions(self):
+        hierarchy = sample_hierarchy().copy()
+        hierarchy.loc[hierarchy["Parent_ID"] == 4, "Parent_Name"] = combine_label_description(
+            "Alpha Beta", "Papers about alpha and beta."
+        )
+        descriptions = level_parent_descriptions(hierarchy)
+        assert descriptions[4] == "Papers about alpha and beta."
+        assert descriptions[5] == ""
+        assert level_parent_descriptions(None) == {}
+
+
+class TestResults:
+    """Tests for result assembly."""
+
+    def test_build_statistics(self):
+        stats = build_statistics([0, 0, 1, -1])
+        assert stats["n_clusters"] == 2
+        assert stats["n_noise"] == 1
+        assert stats["cluster_sizes"] == {0: 2, 1: 1}
+        assert stats["total_papers"] == 4
+
+    def test_build_points_and_centers(self):
+        embeddings = np.array([[0.0, 0.0], [2.0, 2.0], [10.0, 10.0]])
+        metadatas = [
+            {"title": "A", "year": 2024, "conference": "X", "session": "S"},
+            {"title": "B" * 150, "year": 2025, "conference": "Y", "session": ""},
+            {"title": "C", "year": 2025, "conference": "Y", "session": ""},
+        ]
+        points = build_points(["p1", "p2", "p3"], embeddings, metadatas, [0, 0, 1], max_title_length=20)
+        assert points[0]["x"] == 0.0
+        assert points[1]["title"].endswith("...")
+        assert points[2]["cluster"] == 1
+        assert points[2]["conference"] == "Y"
+
+        centers = build_cluster_centers(embeddings, [0, 0, 1])
+        assert centers[0] == {"x": 1.0, "y": 1.0}
+        assert centers[1] == {"x": 10.0, "y": 10.0}
+
+    def test_build_hierarchy(self):
+        points = [
+            {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0},
+            {"id": "p2", "x": 2.0, "y": 2.0, "cluster": 1},
+            {"id": "p3", "x": 10.0, "y": 10.0, "cluster": 2},
+            {"id": "p4", "x": 12.0, "y": 12.0, "cluster": 3},
+        ]
+        stats = build_statistics([0, 1, 2, 3])
+        hierarchy = build_hierarchy(
+            hierarchical_topics=sample_hierarchy(),
+            flat_topic_ids=[0, 1, 2, 3],
+            flat_labels={0: "A", 1: "B", 2: "C", 3: "D"},
+            flat_descriptions={0: "Papers about A.", 1: "Papers about B."},
+            flat_keywords={0: ["a"], 1: ["b"], 2: ["c"], 3: ["d"]},
+            statistics=stats,
+            points=points,
+            parent_labels=level_parent_labels(sample_hierarchy()),
+            parent_descriptions={4: "Papers about alpha and beta."},
+            nr_levels=3,
+        )
+        assert hierarchy["method"] == "bertopic"
+        assert hierarchy["nr_levels"] == 3
+        assert hierarchy["n_topics"] == 4
+
+        level0 = hierarchy["levels"][0]
+        assert level0["max_distance"] == 0.1
+        assert len(level0["clusters"]) == 3
+        merged = next(cluster for cluster in level0["clusters"] if cluster["id"] == 4)
+        assert merged["label"] == "alpha beta"
+        assert merged["description"] == "Papers about alpha and beta."
+        assert merged["size"] == 2
+        assert merged["source_topic_count"] == 2
+        assert merged["center"] == {"x": 1.0, "y": 1.0}
+        assert merged["keywords"] == ["a", "b"]
+        assert level0["mapping"] == {"0": 4, "1": 4, "2": 2, "3": 3}
+
+        level2 = hierarchy["levels"][2]
+        assert len(level2["clusters"]) == 1
+        assert level2["clusters"][0]["id"] == 6
+
+    def test_build_hierarchy_empty(self):
+        hierarchy = build_hierarchy(
+            hierarchical_topics=pd.DataFrame({"Distance": []}),
+            flat_topic_ids=[0, 1],
+            flat_labels={0: "A", 1: "B"},
+            flat_keywords={0: ["a"], 1: ["b"]},
+            statistics=build_statistics([0, 1]),
+            points=[
+                {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0},
+                {"id": "p2", "x": 1.0, "y": 1.0, "cluster": 1},
+            ],
+            parent_labels={},
+            nr_levels=10,
+        )
+        assert hierarchy["levels"] == []
+
+    def test_build_clustering_results_schema(self):
+        embeddings = np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0]])
+        results = build_clustering_results(
+            paper_ids=["p1", "p2", "p3", "p4"],
+            reduced_embeddings=embeddings,
+            metadatas=[{"title": f"T{i}"} for i in range(4)],
+            topics=[0, 1, 2, 3],
+            flat_labels={0: "A", 1: "B", 2: "C", 3: "D"},
+            flat_descriptions={0: "Papers about A."},
+            flat_keywords={0: ["a"], 1: ["b"], 2: ["c"], 3: ["d"]},
+            hierarchical_topics=sample_hierarchy(),
+            parent_labels=level_parent_labels(sample_hierarchy()),
+            parent_descriptions={4: "Papers about A and B."},
+            nr_levels=3,
+        )
+        assert set(results) == {
+            "points",
+            "statistics",
+            "n_dimensions",
+            "cluster_centers",
+            "cluster_labels",
+            "cluster_descriptions",
+            "cluster_keywords",
+            "hierarchy",
+        }
+        json.dumps(results)
+        assert results["n_dimensions"] == 2
+        assert results["cluster_descriptions"] == {0: "Papers about A."}
+        assert len(results["points"]) == 4
+
+    def test_export_results(self, tmp_path):
+        path = tmp_path / "nested" / "results.json"
+        export_results_to_json({"points": []}, path)
+        assert json.loads(path.read_text()) == {"points": []}
+
+    def test_results_have_flat_labels(self):
+        assert results_have_flat_labels({"cluster_labels": {"0": "A"}, "statistics": {"cluster_sizes": {"0": 1}}})
+        assert not results_have_flat_labels({"cluster_labels": {}, "statistics": {"cluster_sizes": {"0": 1}}})
+
+
+class TestLLMHelpers:
+    """Tests for retry-aware label generation."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_llm_cooldown(self, monkeypatch):
+        import abstracts_explorer.clustering.llm as llm_module
+
+        monkeypatch.setattr(llm_module, "_rate_limit_cooldown", RateLimitCooldown())
+
+    def test_is_retryable(self):
+        assert is_retryable_llm_error(ValueError("empty"))
+        assert is_retryable_llm_error(TimeoutError("timeout"))
+        assert not is_retryable_llm_error(AttributeError("missing client"))
+
+        error = MockError(status_code=429)
+        assert is_retryable_llm_error(error)
+        error = MockError(status_code=401)
+        assert not is_retryable_llm_error(error)
+        error = MockError(response=MockError(status_code=503))
+        assert is_retryable_llm_error(error)
+
+    def test_generate_label_success(self, mocker):
+        config = mocker.Mock(
+            llm_max_attempts=3,
+            llm_retry_base_delay=1,
+            llm_retry_max_delay=2,
+            llm_request_timeout=5,
+            cluster_label_model="model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        chat = mocker.patch("abstracts_explorer.clustering.llm.chat_completion_text", return_value=" 'Nice Label' ")
+        em = mocker.Mock(openai_client=object())
+
+        assert generate_llm_label(em, "system", "user") == "Nice Label"
+        assert chat.call_count == 1
+
+    def test_generate_label_uses_embeddings_client(self, mocker):
+        config = mocker.Mock(
+            llm_max_attempts=1,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_request_timeout=5,
+            cluster_label_model="model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        chat = mocker.patch("abstracts_explorer.clustering.llm.chat_completion_text", return_value="Label")
+        client = object()
+        em = mocker.Mock(openai_client=client)
+
+        assert generate_llm_label(em, "system", "user") == "Label"
+        assert chat.call_args.kwargs["client"] is client
+
+    def test_generate_label_retries_empty_then_succeeds(self, mocker):
+        config = mocker.Mock(
+            llm_max_attempts=3,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_request_timeout=5,
+            cluster_label_model="model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        sleep = mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
+        chat = mocker.patch("abstracts_explorer.clustering.llm.chat_completion_text", side_effect=["", "Label"])
+        em = mocker.Mock(openai_client=object())
+
+        assert generate_llm_label(em, "system", "user") == "Label"
+        assert chat.call_count == 2
+        sleep.assert_called_once()
+
+    def test_generate_label_retries_retryable_error(self, mocker):
+        config = mocker.Mock(
+            llm_max_attempts=2,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_rate_limit_delay=60,
+            llm_request_timeout=5,
+            cluster_label_model="model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
+        cooldown = mocker.Mock()
+        mocker.patch("abstracts_explorer.clustering.llm._rate_limit_cooldown", cooldown)
+        chat = mocker.patch(
+            "abstracts_explorer.clustering.llm.chat_completion_text",
+            side_effect=[MockError(status_code=429), "Label"],
+        )
+        em = mocker.Mock(openai_client=object())
+
+        assert generate_llm_label(em, "system", "user") == "Label"
+        assert chat.call_count == 2
+        assert cooldown.wait.call_count == 2
+        cooldown.defer.assert_called_once_with(60)
+
+    def test_generate_label_honors_retry_after_header(self, mocker):
+        config = mocker.Mock(
+            llm_max_attempts=2,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_rate_limit_delay=60,
+            llm_request_timeout=5,
+            cluster_label_model="model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
+        cooldown = mocker.Mock()
+        mocker.patch("abstracts_explorer.clustering.llm._rate_limit_cooldown", cooldown)
+        error = MockError(status_code=429, response=Mock(headers={"retry-after": "12"}))
+        mocker.patch(
+            "abstracts_explorer.clustering.llm.chat_completion_text",
+            side_effect=[error, "Label"],
+        )
+        em = mocker.Mock(openai_client=object())
+
+        assert generate_llm_label(em, "system", "user") == "Label"
+        cooldown.defer.assert_called_once_with(12)
+
+    def test_retry_after_http_date(self):
+        from datetime import datetime, timedelta, timezone
+        from email.utils import format_datetime
+
+        retry_at = datetime.now(timezone.utc) + timedelta(seconds=30)
+        error = MockError(
+            status_code=429,
+            response=Mock(headers={"retry-after": format_datetime(retry_at, usegmt=True)}),
+        )
+
+        delay = _retry_after_seconds(error)
+        assert delay is not None
+        assert 25 <= delay <= 35
+
+    def test_retry_after_invalid_value(self):
+        error = MockError(status_code=429, response=Mock(headers={"retry-after": "not-a-date"}))
+        assert _retry_after_seconds(error) is None
+
+    def test_generate_label_uses_configured_rate_limit_delay(self, mocker):
+        config = mocker.Mock(
+            llm_max_attempts=2,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_rate_limit_delay=45,
+            llm_request_timeout=5,
+            cluster_label_model="model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
+        cooldown = mocker.Mock()
+        mocker.patch("abstracts_explorer.clustering.llm._rate_limit_cooldown", cooldown)
+        mocker.patch(
+            "abstracts_explorer.clustering.llm.chat_completion_text",
+            side_effect=[MockError(status_code=429), "Label"],
+        )
+        em = mocker.Mock(openai_client=object())
+
+        assert generate_llm_label(em, "system", "user") == "Label"
+        cooldown.defer.assert_called_once_with(45)
+
+    def test_generate_label_exhausts_retries(self, mocker):
+        config = mocker.Mock(
+            llm_max_attempts=2,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_request_timeout=5,
+            cluster_label_model="model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
+        chat = mocker.patch("abstracts_explorer.clustering.llm.chat_completion_text", side_effect=ValueError("empty"))
+        em = mocker.Mock(openai_client=object())
+
+        with pytest.raises(ValueError):
+            generate_llm_label(em, "system", "user")
+        assert chat.call_count == 2
+
+    def test_generate_label_missing_client(self):
+        with pytest.raises(AttributeError):
+            generate_llm_label(object(), "system", "user")
+
+
+class MockError(Exception):
+    """Exception carrying an HTTP status code or response."""
+
+    def __init__(self, status_code=None, response=None):
+        super().__init__("mock error")
+        self.status_code = status_code
+        self.response = response
+
+
+class TestRepresentation:
+    """Tests for the project LLM representation model."""
+
+    def _topic_model(self, docs=None):
+        model = Mock()
+        model._extract_representative_docs.return_value = (
+            {0: docs or ["doc one", "doc two"], 1: ["doc three"]},
+            None,
+            None,
+            None,
+        )
+        return model
+
+    def test_extract_topics_uses_llm_label(self, mocker):
+        model = self._topic_model()
+        representation = ProjectLLMRepresentation(mocker.Mock())
+        label = mocker.patch(
+            "abstracts_explorer.clustering.representation.generate_llm_label",
+            return_value=" 'Topic: Nice Label' ",
+        )
+
+        topics = {0: [("alpha", 1.0), ("beta", 0.9)], 1: [("gamma", 1.0)]}
+        updated = representation.extract_topics(model, ["d"], None, topics)
+
+        assert updated[0] == [("Nice Label", 1)]
+        assert updated[1] == [("Nice Label", 1)]
+        assert label.call_count == 2
+
+    def test_extract_topics_parses_label_and_description(self, mocker):
+        model = self._topic_model()
+        representation = ProjectLLMRepresentation(mocker.Mock())
+        mocker.patch(
+            "abstracts_explorer.clustering.representation.generate_llm_label",
+            return_value="Label: Nice Label\nDescription: Papers about nice things.",
+        )
+
+        topics = {0: [("alpha", 1.0)], 1: [("beta", 1.0)]}
+        updated = representation.extract_topics(model, ["d"], None, topics)
+
+        assert updated[0] == [(combine_label_description("Nice Label", "Papers about nice things."), 1)]
+
+    def test_extract_topics_falls_back_to_keywords(self, mocker):
+        model = self._topic_model()
+        representation = ProjectLLMRepresentation(mocker.Mock())
+        mocker.patch(
+            "abstracts_explorer.clustering.representation.generate_llm_label",
+            side_effect=RuntimeError("boom"),
+        )
+
+        topics = {0: [("alpha", 1.0), ("beta", 0.9), ("gamma", 0.8)], 1: [("delta", 1.0)]}
+        updated = representation.extract_topics(model, ["d"], None, topics)
+
+        assert updated[0] == [("alpha & beta & gamma", 1)]
+
+    def test_extract_topics_empty_label_falls_back(self, mocker):
+        model = self._topic_model()
+        representation = ProjectLLMRepresentation(mocker.Mock())
+        mocker.patch(
+            "abstracts_explorer.clustering.representation.generate_llm_label",
+            return_value="",
+        )
+
+        topics = {0: [("alpha", 1.0)], 1: [("beta", 1.0)]}
+        updated = representation.extract_topics(model, ["d"], None, topics)
+
+        assert updated[0] == [("alpha", 1)]
+
+    def test_extract_topics_shows_progress_for_multi_topic_batch(self, mocker):
+        model = self._topic_model()
+        representation = ProjectLLMRepresentation(mocker.Mock(), show_progress=True)
+        mocker.patch(
+            "abstracts_explorer.clustering.representation.generate_llm_label",
+            return_value="Label",
+        )
+        progress = mocker.Mock()
+        tqdm_factory = mocker.patch(
+            "abstracts_explorer.clustering.representation.tqdm",
+            return_value=progress,
+        )
+
+        topics = {0: [("alpha", 1.0)], 1: [("beta", 1.0)]}
+        representation.extract_topics(model, ["d"], None, topics)
+
+        tqdm_factory.assert_called_once_with(
+            total=2,
+            desc="Labeling clusters (LLM)",
+            unit="topic",
+        )
+        assert progress.update.call_count == 2
+        progress.close.assert_called_once()
+
+    def test_extract_topics_skips_progress_for_single_topic_batch(self, mocker):
+        model = Mock()
+        model._extract_representative_docs.return_value = ({0: ["doc"]}, None, None, None)
+        representation = ProjectLLMRepresentation(mocker.Mock(), show_progress=True)
+        mocker.patch(
+            "abstracts_explorer.clustering.representation.generate_llm_label",
+            return_value="Label",
+        )
+        tqdm_factory = mocker.patch("abstracts_explorer.clustering.representation.tqdm")
+
+        representation.extract_topics(model, ["d"], None, {0: [("alpha", 1.0)]})
+
+        tqdm_factory.assert_not_called()
+
+    def test_extract_topics_skips_progress_when_disabled(self, mocker):
+        model = self._topic_model()
+        representation = ProjectLLMRepresentation(mocker.Mock(), show_progress=False)
+        mocker.patch(
+            "abstracts_explorer.clustering.representation.generate_llm_label",
+            return_value="Label",
+        )
+        tqdm_factory = mocker.patch("abstracts_explorer.clustering.representation.tqdm")
+
+        topics = {0: [("alpha", 1.0)], 1: [("beta", 1.0)]}
+        representation.extract_topics(model, ["d"], None, topics)
+
+        tqdm_factory.assert_not_called()
+
+    def test_extract_topics_progress_counts_keyword_fallbacks(self, mocker):
+        model = self._topic_model()
+        representation = ProjectLLMRepresentation(mocker.Mock(), show_progress=True)
+        mocker.patch(
+            "abstracts_explorer.clustering.representation.generate_llm_label",
+            side_effect=RuntimeError("boom"),
+        )
+        progress = mocker.Mock()
+        mocker.patch(
+            "abstracts_explorer.clustering.representation.tqdm",
+            return_value=progress,
+        )
+
+        topics = {0: [("alpha", 1.0)], 1: [("beta", 1.0)]}
+        representation.extract_topics(model, ["d"], None, topics)
+
+        assert progress.update.call_count == 2
+        progress.close.assert_called_once()
 
 
 class TestClusteringManager:
-    """Test suite for ClusteringManager class."""
-
-    def test_init(self, mock_embeddings_manager, mock_database):
-        """Test ClusteringManager initialization."""
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-
-        assert cm.embeddings_manager is mock_embeddings_manager
-        assert cm.database is mock_database
-        assert cm.embeddings is None
-        assert cm.paper_ids is None
-        assert cm.metadatas is None
-
-    def test_load_embeddings_no_collection(self, mock_embeddings_manager, mock_database):
-        """Test loading embeddings fails without collection."""
-        mock_embeddings_manager.collection = None
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-
-        with pytest.raises(ClusteringError, match="Collection not initialized"):
-            cm.load_embeddings()
-
-    def test_load_embeddings_empty_collection(self, mock_embeddings_manager, mock_collection_empty, mock_database):
-        """Test loading embeddings from empty collection."""
-        mock_embeddings_manager.collection = mock_collection_empty
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-
-        with pytest.raises(ClusteringError, match="No embeddings found"):
-            cm.load_embeddings()
-
-    def test_load_embeddings_success(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
-        """Test successfully loading embeddings."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-
-        count = cm.load_embeddings()
-
-        assert count == 10
-        assert cm.embeddings.shape == (10, 128)
-        assert len(cm.paper_ids) == 10
-        assert len(cm.metadatas) == 10
-
-    def test_reduce_dimensions_no_embeddings(self, mock_embeddings_manager, mock_database):
-        """Test dimensionality reduction fails without embeddings."""
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-
-        with pytest.raises(ClusteringError, match="No embeddings loaded"):
-            cm.reduce_dimensions()
-
-    def test_reduce_dimensions_tsne(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
-        """Test t-SNE dimensionality reduction."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-
-        reduced = cm.reduce_dimensions(n_components=2)
-
-        assert reduced.shape == (10, 2)
-        assert cm.reduced_embeddings is not None
-
-    def test_cluster_no_embeddings(self, mock_embeddings_manager, mock_database):
-        """Test clustering fails without embeddings."""
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-
-        with pytest.raises(ClusteringError, match="No embeddings loaded"):
-            cm.cluster()
-
-    def test_cluster_auto_calculate_n_clusters(
-        self, mock_embeddings_manager, mock_collection_with_data, mock_database
-    ):
-        """Test automatic calculation of n_clusters when None is provided."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-
-        # Cluster with n_clusters=None should auto-calculate
-        labels = cm.cluster(n_clusters=None)
-
-        assert labels.shape == (10,)
-        assert cm.cluster_labels is not None
-        # With 10 papers, should calculate 2 clusters (10 / 100 = 0, min is 2)
-        unique_labels = np.unique(labels)
-        assert len(unique_labels) <= 2
-
-    def test_cluster_agglomerative(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
-        """Test Agglomerative clustering on full embeddings."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-
-        # Cluster on full embeddings (not reduced)
-        labels = cm.cluster(n_clusters=3)
-
-        assert labels.shape == (10,)
-        assert cm.cluster_labels is not None
-
-    def test_get_cluster_statistics(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
-        """Test getting cluster statistics."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-        # Cluster first on full embeddings
-        cm.cluster(n_clusters=3)
-
-        stats = cm.get_cluster_statistics()
-
-        assert "n_clusters" in stats
-        assert "n_noise" in stats
-        assert "cluster_sizes" in stats
-        assert "total_papers" in stats
-        assert stats["total_papers"] == 10
-
-    def test_get_clustering_results(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
-        """Test getting complete clustering results."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-        # Cluster first, then reduce for visualization
-        cm.cluster(n_clusters=3)
-        cm.reduce_dimensions(n_components=2)
-
-        results = cm.get_clustering_results()
-
-        assert "points" in results
-        assert "statistics" in results
-        assert "n_dimensions" in results
-        assert "cluster_centers" in results
-        assert len(results["points"]) == 10
-        assert results["n_dimensions"] == 2
-
-        # Verify cluster centers are calculated correctly
-        assert isinstance(results["cluster_centers"], dict)
-        # Should have centers for each non-noise cluster
-        n_clusters = results["statistics"]["n_clusters"]
-        assert len(results["cluster_centers"]) <= n_clusters
-
-        # Each center should have x and y coordinates
-        for cluster_id, center in results["cluster_centers"].items():
-            assert "x" in center
-            assert "y" in center
-            assert isinstance(center["x"], (int, float))
-            assert isinstance(center["y"], (int, float))
-
-    def test_export_to_json(self, mock_embeddings_manager, mock_collection_with_data, tmp_path, mock_database):
-        """Test exporting clustering results to JSON."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-        # Cluster first, then reduce for visualization
-        cm.cluster(n_clusters=3)
-        cm.reduce_dimensions(n_components=2)
-
-        output_path = tmp_path / "clusters.json"
-        cm.export_to_json(output_path)
-
-        assert output_path.exists()
-
-        # Verify JSON can be loaded
-        import json
-
-        with open(output_path) as f:
-            data = json.load(f)
-
-        assert "points" in data
-        assert "statistics" in data
-
-
-# Fixtures
-
-
-@pytest.fixture
-def mock_embeddings_manager(mocker):
-    """Create a mock EmbeddingsManager."""
-    em = mocker.MagicMock()
-    em.collection = None
-    return em
-
-
-@pytest.fixture
-def mock_database(mocker, mock_collection_with_data):
-    """Create a mock DatabaseManager that hydrates the clustered papers."""
-    db = mocker.MagicMock()
-    data = mock_collection_with_data.get.return_value
-    summaries = []
-    for uid, metadata in zip(data["ids"], data["metadatas"]):
-        summaries.append(
-            {
-                "uid": uid,
-                "title": metadata["title"],
-                "abstract": metadata["abstract"],
-                "year": int(metadata["year"]),
-                "conference": metadata["conference"],
-                "session": metadata["session"],
-            }
-        )
-    by_uid = {summary["uid"]: summary for summary in summaries}
-    db.resolve_paper_uids.return_value = [summary["uid"] for summary in summaries]
-    db.get_paper_summaries_by_uids.side_effect = lambda uids: [by_uid[uid] for uid in uids if uid in by_uid]
-    return db
-
-
-@pytest.fixture
-def mock_collection_empty(mocker):
-    """Create a mock empty ChromaDB collection."""
-    collection = mocker.MagicMock()
-    collection.get.return_value = {"ids": [], "embeddings": [], "metadatas": []}
-    return collection
-
-
-@pytest.fixture
-def mock_collection_with_data(mocker):
-    """Create a mock ChromaDB collection with test data."""
-    collection = mocker.MagicMock()
-
-    # Create 10 sample embeddings (128-dimensional)
-    embeddings = np.random.randn(10, 128).tolist()
-    ids = [f"paper_{i}" for i in range(10)]
-
-    # Create more realistic metadata with varied abstracts
-    abstracts = [
-        "This paper presents a novel deep learning approach for image classification using convolutional neural networks.",
-        "We propose a new transformer architecture for natural language processing tasks with improved efficiency.",
-        "An analysis of reinforcement learning algorithms for robotic control and autonomous navigation systems.",
-        "This work introduces a generative adversarial network for high-resolution image synthesis and style transfer.",
-        "We study the application of convolutional neural networks in computer vision and object detection tasks.",
-        "A comprehensive survey of attention mechanisms in transformer models for sequence-to-sequence learning.",
-        "This paper explores policy gradient methods in reinforcement learning for continuous control problems.",
-        "We present a novel architecture combining transformers and attention for machine translation applications.",
-        "An investigation of deep Q-networks and actor-critic methods for game playing and decision making.",
-        "This work proposes improvements to generative models for realistic image generation and manipulation.",
-    ]
-
-    metadatas = [
-        {
-            "title": f"Paper {i}",
-            "abstract": abstracts[i],
-            "authors": f"Author A{i};Author B{i}",
-            "year": "2025",
-            "conference": "TestConf",
-            "session": "Session A",
-            "poster_position": str(i),
-        }
-        for i in range(10)
-    ]
-
-    collection.get.return_value = {"ids": ids, "embeddings": embeddings, "metadatas": metadatas}
-
-    return collection
-
-
-class TestClusterLabeling:
-    """Test suite for cluster labeling functionality."""
-
-    def test_extract_cluster_keywords(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
-        """Test extracting keywords for each cluster."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-        cm.cluster(n_clusters=3)
-
-        keywords = cm.extract_cluster_keywords(n_keywords=5)
-
-        assert isinstance(keywords, dict)
-        assert len(keywords) > 0
-        # Check that each cluster has keywords
-        for cluster_id, kw_list in keywords.items():
-            assert isinstance(kw_list, list)
-            assert len(kw_list) <= 5
-
-    def test_extract_cluster_keywords_no_clustering(self, mock_embeddings_manager, mock_database):
-        """Test that keyword extraction fails without clustering."""
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-
-        with pytest.raises(ClusteringError, match="No clustering performed"):
-            cm.extract_cluster_keywords()
-
-    def test_generate_cluster_labels_keyword_based(
-        self, mock_embeddings_manager, mock_collection_with_data, mock_database
-    ):
-        """Test generating cluster labels without LLM."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-        cm.cluster(n_clusters=3)
-
-        labels = cm.generate_cluster_labels(use_llm=False)
-
-        assert isinstance(labels, dict)
-        assert len(labels) > 0
-        # Check that each cluster has a label
-        for cluster_id, label in labels.items():
-            assert isinstance(label, str)
-            assert len(label) > 0
-
-    def test_generate_cluster_labels_with_llm(
-        self, mock_embeddings_manager, mock_collection_with_data, mocker, mock_database
-    ):
-        """Test generating cluster labels with LLM."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-
-        # Mock the OpenAI client response
-        mock_response = mocker.MagicMock()
-        mock_response.choices = [mocker.MagicMock()]
-        mock_response.choices[0].message.content = "Machine Learning Models"
-
-        mock_openai_client = mocker.MagicMock()
-        mock_openai_client.chat.completions.create.return_value = mock_response
-        mock_embeddings_manager.openai_client = mock_openai_client
-
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-        cm.cluster(n_clusters=3)
-
-        labels = cm.generate_cluster_labels(use_llm=True)
-
-        assert isinstance(labels, dict)
-        assert len(labels) > 0
-        # At least one cluster should have the LLM-generated label
-        assert any("Machine Learning" in label for label in labels.values())
-
-    def test_llm_chat_label_returns_stripped_label(self, mock_embeddings_manager, mocker, mock_database):
-        """_llm_chat_label strips whitespace and surrounding quotes."""
-        mock_response = mocker.MagicMock()
-        mock_response.choices = [mocker.MagicMock()]
-        mock_response.choices[0].message.content = "  'Deep Learning'  "
-
-        mock_openai_client = mocker.MagicMock()
-        mock_openai_client.chat.completions.create.return_value = mock_response
-        mock_embeddings_manager.openai_client = mock_openai_client
-
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        result = cm._llm_chat_label(
-            "system prompt",
-            "user prompt",
-        )
-
-        assert result == "Deep Learning"
-        # The call must use the dedicated label model, not the chat model
-        call_kwargs = mock_openai_client.chat.completions.create.call_args.kwargs
-        from abstracts_explorer.config import get_config
-
-        assert call_kwargs["model"] == get_config().cluster_label_model
-        # Budget must be large enough to absorb reasoning-model overhead
-        assert call_kwargs["max_tokens"] >= 200
-        # Reasoning must be suppressed where the back-end supports it
-        assert call_kwargs["reasoning_effort"] == "low"
-
-    def test_compute_tfidf_keywords_extracts_distinctive_terms(self):
-        """Shared TF-IDF helper ranks terms for the selected documents."""
-        documents = [
-            "machine learning neural networks",
-            "machine learning deep neural networks",
-            "quantum physics particle collisions",
-            "quantum physics particle accelerator",
+    """Tests for the BERTopic manager facade."""
+
+    def _manager(self):
+        manager = ClusteringManager(Mock(), Mock())
+        manager.paper_ids = ["p1", "p2", "p3", "p4"]
+        manager.embeddings = np.zeros((4, 8), dtype=float)
+        manager.metadatas = [
+            {"title": f"Paper {index}", "year": 2025, "conference": "Test", "session": ""} for index in range(4)
         ]
-
-        keywords = _compute_tfidf_keywords(documents, [0, 1], n_keywords=3, min_df=1)
-
-        assert isinstance(keywords, list)
-        assert len(keywords) <= 3
-        assert any("learning" in keyword for keyword in keywords)
-        assert not any("quantum" in keyword for keyword in keywords)
-
-    def test_compute_tfidf_keywords_empty_inputs(self):
-        """Shared TF-IDF helper returns an empty list for unusable inputs."""
-        assert _compute_tfidf_keywords([], [0], n_keywords=5) == []
-        assert _compute_tfidf_keywords(["some text"], [], n_keywords=5) == []
-        assert _compute_tfidf_keywords(["some text"], [0], n_keywords=0) == []
-
-    def test_compute_tfidf_keywords_respects_min_df(self):
-        """Shared TF-IDF helper filters terms below the minimum document frequency."""
-        documents = ["alpha beta", "alpha gamma", "delta epsilon"]
-
-        keywords = _compute_tfidf_keywords(documents, [0], n_keywords=5, min_df=2)
-
-        assert keywords == ["alpha"]
-
-    def test_extract_keywords_for_samples(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
-        """_extract_keywords_for_samples delegates to the shared TF-IDF helper."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-
-        keywords = cm._extract_keywords_for_samples(["paper_0", "paper_1"], max_keywords=3)
-
-        assert isinstance(keywords, list)
-        assert len(keywords) <= 3
-
-    def test_extract_keywords_for_samples_unknown_ids(
-        self, mock_embeddings_manager, mock_collection_with_data, mock_database
-    ):
-        """Unknown paper IDs produce no keywords."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-
-        assert cm._extract_keywords_for_samples(["missing-paper"], max_keywords=3) == []
-
-    def test_call_llm_for_label_returns_llm_label(self, mock_embeddings_manager, mocker, mock_database):
-        """_call_llm_for_label returns the stripped LLM response."""
-        mock_response = mocker.MagicMock()
-        mock_response.choices = [mocker.MagicMock()]
-        mock_response.choices[0].message.content = "  'Generated Label'  "
-
-        mock_openai_client = mocker.MagicMock()
-        mock_openai_client.chat.completions.create.return_value = mock_response
-        mock_embeddings_manager.openai_client = mock_openai_client
-
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        result = cm._call_llm_for_label("user prompt", "fallback label")
-
-        assert result == "Generated Label"
-
-    def test_call_llm_for_label_returns_fallback_on_error(self, mock_embeddings_manager, mocker, mock_database):
-        """_call_llm_for_label returns the fallback when the LLM call fails."""
-        mock_openai_client = mocker.MagicMock()
-        mock_openai_client.chat.completions.create.side_effect = RuntimeError("API down")
-        mock_embeddings_manager.openai_client = mock_openai_client
-
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        result = cm._call_llm_for_label("user prompt", "fallback label")
-
-        assert result == "fallback label"
-
-    def test_generate_llm_label_from_keywords_uses_shared_helper(
-        self, mock_embeddings_manager, mocker, mock_database
-    ):
-        """_generate_llm_label_from_keywords delegates to _call_llm_for_label."""
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        helper = mocker.patch.object(cm, "_call_llm_for_label", return_value="Keyword Label")
-
-        result = cm._generate_llm_label_from_keywords(["machine", "learning", "neural"])
-
-        assert result == "Keyword Label"
-        call_args = helper.call_args.args
-        assert "machine, learning, neural" in call_args[0]
-        assert call_args[1] == "machine, learning, neural"
-
-    def test_generate_parent_label_llm_uses_shared_helper(self, mock_embeddings_manager, mocker, mock_database):
-        """_generate_parent_label_llm delegates to _call_llm_for_label."""
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        helper = mocker.patch.object(cm, "_call_llm_for_label", return_value="Parent Label")
-        child_labels = ["Machine Learning", "Deep Learning"]
-
-        result = cm._generate_parent_label_llm(child_labels, [])
-
-        assert result == "Parent Label"
-        call_args = helper.call_args.args
-        assert call_args[0]
-        assert call_args[1] == cm._generate_parent_label_fallback(child_labels)
-
-    def test_generate_llm_label_uses_shared_helper(
-        self, mock_embeddings_manager, mock_collection_with_data, mocker, mock_database
-    ):
-        """_generate_llm_label delegates to _call_llm_for_label."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-        cm.cluster(n_clusters=3)
-        helper = mocker.patch.object(cm, "_call_llm_for_label", return_value="Cluster Label")
-
-        result = cm._generate_llm_label(0, ["machine", "learning"])
-
-        assert result == "Cluster Label"
-        call_args = helper.call_args.args
-        assert "machine, learning" in call_args[0]
-        assert call_args[1] == "machine, learning"
-
-    def test_generate_cluster_labels_llm_truncated_content_falls_back(
-        self, mock_embeddings_manager, mock_collection_with_data, mocker, mock_database
-    ):
-        """A reasoning model truncated at the token budget returns
-        ``content=None`` (finish_reason='length'); each label must then fall
-        back to keyword concatenation instead of crashing the whole run."""
-        mock_response = mocker.MagicMock()
-        mock_response.choices = [mocker.MagicMock()]
-        mock_response.choices[0].message.content = None  # reasoning ate the budget
-
-        mock_openai_client = mocker.MagicMock()
-        mock_openai_client.chat.completions.create.return_value = mock_response
-        mock_embeddings_manager.collection = mock_collection_with_data
-        mock_embeddings_manager.openai_client = mock_openai_client
-
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-        cm.cluster(n_clusters=3)
-
-        labels = cm.generate_cluster_labels(use_llm=True)
-
-        assert isinstance(labels, dict)
-        assert len(labels) > 0
-        # No label should be empty or None: the fallback kicked in everywhere
-        for cluster_id, label in labels.items():
-            assert isinstance(label, str)
-            assert len(label) > 0
-
-    def test_clustering_results_with_labels(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
-        """Test that clustering results include labels when available."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-        cm.cluster(n_clusters=3)
-        cm.reduce_dimensions(n_components=2)
-        cm.extract_cluster_keywords(n_keywords=5)
-        cm.generate_cluster_labels(use_llm=False)
-
-        results = cm.get_clustering_results()
-
-        assert "cluster_labels" in results
-        assert "cluster_keywords" in results
-        assert isinstance(results["cluster_labels"], dict)
-        assert isinstance(results["cluster_keywords"], dict)
-
-
-class TestAgglomerativeVariants:
-    """Test suite for agglomerative clustering variants."""
-
-    def test_agglomerative_with_distance_threshold(
-        self, mock_embeddings_manager, mock_collection_with_data, mock_database
-    ):
-        """Test agglomerative clustering with distance threshold instead of n_clusters."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-
-        labels = cm.cluster(distance_threshold=5.0)
-
-        assert labels is not None
-        assert len(labels) == 10
-        # Number of clusters should be determined by distance threshold
-        n_clusters_found = len(np.unique(labels))
-        assert n_clusters_found >= 1
-
-    def test_agglomerative_hierarchy_extraction(
-        self, mock_embeddings_manager, mock_collection_with_data, mock_database
-    ):
-        """Test that hierarchical structure is extracted for agglomerative clustering."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-
-        cm.cluster(n_clusters=3)
-
-        # Check that hierarchy was extracted
-        assert cm.cluster_hierarchy is not None
-        assert "n_samples" in cm.cluster_hierarchy
-        assert "n_clusters" in cm.cluster_hierarchy
-        assert "merges" in cm.cluster_hierarchy
-        assert isinstance(cm.cluster_hierarchy["merges"], list)
-        # Should have n_samples - 1 merges to form the tree
-        assert len(cm.cluster_hierarchy["merges"]) == 9  # 10 samples - 1
-
-    def test_agglomerative_hierarchy_in_results(
-        self, mock_embeddings_manager, mock_collection_with_data, mock_database
-    ):
-        """Test that hierarchy is included in clustering results."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-        cm.cluster(n_clusters=3)
-        cm.reduce_dimensions(n_components=2)
-
-        results = cm.get_clustering_results()
-
-        assert "cluster_hierarchy" in results
-        assert isinstance(results["cluster_hierarchy"], dict)
-        assert "merges" in results["cluster_hierarchy"]
-
-    def test_agglomerative_with_linkage(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
-        """Test agglomerative clustering with different linkage methods."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-
-        # Test with different linkage methods
-        for linkage in ["ward", "complete", "average"]:
-            cm_test = ClusteringManager(mock_embeddings_manager, mock_database)
-            cm_test.load_embeddings()
-            labels = cm_test.cluster(n_clusters=3, linkage=linkage)
-
-            assert labels is not None
-            assert len(labels) == 10
-
-
-class TestHierarchicalClustering:
-    """Test suite for hierarchical clustering visualization features."""
-
-    def test_build_hierarchy_tree(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
-        """Test that hierarchy tree is built correctly."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-
-        cm.cluster(n_clusters=3)
-
-        assert cm.cluster_hierarchy is not None
-        assert "tree" in cm.cluster_hierarchy
-
-        tree = cm.cluster_hierarchy["tree"]
-        assert "nodes" in tree
-        assert "root" in tree
-        assert "max_level" in tree
-
-        # Check that we have leaf and internal nodes
-        assert len(tree["nodes"]) == 19  # 10 leaves + 9 internal nodes
-
-    def test_generate_hierarchical_labels_fallback(
-        self, mock_embeddings_manager, mock_collection_with_data, mock_database
-    ):
-        """Test hierarchical label generation with fallback (no LLM)."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-
-        cm.cluster(n_clusters=3)
-
-        # Generate labels without LLM
-        labels = cm.generate_hierarchical_labels(use_llm=False)
-
-        assert labels is not None
-        assert len(labels) > 0
-
-        # Check that we have labels for both leaf and internal nodes
-        tree = cm.cluster_hierarchy["tree"]
-        for node_id in tree["nodes"].keys():
-            assert node_id in labels
-
-    def test_parent_label_fallback(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
-        """Test fallback parent label generation."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-
-        cm.cluster(n_clusters=3)
-
-        # Test the fallback method directly
-        child_labels = ["Machine Learning", "Deep Learning", "Neural Networks"]
-        parent_label = cm._generate_parent_label_fallback(child_labels)
-
-        assert parent_label is not None
-        assert isinstance(parent_label, str)
-        assert len(parent_label) > 0
-
-    def test_hierarchy_labels_in_tree_nodes(self, mock_embeddings_manager, mock_collection_with_data, mock_database):
-        """Test that hierarchical labels are added to tree nodes."""
-        mock_embeddings_manager.collection = mock_collection_with_data
-        cm = ClusteringManager(mock_embeddings_manager, mock_database)
-        cm.load_embeddings()
-
-        # Use agglomerative clustering
-        cm.cluster(n_clusters=3)
-
-        # Generate hierarchical labels
-        hierarchical_labels = cm.generate_hierarchical_labels(use_llm=False)
-
-        # Verify labels are generated
-        assert hierarchical_labels is not None
-        assert len(hierarchical_labels) > 0
-
-        # Manually update tree nodes with labels (simulating what compute_clusters_with_cache does)
-        if "tree" in cm.cluster_hierarchy and "nodes" in cm.cluster_hierarchy["tree"]:
-            for node_id, label in hierarchical_labels.items():
-                node_id_int = int(node_id)
-                if node_id_int in cm.cluster_hierarchy["tree"]["nodes"]:
-                    cm.cluster_hierarchy["tree"]["nodes"][node_id_int]["label"] = label
-
-        # Verify that tree nodes now have labels
-        tree = cm.cluster_hierarchy["tree"]
-        for node_id, node_info in tree["nodes"].items():
-            if not node_info.get("is_leaf", False):  # Check internal nodes
-                assert "label" in node_info, f"Node {node_id} missing label"
-                assert node_info["label"] is not None
-                assert len(node_info["label"]) > 0
-
-
-class TestClusteringCache:
-    """Test suite for clustering cache with different parameters."""
-
-    def test_cache_with_distance_threshold(self, tmp_path):
-        """Test that cache considers distance_threshold parameter."""
-        from abstracts_explorer.database import DatabaseManager
-        from tests.conftest import set_test_db
-
-        # Create temporary database
-        db_path = tmp_path / "test_cache.db"
-        set_test_db(db_path)
-
-        db = DatabaseManager()
-        db.create_tables()
-
-        # Create mock results
-        results1 = {
-            "points": [{"id": "p1", "x": 0, "y": 0, "cluster": 0}],
-            "statistics": {"n_clusters": 2},
+        return manager
+
+    def _fake_topic_model(self):
+        model = Mock()
+        model.fit_transform.return_value = (
+            np.array([0, 0, 1, 1]),
+            np.array([0.9, 0.8, 0.7, 0.6]),
+        )
+        model.vectorizer_model.get_feature_names_out.return_value = np.array(["alpha", "beta"])
+        model.c_tf_idf_ = object()
+        model._extract_words_per_topic.return_value = {
+            0: [("alpha", 1.0), ("beta", 0.5)],
+            1: [("beta", 1.0), ("gamma", 0.5)],
         }
-        results2 = {
-            "points": [{"id": "p1", "x": 1, "y": 1, "cluster": 1}],
-            "statistics": {"n_clusters": 3},
+        model.get_topic.side_effect = lambda topic: [("Alpha Topic" if topic == 0 else "Beta Topic", 1.0)]
+        model.hierarchical_topics.return_value = pd.DataFrame(
+            [
+                {
+                    "Parent_ID": 2,
+                    "Parent_Name": "alpha_beta",
+                    "Topics": [0, 1],
+                    "Child_Left_ID": 0,
+                    "Child_Right_ID": 1,
+                    "Distance": 0.1,
+                }
+            ]
+        )
+        return model
+
+    def test_fit_builds_results(self, mocker):
+        manager = self._manager()
+        fake_model = self._fake_topic_model()
+        mocker.patch("bertopic.BERTopic", return_value=fake_model)
+        mocker.patch.object(
+            manager,
+            "_make_umap",
+            return_value=Mock(
+                fit_transform=Mock(return_value=np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]))
+            ),
+        )
+
+        results = manager.fit(use_llm_labels=True, nr_levels=2)
+
+        assert results["statistics"]["n_clusters"] == 2
+        assert results["cluster_labels"] == {0: "Alpha Topic", 1: "Beta Topic"}
+        assert results["cluster_keywords"] == {0: ["alpha", "beta"], 1: ["beta", "gamma"]}
+        assert manager.cluster_labels is not None
+        assert manager.get_cluster_statistics()["total_papers"] == 4
+        assert manager.get_clustering_results() is results
+        assert len(results["hierarchy"]["levels"]) == 1
+
+    def test_fit_collects_descriptions(self, mocker):
+        manager = self._manager()
+        fake_model = self._fake_topic_model()
+        fake_model.get_topic.side_effect = lambda topic: [
+            (
+                combine_label_description(
+                    "Alpha Topic" if topic == 0 else "Beta Topic",
+                    f"Papers about topic {topic}.",
+                ),
+                1.0,
+            )
+        ]
+        fake_model.hierarchical_topics.return_value = pd.DataFrame(
+            [
+                {
+                    "Parent_ID": 2,
+                    "Parent_Name": combine_label_description("Alpha Beta", "Papers spanning both topics."),
+                    "Topics": [0, 1],
+                    "Child_Left_ID": 0,
+                    "Child_Right_ID": 1,
+                    "Distance": 0.1,
+                }
+            ]
+        )
+        mocker.patch("bertopic.BERTopic", return_value=fake_model)
+        mocker.patch.object(
+            manager,
+            "_make_umap",
+            return_value=Mock(
+                fit_transform=Mock(return_value=np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]))
+            ),
+        )
+
+        results = manager.fit(use_llm_labels=True, nr_levels=2)
+
+        assert results["cluster_labels"] == {0: "Alpha Topic", 1: "Beta Topic"}
+        assert results["cluster_descriptions"] == {
+            0: "Papers about topic 0.",
+            1: "Papers about topic 1.",
         }
+        assert manager.cluster_descriptions == results["cluster_descriptions"]
+        merged = results["hierarchy"]["levels"][0]["clusters"][0]
+        assert merged["description"] == "Papers spanning both topics."
 
-        # Save first result with distance_threshold=1.0
-        db.save_clustering_cache(
-            embedding_model="model1",
-            reduction_method="pca",
-            n_components=2,
-            clustering_method="agglomerative",
-            results=results1,
-            n_clusters=None,
-            clustering_params={"distance_threshold": 1.0, "linkage": "ward"},
+    def test_fit_passes_show_progress_to_representation(self, mocker):
+        manager = self._manager()
+        fake_model = self._fake_topic_model()
+        mocker.patch("bertopic.BERTopic", return_value=fake_model)
+        mocker.patch.object(
+            manager, "_make_umap", return_value=Mock(fit_transform=Mock(return_value=np.zeros((4, 2))))
+        )
+        representation_class = mocker.patch("abstracts_explorer.clustering.manager.ProjectLLMRepresentation")
+
+        manager.fit(use_llm_labels=True, show_progress=True, nr_levels=2)
+
+        representation_class.assert_called_once_with(manager.embeddings_manager, show_progress=True)
+
+    def test_fit_without_llm_labels(self, mocker):
+        manager = self._manager()
+        fake_model = self._fake_topic_model()
+        mocker.patch("bertopic.BERTopic", return_value=fake_model)
+        mocker.patch.object(
+            manager, "_make_umap", return_value=Mock(fit_transform=Mock(return_value=np.zeros((4, 2))))
         )
 
-        # Save second result with distance_threshold=2.0
-        db.save_clustering_cache(
-            embedding_model="model1",
-            reduction_method="pca",
-            n_components=2,
-            clustering_method="agglomerative",
-            results=results2,
-            n_clusters=None,
-            clustering_params={"distance_threshold": 2.0, "linkage": "ward"},
+        results = manager.fit(use_llm_labels=False, nr_levels=2)
+
+        assert results["cluster_labels"] == {0: "alpha & beta", 1: "beta & gamma"}
+        fake_model.get_topic.assert_not_called()
+
+    def test_fit_requires_embeddings(self):
+        manager = ClusteringManager(Mock(), Mock())
+        with pytest.raises(ClusteringError, match="No embeddings loaded"):
+            manager.fit()
+
+    def test_fit_without_documents(self):
+        manager = self._manager()
+        manager.metadatas = []
+        with pytest.raises(ClusteringError, match="No documents"):
+            manager.fit()
+
+    def test_extract_flat_keywords_failure(self, mocker):
+        manager = self._manager()
+        manager.topic_model = Mock()
+        manager.topic_model.vectorizer_model.get_feature_names_out.return_value = np.array(["a"])
+        manager.topic_model.c_tf_idf_ = object()
+        manager.topic_model._extract_words_per_topic.side_effect = RuntimeError("boom")
+
+        assert manager._extract_flat_keywords(["doc"] * 4, np.array([0, 0, 1, 1])) == {}
+
+    def test_get_cluster_statistics_without_fit(self):
+        manager = ClusteringManager(Mock(), Mock())
+        with pytest.raises(ClusteringError):
+            manager.get_cluster_statistics()
+
+    def test_export_requires_fit(self, tmp_path):
+        manager = ClusteringManager(Mock(), Mock())
+        with pytest.raises(ClusteringError):
+            manager.export_to_json(tmp_path / "out.json")
+
+
+def _fake_results():
+    return {
+        "points": [{"id": "p1", "x": 0, "y": 0, "cluster": 0}],
+        "statistics": {"n_clusters": 1, "n_noise": 0, "cluster_sizes": {0: 1}, "total_papers": 1},
+        "cluster_centers": {0: {"x": 0, "y": 0}},
+        "cluster_labels": {0: "A"},
+        "cluster_keywords": {0: ["a"]},
+        "hierarchy": {"levels": [], "n_topics": 1},
+    }
+
+
+class TestPipeline:
+    """Tests for cached and uncached pipeline orchestration."""
+
+    def _deps(self):
+        embeddings = Mock()
+        embeddings.collection_name = "papers"
+        database = Mock()
+        database.get_clustering_cache.return_value = None
+        return embeddings, database
+
+    def test_cache_hit_returns_cached(self, mocker):
+        embeddings, database = self._deps()
+        cached = _fake_results()
+        database.get_clustering_cache.return_value = cached
+        manager_class = mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager")
+
+        result = compute_clusters_with_cache(embeddings, database, "model", conferences=["A"], years=[2024])
+
+        assert result is cached
+        manager_class.assert_not_called()
+
+    def test_cache_hit_backfills_and_updates_entry(self, mocker):
+        embeddings, database = self._deps()
+        cached = _fake_results()
+        database.get_clustering_cache_entry.return_value = {"id": 42, "results": cached}
+        backfill = mocker.patch(
+            "abstracts_explorer.clustering.pipeline._backfill_missing_labels",
+            return_value={"flat_updated": 1, "hierarchy_updated": 0},
+        )
+        manager_class = mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager")
+
+        result = compute_clusters_with_cache(
+            embeddings,
+            database,
+            "model",
+            conferences=["A"],
+            years=[2024],
+            backfill_missing_labels=True,
         )
 
-        # Retrieve with distance_threshold=1.0 should get results1
-        cached = db.get_clustering_cache(
-            embedding_model="model1",
-            reduction_method="pca",
-            n_components=2,
-            clustering_method="agglomerative",
-            n_clusters=None,
-            clustering_params={"distance_threshold": 1.0, "linkage": "ward"},
-        )
-        assert cached is not None
-        assert cached["statistics"]["n_clusters"] == 2
+        assert result is cached
+        backfill.assert_called_once_with(cached, embeddings, database)
+        database.update_clustering_cache_results.assert_called_once_with(42, cached)
+        database.save_clustering_cache.assert_not_called()
+        manager_class.assert_not_called()
 
-        # Retrieve with distance_threshold=2.0 should get results2
-        cached = db.get_clustering_cache(
-            embedding_model="model1",
-            reduction_method="pca",
-            n_components=2,
-            clustering_method="agglomerative",
-            n_clusters=None,
-            clustering_params={"distance_threshold": 2.0, "linkage": "ward"},
-        )
-        assert cached is not None
-        assert cached["statistics"]["n_clusters"] == 3
-
-        # Retrieve with distance_threshold=3.0 should return None (cache miss)
-        cached = db.get_clustering_cache(
-            embedding_model="model1",
-            reduction_method="pca",
-            n_components=2,
-            clustering_method="agglomerative",
-            n_clusters=None,
-            clustering_params={"distance_threshold": 3.0, "linkage": "ward"},
-        )
-        assert cached is None
-
-        db.close()
-
-    def test_cache_without_params(self, tmp_path):
-        """Test that cache works when no params are provided."""
-        from abstracts_explorer.database import DatabaseManager
-        from tests.conftest import set_test_db
-
-        # Create temporary database
-        db_path = tmp_path / "test_cache2.db"
-        set_test_db(db_path)
-
-        db = DatabaseManager()
-        db.create_tables()
-
-        # Save result without params
-        results = {
-            "points": [{"id": "p1", "x": 0, "y": 0, "cluster": 0}],
-            "statistics": {"n_clusters": 5},
-        }
-
-        db.save_clustering_cache(
-            embedding_model="model1",
-            reduction_method="pca",
-            n_components=2,
-            clustering_method="kmeans",
-            results=results,
-            n_clusters=5,
-            clustering_params=None,
+    def test_cache_hit_backfill_noop_does_not_update_entry(self, mocker):
+        embeddings, database = self._deps()
+        cached = _fake_results()
+        database.get_clustering_cache_entry.return_value = {"id": 42, "results": cached}
+        mocker.patch(
+            "abstracts_explorer.clustering.pipeline._backfill_missing_labels",
+            return_value={"flat_updated": 0, "hierarchy_updated": 0},
         )
 
-        # Retrieve without params should work
-        cached = db.get_clustering_cache(
-            embedding_model="model1",
-            reduction_method="pca",
-            n_components=2,
-            clustering_method="kmeans",
-            n_clusters=5,
-            clustering_params=None,
-        )
-        assert cached is not None
-        assert cached["statistics"]["n_clusters"] == 5
+        compute_clusters_with_cache(embeddings, database, "model", backfill_missing_labels=True)
 
-        db.close()
+        database.update_clustering_cache_results.assert_not_called()
 
-    def test_different_reduction_methods_reuse_clustering(self, tmp_path):
-        """Changing reduction method should find clustering results via clustering-only lookup."""
-        from abstracts_explorer.database import DatabaseManager
-        from tests.conftest import set_test_db
+    def test_cache_miss_does_not_backfill(self, mocker):
+        embeddings, database = self._deps()
+        database.get_clustering_cache_entry.return_value = None
+        manager = mocker.Mock()
+        manager.fit.return_value = _fake_results()
+        mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager", return_value=manager)
+        backfill = mocker.patch("abstracts_explorer.clustering.pipeline._backfill_missing_labels")
 
-        db_path = tmp_path / "test_reduction.db"
-        set_test_db(db_path)
+        compute_clusters_with_cache(embeddings, database, "model", backfill_missing_labels=True)
 
-        db = DatabaseManager()
-        db.create_tables()
+        backfill.assert_not_called()
+        database.update_clustering_cache_results.assert_not_called()
+        database.save_clustering_cache.assert_called_once()
 
-        results = {
-            "points": [{"id": "p1", "x": 1.0, "y": 2.0, "cluster": 0}],
-            "statistics": {"n_clusters": 2},
-        }
+    def test_ctfidf_cache_hit_does_not_backfill(self, mocker):
+        embeddings, database = self._deps()
+        cached = _fake_results()
+        database.get_clustering_cache.return_value = cached
+        backfill = mocker.patch("abstracts_explorer.clustering.pipeline._backfill_missing_labels")
 
-        # Save with pca
-        db.save_clustering_cache(
-            embedding_model="model1",
-            reduction_method="pca",
-            n_components=2,
-            clustering_method="kmeans",
-            results=results,
-            n_clusters=2,
+        result = compute_clusters_with_cache(
+            embeddings,
+            database,
+            "model",
+            use_llm_labels=False,
+            backfill_missing_labels=True,
         )
 
-        # Exact match with tsne should miss
-        cached_exact = db.get_clustering_cache(
-            embedding_model="model1",
-            reduction_method="tsne",
-            n_components=2,
-            clustering_method="kmeans",
-            n_clusters=2,
-        )
-        assert cached_exact is None
+        assert result is cached
+        backfill.assert_not_called()
+        database.get_clustering_cache_entry.assert_not_called()
 
-        # Clustering-only lookup (no reduction_method) should find the pca entry
-        cached_any = db.get_clustering_cache(
-            embedding_model="model1",
-            clustering_method="kmeans",
-            n_clusters=2,
-        )
-        assert cached_any is not None
-        assert cached_any["statistics"]["n_clusters"] == 2
+    def test_cache_miss_fits_and_saves(self, mocker):
+        embeddings, database = self._deps()
+        results = _fake_results()
+        manager = mocker.Mock()
+        manager.fit.return_value = results
+        manager_class = mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager", return_value=manager)
 
-        db.close()
+        result = compute_clusters_with_cache(embeddings, database, "model", conferences=["A"], years=[2024])
+
+        assert result is results
+        manager_class.assert_called_once()
+        manager.load_embeddings.assert_called_once()
+        database.save_clustering_cache.assert_called_once()
+        _, kwargs = database.save_clustering_cache.call_args
+        assert kwargs["conference"] == "A"
+        assert kwargs["year"] == 2024
+        assert kwargs["clustering_params"]["representation"] == "llm"
+        assert kwargs["clustering_params"]["distance_threshold"] == 0.5
+
+    def test_no_llm_labels_uses_ctfidf_cache_key(self, mocker):
+        embeddings, database = self._deps()
+        manager = mocker.Mock()
+        manager.fit.return_value = _fake_results()
+        mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager", return_value=manager)
+
+        compute_clusters_with_cache(embeddings, database, "model", use_llm_labels=False)
+
+        _, kwargs = database.save_clustering_cache.call_args
+        assert kwargs["clustering_params"]["representation"] == "ctfidf"
+        manager.fit.assert_called_once()
+        assert manager.fit.call_args.kwargs["use_llm_labels"] is False
+
+    def test_force_recomputes(self, mocker):
+        embeddings, database = self._deps()
+        database.get_clustering_cache.return_value = _fake_results()
+        manager = mocker.Mock()
+        manager.fit.return_value = _fake_results()
+        mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager", return_value=manager)
+
+        compute_clusters_with_cache(embeddings, database, "model", force=True)
+
+        manager.fit.assert_called_once()
+        database.save_clustering_cache.assert_called_once()
+
+    def test_limit_does_not_cache(self, mocker):
+        embeddings, database = self._deps()
+        manager = mocker.Mock()
+        manager.fit.return_value = _fake_results()
+        mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager", return_value=manager)
+
+        compute_clusters_with_cache(embeddings, database, "model", limit=10)
+
+        database.get_clustering_cache.assert_not_called()
+        database.save_clustering_cache.assert_not_called()
+
+    def test_perform_clustering_exports(self, mocker, tmp_path):
+        manager = mocker.Mock()
+        manager.fit.return_value = _fake_results()
+        mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager", return_value=manager)
+        mocker.patch("abstracts_explorer.clustering.pipeline.DatabaseManager")
+        mocker.patch("abstracts_explorer.clustering.pipeline.EmbeddingsManager")
+
+        results = perform_clustering(output_path=tmp_path / "out.json", limit=5, conferences=["A"])
+
+        assert results == _fake_results()
+        manager.load_embeddings.assert_called_once_with(limit=5, conferences=["A"], years=None)
+        manager.export_to_json.assert_called_once_with(tmp_path / "out.json")
+
+    def test_perform_clustering_forwards_requests_per_minute(self, mocker):
+        manager = mocker.Mock()
+        manager.fit.return_value = _fake_results()
+        mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager", return_value=manager)
+        mocker.patch("abstracts_explorer.clustering.pipeline.DatabaseManager")
+        embedding_class = mocker.patch("abstracts_explorer.clustering.pipeline.EmbeddingsManager")
+
+        perform_clustering(requests_per_minute=30)
+
+        embedding_class.assert_called_once_with(collection_name="papers", requests_per_minute=30)
+
+    def test_perform_clustering_uses_config_rate_limit_by_default(self, mocker):
+        manager = mocker.Mock()
+        manager.fit.return_value = _fake_results()
+        mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager", return_value=manager)
+        mocker.patch("abstracts_explorer.clustering.pipeline.DatabaseManager")
+        embedding_class = mocker.patch("abstracts_explorer.clustering.pipeline.EmbeddingsManager")
+
+        perform_clustering()
+
+        embedding_class.assert_called_once_with(collection_name="papers", requests_per_minute=None)
+
+    def test_perform_clustering_wraps_errors(self, mocker):
+        manager = mocker.Mock()
+        manager.load_embeddings.side_effect = RuntimeError("boom")
+        mocker.patch("abstracts_explorer.clustering.pipeline.ClusteringManager", return_value=manager)
+        mocker.patch("abstracts_explorer.clustering.pipeline.DatabaseManager")
+        mocker.patch("abstracts_explorer.clustering.pipeline.EmbeddingsManager")
+
+        with pytest.raises(ClusteringError, match="boom"):
+            perform_clustering()

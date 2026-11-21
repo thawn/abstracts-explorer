@@ -1189,6 +1189,85 @@ class TestClusteringCache:
         assert cached["cluster_centers"]["0"] == results["cluster_centers"][0]
         assert cached["cluster_centers"]["1"] == results["cluster_centers"][1]
 
+    def test_get_clustering_cache_entry_returns_id_and_results(self, connected_db):
+        """The entry lookup exposes the row id alongside the parsed results."""
+        results = {"points": [], "statistics": {"n_clusters": 1}}
+        connected_db.save_clustering_cache(
+            embedding_model="test-model",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            results=results,
+            n_clusters=1,
+        )
+
+        entry = connected_db.get_clustering_cache_entry(
+            embedding_model="test-model",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            n_clusters=1,
+        )
+
+        assert entry is not None
+        assert isinstance(entry["id"], int)
+        assert entry["results"] == results
+        assert (
+            connected_db.get_clustering_cache(
+                embedding_model="test-model",
+                reduction_method="pca",
+                n_components=2,
+                clustering_method="kmeans",
+                n_clusters=1,
+            )
+            == results
+        )
+
+    def test_update_clustering_cache_results_in_place(self, connected_db):
+        """Updating results does not create a duplicate cache row."""
+        from abstracts_explorer.db_models import ClusteringCache
+
+        results = {"points": [], "statistics": {"n_clusters": 1}, "cluster_labels": {0: "Old"}}
+        connected_db.save_clustering_cache(
+            embedding_model="test-model",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            results=results,
+            n_clusters=1,
+        )
+        entry = connected_db.get_clustering_cache_entry(
+            embedding_model="test-model",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            n_clusters=1,
+        )
+
+        updated = {
+            "points": [],
+            "statistics": {"n_clusters": 1},
+            "cluster_labels": {0: "New"},
+            "cluster_descriptions": {0: "A description."},
+        }
+        connected_db.update_clustering_cache_results(entry["id"], updated)
+
+        assert connected_db._session.query(ClusteringCache).count() == 1
+        cached = connected_db.get_clustering_cache(
+            embedding_model="test-model",
+            reduction_method="pca",
+            n_components=2,
+            clustering_method="kmeans",
+            n_clusters=1,
+        )
+        assert cached["cluster_labels"] == {"0": "New"}
+        assert cached["cluster_descriptions"] == {"0": "A description."}
+
+    def test_update_clustering_cache_results_missing_id_raises(self, connected_db):
+        """Updating a missing cache row raises DatabaseError."""
+        with pytest.raises(DatabaseError, match="not found"):
+            connected_db.update_clustering_cache_results(999, {"points": []})
+
     def test_cache_invalidation_by_embedding_model(self, connected_db):
         """Test that cache is invalidated when embedding model changes."""
         results = {
@@ -1546,54 +1625,6 @@ class TestClusteringCache:
             n_clusters=5,
         )
         assert cached_b is not None
-
-    def test_save_and_get_hierarchical_label_cache(self, connected_db):
-        """Test saving and retrieving hierarchical label cache."""
-        labels = {0: "Root", 5: "Sub-cluster A", 6: "Sub-cluster B", 10: "Leaf"}
-
-        connected_db.save_hierarchical_label_cache(
-            embedding_model="test-model",
-            labels=labels,
-            linkage="ward",
-        )
-
-        cached = connected_db.get_hierarchical_label_cache(
-            embedding_model="test-model",
-            linkage="ward",
-        )
-
-        assert cached is not None
-        assert cached == labels
-
-    def test_hierarchical_label_cache_miss_on_different_linkage(self, connected_db):
-        """Test that hierarchical label cache misses when linkage differs."""
-        labels = {0: "Root"}
-        connected_db.save_hierarchical_label_cache(
-            embedding_model="test-model",
-            labels=labels,
-            linkage="ward",
-        )
-
-        cached = connected_db.get_hierarchical_label_cache(
-            embedding_model="test-model",
-            linkage="complete",
-        )
-        assert cached is None
-
-    def test_hierarchical_label_cache_miss_on_different_model(self, connected_db):
-        """Test that hierarchical label cache misses when embedding model differs."""
-        labels = {0: "Root"}
-        connected_db.save_hierarchical_label_cache(
-            embedding_model="model-A",
-            labels=labels,
-            linkage="ward",
-        )
-
-        cached = connected_db.get_hierarchical_label_cache(
-            embedding_model="model-B",
-            linkage="ward",
-        )
-        assert cached is None
 
 
 class TestValidationData:

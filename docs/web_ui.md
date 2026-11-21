@@ -129,6 +129,9 @@ automatically identified topic cluster.
 
 - **Hover** over a dot to see the paper title.
 - **Click** a dot to view full paper details below the plot.
+- **Hierarchy level slider** — switch between BERTopic hierarchy levels. Every
+  paper dot keeps its hover card; only the cluster colors and star centers
+  change.
 - **Click** a cluster name in the legend to highlight that cluster.
 - **Export Data** — download the raw clustering JSON for further analysis.
 

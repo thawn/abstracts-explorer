@@ -637,9 +637,9 @@ def compute_clusters():
     """
     Return pre-computed clustering results from the database cache.
 
-    Clustering always uses agglomerative clustering with
-    distance_threshold=150, linkage=ward, and t-SNE dimensionality
-    reduction.  Results must be pre-generated via the CLI
+    Clustering always uses BERTopic with Agglomerative clustering
+    (distance_threshold=0.5, linkage=ward) on 5-D UMAP embeddings and
+    2-D UMAP visualization.  Results must be pre-generated via the CLI
     ``clustering pre-generate`` command.
 
     Request Body
@@ -652,7 +652,7 @@ def compute_clusters():
     Returns
     -------
     dict
-        Clustering results with points, statistics, and metadata
+        Clustering results with points, statistics, hierarchy levels, and metadata
     """
     data = get_json_object()
 

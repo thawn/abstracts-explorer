@@ -2728,6 +2728,47 @@ class TestCLI:
         captured = capsys.readouterr()
         assert "Error clearing clustering cache" in captured.err
 
+    def test_cluster_embeddings_passes_show_progress(self, tmp_path, capsys, monkeypatch):
+        """Test clustering run enables label progress bars."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+
+        mock_results = {
+            "statistics": {"total_papers": 5, "n_clusters": 2, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        with patch("abstracts_explorer.cli.clustering.perform_clustering") as mock_perform:
+            mock_perform.return_value = mock_results
+            with patch.object(sys, "argv", ["abstracts-explorer", "clustering", "run"]):
+                exit_code = main()
+
+        assert exit_code == 0
+        assert mock_perform.call_args.kwargs["show_progress"] is True
+
+    def test_cluster_embeddings_requests_per_minute(self, tmp_path, capsys, monkeypatch):
+        """Test clustering run forwards the configured API rate limit."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+
+        mock_results = {
+            "statistics": {"total_papers": 5, "n_clusters": 2, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        with patch("abstracts_explorer.cli.clustering.perform_clustering") as mock_perform:
+            mock_perform.return_value = mock_results
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "clustering", "run", "--requests-per-minute", "30"],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        assert mock_perform.call_args.kwargs["requests_per_minute"] == 30
+        assert "30 req/min" in capsys.readouterr().out
+
     def test_pre_generate_clustering_missing_embeddings(self, tmp_path, capsys, monkeypatch):
         """Test pre-generate-clustering fails when embeddings DB doesn't exist."""
         patch_get_config_for_test(monkeypatch, tmp_path / "nonexistent")
@@ -2820,12 +2861,13 @@ class TestCLI:
         assert "Pre-generation complete" in captured.out
         # 2 combos: NeurIPS 2023 + NeurIPS 2024
         assert mock_compute.call_count == 2
-        # Verify fixed agglomerative/t-SNE parameters on all calls
+        # Verify BERTopic parameters on all calls
         for call in mock_compute.call_args_list:
             kw = call[1]
-            assert kw["linkage"] == "ward"
-            assert kw["distance_threshold"] == 150.0
-            assert kw["n_clusters"] is None
+            assert kw["nr_levels"] == 10
+            assert kw["use_llm_labels"] is True
+            assert kw["show_progress"] is True
+            assert kw["backfill_missing_labels"] is True
         mock_em.close.assert_called_once()
 
     def test_pre_generate_clustering_no_conferences_in_db(self, tmp_path, capsys, monkeypatch):
@@ -2906,6 +2948,45 @@ class TestCLI:
         assert exit_code == 0
         call_kwargs = mock_compute.call_args[1]
         assert call_kwargs["force"] is True
+
+    def test_pre_generate_clustering_no_llm_labels(self, tmp_path, capsys, monkeypatch):
+        """Test --no-llm-labels is forwarded and does not imply --force."""
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+        set_test_db(tmp_path / "test.db")
+
+        mock_results = {
+            "points": [],
+            "statistics": {"total_papers": 5, "n_clusters": 3, "n_noise": 0, "cluster_sizes": {}},
+        }
+
+        with (
+            patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
+            patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
+            patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
+            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+        ):
+            mock_em_class.return_value = Mock()
+            mock_compute.return_value = mock_results
+            mock_db_instance = Mock()
+            mock_db_instance.get_conferences.return_value = ["NeurIPS"]
+            mock_db_instance.get_years.side_effect = lambda conference=None: [2024]
+            mock_db_instance.__enter__ = Mock(return_value=mock_db_instance)
+            mock_db_instance.__exit__ = Mock(return_value=False)
+            mock_db_class.return_value = mock_db_instance
+
+            with patch.object(
+                sys,
+                "argv",
+                ["abstracts-explorer", "clustering", "pre-generate", "--no-llm-labels"],
+            ):
+                exit_code = main()
+
+        assert exit_code == 0
+        kwargs = mock_compute.call_args[1]
+        assert kwargs["use_llm_labels"] is False
+        assert kwargs["force"] is False
 
     def test_pre_generate_clustering_requests_per_minute(self, tmp_path, capsys, monkeypatch):
         """Test pre-generate-clustering with --requests-per-minute flag."""

@@ -31,6 +31,13 @@ result = execute_mcp_tool(
 formatted = format_tool_result_for_llm("get_conference_topics", result)
 ```
 
+## Conference topics
+
+`get_conference_topics` reads the cached BERTopic hierarchy and uses fixed
+level 6 (clamped to the available levels). It returns the level’s parent
+labels, aggregated keywords, paper counts, and sample titles without loading
+embeddings. The web UI independently defaults to level 4.
+
 ## API Reference
 
 ```{eval-rst}

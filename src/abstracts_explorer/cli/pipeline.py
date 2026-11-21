@@ -61,6 +61,7 @@ def _build_pre_process_clustering_args(
         year=year,
         collection=getattr(args, "collection", config.collection_name),
         force=force,
+        no_llm_labels=getattr(args, "no_llm_labels", False),
         requests_per_minute=getattr(args, "requests_per_minute", config.requests_per_minute),
         verbose=getattr(args, "verbose", 0),
     )
