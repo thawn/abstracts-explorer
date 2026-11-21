@@ -3,6 +3,7 @@ Tests for the embeddings module.
 """
 
 import logging
+import threading
 import time
 
 import httpx2
@@ -1568,6 +1569,55 @@ class TestQueryEmbedding:
 
         assert query.embedding == [0.3]
         assert manager.generate_embedding.call_count == 2
+
+
+class TestConcurrentClientCreation:
+    """Tests for concurrent ChromaDB client creation."""
+
+    def test_client_creation_is_serialized_across_managers(self, embeddings_manager, monkeypatch):
+        """Concurrent managers must not create ChromaDB clients at the same time."""
+        active = 0
+        max_active = 0
+        counter_lock = threading.Lock()
+        barrier = threading.Barrier(2)
+
+        def fake_persistent_client(*args, **kwargs):
+            nonlocal active, max_active
+            with counter_lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.05)
+            with counter_lock:
+                active -= 1
+            return Mock()
+
+        monkeypatch.setattr(
+            "abstracts_explorer.embeddings.chroma.chromadb.PersistentClient",
+            fake_persistent_client,
+        )
+
+        managers = [
+            EmbeddingsManager(collection_name="test_collection"),
+            EmbeddingsManager(collection_name="test_collection"),
+        ]
+        errors = []
+
+        def connect(manager):
+            barrier.wait(timeout=5)
+            try:
+                _ = manager.client
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=connect, args=(manager,)) for manager in managers]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+
+        assert all(not thread.is_alive() for thread in threads)
+        assert errors == []
+        assert max_active == 1
 
 
 class TestDistanceHelpers:

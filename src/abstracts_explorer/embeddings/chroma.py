@@ -3,6 +3,7 @@ ChromaDB connection and collection management.
 """
 
 import logging
+import threading
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -13,6 +14,8 @@ from chromadb.config import Settings
 from abstracts_explorer.embeddings.errors import translate_errors
 
 logger = logging.getLogger(__name__)
+
+_CLIENT_CREATION_LOCK = threading.Lock()
 
 
 class ChromaMixin:
@@ -82,22 +85,23 @@ class ChromaMixin:
         """Connect to ChromaDB via HTTP for URLs or persistent storage for local paths."""
         with translate_errors("Failed to connect to ChromaDB"):
             parsed = urlparse(self.embedding_db)
-            if parsed.scheme in ("http", "https"):
-                self._client = chromadb.HttpClient(
-                    host=parsed.hostname or "localhost",
-                    port=parsed.port or 8000,
-                    ssl=parsed.scheme == "https",
-                    settings=Settings(anonymized_telemetry=False),
-                )
-                logger.debug("Connected to ChromaDB HTTP service at: %s", self.embedding_db)
-            else:
-                chroma_path = Path(self.embedding_db)
-                chroma_path.mkdir(parents=True, exist_ok=True)
-                self._client = chromadb.PersistentClient(
-                    path=str(chroma_path),
-                    settings=Settings(anonymized_telemetry=False),
-                )
-                logger.debug("Connected to ChromaDB at: %s", chroma_path)
+            with _CLIENT_CREATION_LOCK:
+                if parsed.scheme in ("http", "https"):
+                    self._client = chromadb.HttpClient(
+                        host=parsed.hostname or "localhost",
+                        port=parsed.port or 8000,
+                        ssl=parsed.scheme == "https",
+                        settings=Settings(anonymized_telemetry=False),
+                    )
+                    logger.debug("Connected to ChromaDB HTTP service at: %s", self.embedding_db)
+                else:
+                    chroma_path = Path(self.embedding_db)
+                    chroma_path.mkdir(parents=True, exist_ok=True)
+                    self._client = chromadb.PersistentClient(
+                        path=str(chroma_path),
+                        settings=Settings(anonymized_telemetry=False),
+                    )
+                    logger.debug("Connected to ChromaDB at: %s", chroma_path)
 
     def create_collection(self, reset: bool = False) -> None:
         """
