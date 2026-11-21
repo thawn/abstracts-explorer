@@ -91,6 +91,103 @@ const mergedLevel = {
     mapping: { 0: 100, 1: 100 }
 };
 
+const fourTopicFlatLevel = {
+    level: 0,
+    max_distance: 0.1,
+    clusters: [0, 1, 2, 3].map(id => ({
+        id,
+        label: `Topic ${id}`,
+        description: `Papers about topic ${id}.`,
+        size: 1,
+        center: { x: id + 1, y: id + 1 },
+        keywords: []
+    })),
+    mapping: { 0: 0, 1: 1, 2: 2, 3: 3 }
+};
+
+const fourTopicMidLevel = {
+    level: 1,
+    max_distance: 0.2,
+    clusters: [
+        {
+            id: 10,
+            label: 'Topics 0 + 1',
+            description: 'Papers about topics 0 and 1.',
+            size: 2,
+            center: { x: 1.5, y: 1.5 },
+            keywords: []
+        },
+        {
+            id: 2,
+            label: 'Topic 2',
+            description: 'Papers about topic 2.',
+            size: 1,
+            center: { x: 3, y: 3 },
+            keywords: []
+        },
+        {
+            id: 3,
+            label: 'Topic 3',
+            description: 'Papers about topic 3.',
+            size: 1,
+            center: { x: 4, y: 4 },
+            keywords: []
+        }
+    ],
+    mapping: { 0: 10, 1: 10, 2: 2, 3: 3 }
+};
+
+const fourTopicHighLevel = {
+    level: 2,
+    max_distance: 0.3,
+    clusters: [
+        {
+            id: 100,
+            label: 'Topics 0 + 1',
+            description: 'Papers about topics 0 and 1.',
+            size: 2,
+            center: { x: 1.5, y: 1.5 },
+            keywords: []
+        },
+        {
+            id: 200,
+            label: 'Topics 2 + 3',
+            description: 'Papers about topics 2 and 3.',
+            size: 2,
+            center: { x: 3.5, y: 3.5 },
+            keywords: []
+        }
+    ],
+    mapping: { 0: 100, 1: 100, 2: 200, 3: 200 }
+};
+
+const fourTopicLevels = [fourTopicFlatLevel, fourTopicMidLevel, fourTopicHighLevel];
+
+function buildFourTopicData(levels) {
+    const points = [0, 1, 2, 3].map(id => ({
+        id: `p${id}`,
+        x: id + 1,
+        y: id + 1,
+        cluster: id,
+        title: `Paper ${id}`,
+        year: 2025,
+        conference: 'NeurIPS'
+    }));
+    return {
+        points,
+        statistics: { total_papers: 4, n_clusters: 4, n_noise: 0, cluster_sizes: { 0: 1, 1: 1, 2: 1, 3: 1 } },
+        cluster_labels: { 0: 'Topic 0', 1: 'Topic 1', 2: 'Topic 2', 3: 'Topic 3' },
+        cluster_descriptions: {
+            0: 'Papers about topic 0.',
+            1: 'Papers about topic 1.',
+            2: 'Papers about topic 2.',
+            3: 'Papers about topic 3.'
+        },
+        cluster_centers: { 0: { x: 1, y: 1 }, 1: { x: 2, y: 2 }, 2: { x: 3, y: 3 }, 3: { x: 4, y: 4 } },
+        hierarchy: { levels }
+    };
+}
+
 describe('Hierarchy slider', () => {
     beforeEach(() => {
         jest.clearAllMocks();
@@ -253,11 +350,134 @@ describe('Hierarchy slider', () => {
         expect(clearedCall[1].ids[0]).toEqual([]);
         expect(clearedCall[1].customdata[0]).toEqual([]);
     });
+
+    it('only splits visible clusters into children when lowering the level', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildFourTopicData(fourTopicLevels) });
+
+        await loadClusters();
+        await flushPromises();
+        primePlotData(4);
+
+        clickLegendItem('200');
+        global.Plotly.restyle.mockClear();
+
+        setHierarchyLevel(1);
+
+        expect(getSelectionRestyleCall(1)[1].ids[0]).toEqual(['10']);
+        expect(getSelectionRestyleCall(0)[1].ids[0]).toEqual(['p0', 'p1']);
+        expect(getLegendItem('10').style.opacity).toBe('1');
+        expect(getLegendItem('2').style.opacity).toBe('0.4');
+        expect(getLegendItem('3').style.opacity).toBe('0.4');
+
+        setHierarchyLevel(0);
+
+        expect(getSelectionRestyleCall(1)[1].ids[0]).toEqual(['0', '1']);
+        expect(getSelectionRestyleCall(0)[1].ids[0]).toEqual(['p0', 'p1']);
+    });
+
+    it('shows whole parent clusters with visible children when raising the level', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildFourTopicData(fourTopicLevels) });
+
+        await loadClusters();
+        await flushPromises();
+        primePlotData(4);
+
+        setHierarchyLevel(0);
+        clickLegendButton('None');
+        clickLegendItem('2');
+        global.Plotly.restyle.mockClear();
+
+        setHierarchyLevel(1);
+
+        expect(getSelectionRestyleCall(1)[1].ids[0]).toEqual(['2']);
+        expect(getSelectionRestyleCall(0)[1].ids[0]).toEqual(['p2']);
+
+        setHierarchyLevel(2);
+
+        expect(getSelectionRestyleCall(1)[1].ids[0]).toEqual(['200']);
+        expect(getSelectionRestyleCall(0)[1].ids[0]).toEqual(['p2', 'p3']);
+        expect(getLegendItem('200').style.opacity).toBe('1');
+        expect(getLegendItem('100').style.opacity).toBe('0.4');
+    });
+
+    it('raises every parent with a visible child', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildFourTopicData(fourTopicLevels) });
+
+        await loadClusters();
+        await flushPromises();
+        primePlotData(4);
+
+        setHierarchyLevel(0);
+        clickLegendButton('None');
+        clickLegendItem('0');
+        clickLegendItem('2');
+        global.Plotly.restyle.mockClear();
+
+        setHierarchyLevel(2);
+
+        expect(getSelectionRestyleCall(1)[1].ids[0]).toEqual(['100', '200']);
+        expect(getSelectionRestyleCall(0)[1].ids[0]).toEqual(['p0', 'p1', 'p2', 'p3']);
+    });
+
+    it('preserves the selection when lowering and raising back', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildFourTopicData(fourTopicLevels) });
+
+        await loadClusters();
+        await flushPromises();
+        primePlotData(4);
+
+        clickLegendItem('200');
+        setHierarchyLevel(0);
+        global.Plotly.restyle.mockClear();
+
+        setHierarchyLevel(2);
+
+        expect(getSelectionRestyleCall(1)[1].ids[0]).toEqual(['100']);
+        expect(getSelectionRestyleCall(0)[1].ids[0]).toEqual(['p0', 'p1']);
+    });
 });
 
 async function flushPromises() {
     await Promise.resolve();
     await Promise.resolve();
+}
+
+function primePlotData(pointCount) {
+    const plotDiv = document.getElementById('cluster-plot');
+    const xs = Array.from({ length: pointCount }, (_, index) => index);
+    plotDiv.data = [
+        { x: xs, y: xs },
+        { x: [] }
+    ];
+}
+
+function getLegendItem(clusterId) {
+    return document.querySelector(`#cluster-legend [data-cluster-id="${clusterId}"]`);
+}
+
+function clickLegendItem(clusterId) {
+    const item = getLegendItem(clusterId);
+    expect(item).toBeTruthy();
+    item.click();
+    return item;
+}
+
+function clickLegendButton(label) {
+    const button = Array.from(document.querySelectorAll('#cluster-legend button'))
+        .find(candidate => candidate.textContent === label);
+    expect(button).toBeDefined();
+    button.click();
+    return button;
+}
+
+function getSelectionRestyleCall(traceIndex) {
+    const calls = global.Plotly.restyle.mock.calls.filter(call => (
+        Array.isArray(call[2])
+        && call[2][0] === traceIndex
+        && call[1]
+        && Array.isArray(call[1].ids)
+    ));
+    return calls[calls.length - 1];
 }
 
 function getDocumentRestyleCall() {

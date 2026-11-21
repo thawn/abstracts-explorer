@@ -183,6 +183,36 @@ function _getActiveLevel() {
 }
 
 /**
+ * Translate a cluster selection from one hierarchy level to another.
+ *
+ * Selections are resolved to their flat topic IDs and then re-grouped at the
+ * target level. Lowering a level therefore reveals only the children of the
+ * visible clusters, while raising it reveals the whole parent cluster for any
+ * visible child.
+ * @param {Object|null} fromLevel
+ * @param {Set<string>} selection
+ * @param {Object|null} toLevel
+ * @returns {Set<string>}
+ */
+function _convertSelection(fromLevel, selection, toLevel) {
+    const fromMapping = (fromLevel && fromLevel.mapping) || {};
+    const toMapping = (toLevel && toLevel.mapping) || {};
+    const visibleTopics = new Set();
+    Object.keys(fromMapping).forEach(topic => {
+        if (selection.has(String(fromMapping[topic]))) {
+            visibleTopics.add(topic);
+        }
+    });
+    const converted = new Set();
+    Object.keys(toMapping).forEach(topic => {
+        if (visibleTopics.has(topic)) {
+            converted.add(String(toMapping[topic]));
+        }
+    });
+    return converted;
+}
+
+/**
  * Bind the hierarchy range slider.
  */
 function _bindHierarchySlider() {
@@ -195,15 +225,22 @@ function _bindHierarchySlider() {
 }
 
 /**
- * Select a hierarchy level and re-render.
+ * Select a hierarchy level and re-render, preserving the visible clusters.
+ *
+ * Lowering a level splits the visible clusters into their children; raising it
+ * shows the whole parent cluster for any visible child.
  * @param {number} index
  */
 export function setHierarchyLevel(index) {
     const levels = _getHierarchyLevels();
     if (!levels.length) return;
+    const previousLevel = _getActiveLevel();
     currentLevelIndex = Math.min(Math.max(parseInt(index, 10) || 0, 0), levels.length - 1);
-    selectedClusters.clear();
-    renderCurrentLevel();
+    const nextLevel = levels[currentLevelIndex];
+    if (previousLevel !== nextLevel) {
+        selectedClusters = _convertSelection(previousLevel, selectedClusters, nextLevel);
+    }
+    renderCurrentLevel(true);
 }
 
 /**
@@ -367,8 +404,9 @@ function _buildLevelState() {
 
 /**
  * Render the active hierarchy level with one document trace and one star trace.
+ * @param {boolean} preserveSelection - Keep the current selection instead of selecting every cluster.
  */
-export function renderCurrentLevel() {
+export function renderCurrentLevel(preserveSelection = false) {
     if (!clusterData || !clusterData.points) {
         console.error('No cluster data to visualize');
         return;
@@ -376,7 +414,9 @@ export function renderCurrentLevel() {
 
     const state = _buildLevelState();
     currentLevelState = state;
-    selectedClusters = new Set(state.entries.map(entry => String(entry.id)));
+    if (!preserveSelection) {
+        selectedClusters = new Set(state.entries.map(entry => String(entry.id)));
+    }
 
     const plotColors = getPlotColors();
     const layout = {
@@ -721,6 +761,7 @@ function createLevelLegend(state) {
     });
 
     legendContainer.appendChild(itemsContainer);
+    _updateLegendSelectionStyles();
 }
 
 /**
