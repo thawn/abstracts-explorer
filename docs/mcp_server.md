@@ -212,7 +212,7 @@ The ORCID record must be public; private works are not returned by the API.
 - Up to ten recent work titles
 - A warning when no terms could be derived
 
-**Example use case:** "My ORCID is 0000-0002-2315-9247. What should I search for at ICLR?"
+**Example use case:** "Find papers that are interesting to me based on my ORCID record 0000-0002-2315-9247."
 
 ## Starting the MCP Server
 

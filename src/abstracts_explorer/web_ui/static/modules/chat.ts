@@ -90,7 +90,7 @@ export function buildMcpToolsHintHtml(): string {
                 </li>
                 <li class="flex items-start gap-2">
                     <i class="fas fa-id-card text-cyan-400 mt-0.5 flex-shrink-0"></i>
-                    <span><em>"Suggest search terms based on the ORCID record 0000-0002-2315-9247."</em></span>
+                    <span><em>"Find papers that are interesting to me based on my ORCID record 0000-0002-2315-9247."</em></span>
                 </li>
             </ul>
         </div>`;

@@ -43,6 +43,7 @@ import requests as _requests
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, expect
 
 from abstracts_explorer.config import get_config
+from abstracts_explorer.orcid import OrcidError, fetch_orcid_record
 from tests.conftest import get_env_test_path
 
 # CSS selectors used for chart detection in the chat area
@@ -52,6 +53,9 @@ _CSS_CHAT_PLOT_CONTAINER = "div[id^='chat-plot-']"
 # Default conference and year selected in chat-related tests
 _DEFAULT_CONFERENCE = "NeurIPS"
 _DEFAULT_YEAR = "2025"
+
+# Public ORCID record used by the ORCID MCP tool smoke test
+_ORCID_ID = "0000-0002-2315-9247"
 
 # Search requests on staging take ~16s, so allow headroom above that.
 _SEARCH_TIMEOUT = 30
@@ -1226,6 +1230,44 @@ class TestMCPToolSmokeTests:
             criteria=(
                 "the response should name at least one author who works on topics similar to the "
                 "user's interesting papers, ideally with a session or poster location"
+            ),
+        )
+
+    def test_suggest_search_terms_from_orcid(self, staging_url, staging_page):
+        """
+        MCP tool: ``suggest_search_terms_from_orcid``.
+
+        Example query: *"Find papers that are interesting to me based on my
+        ORCID record 0000-0002-2315-9247."*
+
+        Success criteria (LLM-judged): the response recommends or lists
+        multiple papers whose topics relate to the researcher's ORCID profile
+        and explains why they might be interesting.
+
+        Parameters
+        ----------
+        staging_url : str
+            Base URL of the staging deployment.
+        staging_page : Page
+            Playwright page instance.
+        """
+        try:
+            record = fetch_orcid_record(_ORCID_ID, timeout=30)
+        except OrcidError as exc:
+            pytest.skip(f"ORCID public API unavailable: {exc}")
+        assert record["works"], "Expected public works on the ORCID record"
+
+        query = f"Find papers that are interesting to me based on my ORCID record {_ORCID_ID}."
+        response, _ = self._send_chat_query(staging_url, staging_page, query)
+        if not response:
+            pytest.skip("LLM backend unavailable – no response received")
+        _assert_llm_judgment(
+            query,
+            response,
+            criteria=(
+                "the response should recommend or list multiple conference papers whose "
+                "topics relate to the researcher's ORCID works (for example biocomputation, "
+                "computational biology, or machine learning) and explain why they are interesting"
             ),
         )
 
