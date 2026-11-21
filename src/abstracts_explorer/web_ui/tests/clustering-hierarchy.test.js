@@ -134,4 +134,92 @@ describe('Hierarchy slider', () => {
         setHierarchyLevel(-5);
         expect(document.getElementById('hierarchy-level-slider').value).toBe('0');
     });
+
+    it('hides cluster points when toggled off and restores them when toggled on', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildData([flatLevel, mergedLevel]) });
+
+        await loadClusters();
+        setHierarchyLevel(0);
+        await flushPromises();
+        document.getElementById('cluster-plot').data = [
+            { x: [1, 2], y: [1, 2] },
+            { x: [1.5], y: [1.5] }
+        ];
+        global.Plotly.restyle.mockClear();
+
+        const items = document.querySelectorAll('#cluster-legend [data-cluster-id]');
+        expect(items).toHaveLength(2);
+
+        items[0].click();
+
+        const hiddenCall = getDocumentRestyleCall();
+        expect(hiddenCall[1].x[0]).toEqual([2]);
+        expect(hiddenCall[1].y[0]).toEqual([2]);
+        expect(hiddenCall[1].text[0]).toEqual(['Paper 2']);
+        expect(hiddenCall[1].customdata[0]).toHaveLength(1);
+        expect(hiddenCall[1].customdata[0][0].id).toBe('p2');
+        expect(hiddenCall[1]['marker.color'][0]).toEqual(['#ff7f0e']);
+        expect(hiddenCall[1]['marker.color'][0]).not.toContain('#e5e7eb');
+
+        global.Plotly.restyle.mockClear();
+        items[0].click();
+
+        const restoredCall = getDocumentRestyleCall();
+        expect(restoredCall[1].x[0]).toEqual([1, 2]);
+        expect(restoredCall[1].text[0]).toEqual(['Paper 1', 'Paper 2']);
+        expect(restoredCall[1]['marker.color'][0]).toEqual(['#1f77b4', '#ff7f0e']);
+    });
+
+    it('keeps noise points visible until all clusters are cleared', async () => {
+        const data = buildData([flatLevel, mergedLevel]);
+        data.points.push({
+            id: 'noise-1',
+            x: 3,
+            y: 3,
+            cluster: -1,
+            title: 'Noise paper',
+            year: 2025,
+            conference: 'NeurIPS'
+        });
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => data });
+
+        await loadClusters();
+        setHierarchyLevel(0);
+        await flushPromises();
+        document.getElementById('cluster-plot').data = [
+            { x: [1, 2, 3], y: [1, 2, 3] },
+            { x: [1.5], y: [1.5] }
+        ];
+        global.Plotly.restyle.mockClear();
+
+        const items = document.querySelectorAll('#cluster-legend [data-cluster-id]');
+        items[0].click();
+
+        const hiddenCall = getDocumentRestyleCall();
+        expect(hiddenCall[1].customdata[0].map(point => point.id)).toEqual(['p2', 'noise-1']);
+
+        const noneButton = Array.from(document.querySelectorAll('#cluster-legend button'))
+            .find(button => button.textContent === 'None');
+        expect(noneButton).toBeDefined();
+        global.Plotly.restyle.mockClear();
+        noneButton.click();
+
+        const clearedCall = getDocumentRestyleCall();
+        expect(clearedCall[1].x[0]).toEqual([]);
+        expect(clearedCall[1].customdata[0]).toEqual([]);
+    });
 });
+
+async function flushPromises() {
+    await Promise.resolve();
+    await Promise.resolve();
+}
+
+function getDocumentRestyleCall() {
+    return global.Plotly.restyle.mock.calls.find(call => (
+        Array.isArray(call[2])
+        && call[2][0] === 0
+        && call[1]
+        && Array.isArray(call[1].x)
+    ));
+}

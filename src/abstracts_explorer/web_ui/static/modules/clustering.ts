@@ -531,20 +531,28 @@ function _updateHierarchyControls(state) {
 }
 
 /**
- * Apply cluster selection by recoloring documents and filtering stars.
+ * Apply cluster selection by hiding documents and filtering stars.
  */
 function applySelectionToPlot() {
     const state = currentLevelState;
     const plotDiv = document.getElementById('cluster-plot');
     if (!state || !plotDiv || !plotDiv.data || !plotDiv.data.length) return;
 
-    const colorForCluster = clusterId => {
-        const key = String(clusterId);
-        return selectedClusters.has(key) ? (state.colorById[clusterId] || '#9ca3af') : '#e5e7eb';
-    };
+    const visibleIndices = [];
+    state.clusterIdsByPoint.forEach((clusterId, index) => {
+        const isVisible = clusterId < 0
+            ? selectedClusters.size > 0
+            : selectedClusters.has(String(clusterId));
+        if (isVisible) visibleIndices.push(index);
+    });
 
-    const documentColors = state.clusterIdsByPoint.map(clusterId => colorForCluster(clusterId));
-    Plotly.restyle(plotDiv, { 'marker.color': [documentColors] }, [0]);
+    Plotly.restyle(plotDiv, {
+        x: [visibleIndices.map(index => state.xs[index])],
+        y: [visibleIndices.map(index => state.ys[index])],
+        text: [visibleIndices.map(index => state.texts[index])],
+        customdata: [visibleIndices.map(index => state.customdata[index])],
+        'marker.color': [visibleIndices.map(index => state.colors[index])]
+    }, [0]);
 
     const visibleEntries = state.entries.filter(entry => selectedClusters.has(String(entry.id)));
     Plotly.restyle(plotDiv, {
