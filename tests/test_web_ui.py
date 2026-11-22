@@ -866,6 +866,36 @@ class TestChatEndpoint:
         # May fail if LM Studio not running, but should not crash
         assert response.status_code in [200, 500]
 
+    def test_chat_returns_guard_refusal(self):
+        """A blocked chat message is returned as a normal assistant response."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.request_services.get_rag_chat") as mock_get_rag:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_get_config:
+                    mock_config = Mock()
+                    mock_config.max_context_papers = 3
+                    mock_get_config.return_value = mock_config
+
+                    mock_rag = Mock()
+                    mock_rag.query.return_value = {
+                        "response": "I can only help with conference abstracts.",
+                        "papers": [],
+                        "visualizations": [],
+                        "metadata": {
+                            "n_papers": 0,
+                            "guard": {"blocked": True, "label": "B", "probability": 0.94},
+                        },
+                    }
+                    mock_get_rag.return_value = mock_rag
+
+                    response = client.post("/api/chat", json={"message": "Write me a script"})
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["response"]["response"] == "I can only help with conference abstracts."
+        assert data["response"]["metadata"]["guard"]["blocked"] is True
+
 
 class TestPaperEndpoint:
     """Test the paper details endpoint."""

@@ -139,6 +139,40 @@ The configuration automatically detects the type based on the format:
 - **ENABLE_QUERY_REWRITING**: Rewrite follow-up questions into self-contained search queries before retrieval (default: `true`)
 - **QUERY_SIMILARITY_THRESHOLD**: Maximum embedding distance for a rewritten-query answer to be accepted as a hit (default: `0.7`)
 
+### Chat Input Guard (Ollaya)
+
+The optional chat input guard classifies each user message with a local
+[Ollaya](https://ollaya.dev/) decision model before the RAG agent runs. It
+refuses off-topic, coding, general-purpose LLM, and jailbreak requests with a
+polite fixed message. The guard is **fail-open**: if Ollaya is disabled,
+unreachable, slow, or returns an unexpected response, chat proceeds normally.
+
+- **GUARD_ENABLED**: Enable the guard (default: `false`). Container deployments set `true`.
+- **GUARD_BACKEND_URL**: Ollaya base URL (default: `http://127.0.0.1:11435`). The bundled containers use `http://abstracts-ollaya:11435`.
+- **GUARD_API_KEY**: Bearer token for Ollaya (default: empty). Inject it via the `ollaya-api-key` Podman secret in container deployments.
+- **GUARD_MODEL**: Ollaya model name (default: `laya:multilingual`).
+- **GUARD_TIMEOUT**: Per-check HTTP timeout in seconds (default: `2.0`).
+- **GUARD_THRESHOLD**: Minimum probability for the abuse/off-topic choice to block a message (default: `0.8`).
+- **GUARD_JAILBREAK_THRESHOLD**: Minimum probability for the jailbreak yes/no question to block a message (default: `0.8`).
+- **GUARD_MAX_CHARS**: Maximum number of characters sent to Ollaya (default: `1500`).
+- **GUARD_REFUSAL_MESSAGE**: Optional custom refusal text. Empty uses the built-in message.
+
+Run Ollaya locally:
+
+```bash
+podman run --rm -v abstracts-ollaya:/home/ollaya/.ollaya:Z \
+  ghcr.io/ollaya-dev/ollaya pull laya:multilingual
+
+podman run -d --name abstracts-ollaya --network abstracts.network \
+  -v abstracts-ollaya:/home/ollaya/.ollaya:Z \
+  -e OLLAYA_PRELOAD=laya:multilingual \
+  -e OLLAYA_KEEP_ALIVE=-1 \
+  -e OLLAYA_API_KEY="$GUARD_API_KEY" \
+  ghcr.io/ollaya-dev/ollaya
+```
+
+See [Docker and Podman Setup](docker.md) for the Quadlet/Compose deployment.
+
 ### Web UI Defaults
 
 - **DEFAULT_CONFERENCE**: Pre-selected conference in the web UI (default: `ML4PS`)

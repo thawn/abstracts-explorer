@@ -18,6 +18,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from abstracts_explorer.config import get_config
 from abstracts_explorer.rag.citations import PaperCitationRegistry
+from abstracts_explorer.rag.guard import GuardDecision, InputGuard
 from abstracts_explorer.rag.tool_context import RAGToolContext
 from abstracts_explorer.rag.errors import RAGError
 from abstracts_explorer.rag.tools import (
@@ -93,6 +94,7 @@ class AgentMixin:
     _message_history: List[Any]
     _tool_executor: Optional[ThreadPoolExecutor]
     _citations: PaperCitationRegistry
+    _input_guard: InputGuard
     _extract_papers: Any
     _extract_visualizations: Any
     _update_message_history_instructions: Any
@@ -135,6 +137,7 @@ class AgentMixin:
         self._citations = citation_registry or PaperCitationRegistry()
         self._query_lock = threading.Lock()
         self._http_client: Any = None
+        self._input_guard = InputGuard(config=config)
 
         # Build the Pydantic AI agent
         self.agent = self._build_agent()
@@ -375,6 +378,21 @@ class AgentMixin:
         paper_priorities: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
         try:
+            guard_decision = self._safe_guard_check(question)
+            if guard_decision.blocked:
+                return {
+                    "response": self._input_guard.refusal_message,
+                    "papers": [],
+                    "visualizations": [],
+                    "metadata": {
+                        "n_papers": 0,
+                        "model": self.model,
+                        "used_tools": False,
+                        "tools_executed": [],
+                        "guard": self._guard_metadata(guard_decision),
+                    },
+                }
+
             if limit is None:
                 limit = self.max_context_papers
 
@@ -438,20 +456,43 @@ class AgentMixin:
             # Determine which tools were executed
             tools_executed = [tr["name"] for tr in deps.tool_results]
 
+            metadata: Dict[str, Any] = {
+                "n_papers": len(papers),
+                "model": self.model,
+                "used_tools": len(tools_executed) > 0,
+                "tools_executed": tools_executed,
+            }
+            if guard_decision.checked or guard_decision.reason == "guard_unavailable":
+                metadata["guard"] = self._guard_metadata(guard_decision)
+
             return {
                 "response": result.output,
                 "papers": papers,
                 "visualizations": visualizations,
-                "metadata": {
-                    "n_papers": len(papers),
-                    "model": self.model,
-                    "used_tools": len(tools_executed) > 0,
-                    "tools_executed": tools_executed,
-                },
+                "metadata": metadata,
             }
 
         except Exception as e:
             raise RAGError(f"Query failed: {str(e)}") from e
+
+    def _safe_guard_check(self, question: str) -> GuardDecision:
+        """Run the optional input guard, failing open on any unexpected error."""
+        try:
+            return self._input_guard.check(question)
+        except Exception as exc:
+            logger.warning("Chat input guard failed; allowing message: %s", exc)
+            return GuardDecision(blocked=False, checked=False, reason="guard_unavailable")
+
+    @staticmethod
+    def _guard_metadata(decision: GuardDecision) -> Dict[str, Any]:
+        """Serialize a guard decision for the response metadata."""
+        return {
+            "blocked": decision.blocked,
+            "label": decision.label,
+            "probability": decision.probability,
+            "jailbreak_probability": decision.jailbreak_probability,
+            "reason": decision.reason,
+        }
 
     def close(self) -> None:
         """Close the HTTP client and tool executor used by the agent."""

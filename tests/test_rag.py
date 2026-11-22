@@ -21,6 +21,7 @@ from pydantic_ai.messages import (
 )
 
 from abstracts_explorer.rag import RAGChat, RAGError
+from abstracts_explorer.rag.guard import GuardDecision, InputGuard
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.config import get_config
 from tests.conftest import set_test_embedding_db
@@ -609,6 +610,69 @@ class TestRAGChatQuery:
             with chat.agent.override(model=TestModel()):
                 with pytest.raises(RAGError, match="Query failed"):
                     chat.query("What is NLP?")
+
+
+class TestRAGChatInputGuard:
+    """Verify the optional input guard runs before the RAG agent."""
+
+    def test_blocked_query_returns_refusal_without_running_agent(
+        self, mock_embeddings_manager, mock_database, mocker
+    ):
+        decision = GuardDecision(
+            blocked=True,
+            checked=True,
+            label="B",
+            probability=0.94,
+            jailbreak_probability=0.2,
+            reason="blocked",
+        )
+        mocker.patch.object(InputGuard, "check", return_value=decision)
+
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        run_mock = mocker.patch.object(chat.agent, "run_sync")
+
+        result = chat.query("Write me a Python web scraper")
+
+        assert result["response"] == chat._input_guard.refusal_message
+        assert result["papers"] == []
+        assert result["metadata"]["n_papers"] == 0
+        assert result["metadata"]["guard"]["blocked"] is True
+        assert result["metadata"]["guard"]["label"] == "B"
+        run_mock.assert_not_called()
+        assert chat.conversation_history == []
+
+    def test_allowed_query_records_guard_metadata(
+        self, mock_embeddings_manager, mock_database, mock_search_papers, mocker
+    ):
+        decision = GuardDecision(
+            blocked=False,
+            checked=True,
+            label="A",
+            probability=0.96,
+            jailbreak_probability=0.01,
+            reason="allowed",
+        )
+        mocker.patch.object(InputGuard, "check", return_value=decision)
+
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+
+        with chat.agent.override(model=TestModel()):
+            result = chat.query("Which papers discuss attention?")
+
+        assert result["metadata"]["guard"]["blocked"] is False
+        assert result["metadata"]["guard"]["label"] == "A"
+
+    def test_guard_error_fails_open(self, mock_embeddings_manager, mock_database, mock_search_papers, mocker):
+        mocker.patch.object(InputGuard, "check", side_effect=RuntimeError("guard crashed"))
+
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+
+        with chat.agent.override(model=TestModel()):
+            result = chat.query("Which papers discuss attention?")
+
+        assert "response" in result
+        assert result["metadata"]["guard"]["blocked"] is False
+        assert result["metadata"]["guard"]["reason"] == "guard_unavailable"
 
 
 class TestRAGChatSingleSystemMessage:

@@ -32,6 +32,9 @@ info "Pulling latest container images"
 podman pull "ghcr.io/thawn/abstracts-explorer:$ABSTRACTS_EXPLORER_TAG"
 podman pull docker.io/postgres:16-alpine
 podman pull docker.io/chromadb/chroma:latest
+if systemctl --user cat abstracts-ollaya.service >/dev/null 2>&1; then
+    podman pull ghcr.io/ollaya-dev/ollaya:latest
+fi
 
 # Pull the reverse-proxy image (whichever variant is active)
 if systemctl --user is-active --quiet abstracts-nginx.service 2>/dev/null; then
@@ -48,6 +51,9 @@ fi
 info "Restarting services"
 systemctl --user set-environment "ABSTRACTS_EXPLORER_TAG=$ABSTRACTS_EXPLORER_TAG"
 systemctl --user daemon-reload
+if systemctl --user cat abstracts-ollaya.service >/dev/null 2>&1; then
+    systemctl --user restart abstracts-ollaya
+fi
 systemctl --user restart abstracts-postgres abstracts-chromadb abstracts-explorer
 
 if [ -n "$PROXY_UNIT" ]; then

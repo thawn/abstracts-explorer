@@ -66,6 +66,15 @@ services:
       - MAX_CONTEXT_PAPERS=5
       - ENABLE_QUERY_REWRITING=true
       - QUERY_SIMILARITY_THRESHOLD=0.7
+
+      # Optional chat input guard (Ollaya, CPU only)
+      - GUARD_ENABLED=${GUARD_ENABLED:-true}
+      - GUARD_BACKEND_URL=${GUARD_BACKEND_URL:-http://ollaya:11435}
+      - GUARD_API_KEY=${OLLAYA_API_KEY:-}
+      - GUARD_MODEL=${GUARD_MODEL:-laya:multilingual}
+      - GUARD_TIMEOUT=${GUARD_TIMEOUT:-2.0}
+      - GUARD_THRESHOLD=${GUARD_THRESHOLD:-0.8}
+      - GUARD_JAILBREAK_THRESHOLD=${GUARD_JAILBREAK_THRESHOLD:-0.8}
       
       # Logging configuration
       # Set log level: DEBUG, INFO, WARNING (default), ERROR, CRITICAL
@@ -96,6 +105,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      ollaya:
+        condition: service_started
     
     restart: unless-stopped
     
@@ -106,6 +117,31 @@ services:
       retries: 3
       start_period: 30s
       start_interval: 30s
+
+  # Ollaya decision-model server used by the optional chat input guard.
+  # CPU only, internal network only. Pull the model once after first start:
+  #   podman exec abstracts-ollaya ollaya pull laya:multilingual
+  ollaya:
+    image: ghcr.io/ollaya-dev/ollaya:latest
+    container_name: abstracts-ollaya
+    volumes:
+      - ollaya-data:/home/ollaya/.ollaya
+    environment:
+      - OLLAYA_HOST=0.0.0.0:11435
+      - OLLAYA_PRELOAD=laya:multilingual
+      - OLLAYA_KEEP_ALIVE=-1
+      - OLLAYA_MAX_LOADED_MODELS=1
+      - OLLAYA_THREADS=${OLLAYA_THREADS:-4}
+      - OLLAYA_LOG=info
+      - OLLAYA_API_KEY=${OLLAYA_API_KEY:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/ollaya-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+      start_interval: 15s
 
   # ChromaDB vector database service
   chromadb:
@@ -154,6 +190,8 @@ volumes:
   chromadb-data:
     driver: local
   postgres-data:
+    driver: local
+  ollaya-data:
     driver: local
 
 networks:
