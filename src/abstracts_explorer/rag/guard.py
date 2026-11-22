@@ -156,7 +156,7 @@ class InputGuard:
             payload = self._request(state)
             return self._decide(payload)
         except Exception as exc:
-            _warn_unavailable(exc)
+            _log_unavailable(exc)
             return GuardDecision(blocked=False, checked=False, reason="guard_unavailable")
 
     def _request(self, state: str) -> Dict[str, Any]:
@@ -234,7 +234,7 @@ class InputGuard:
         )
 
 
-def _warn_unavailable(exc: Exception) -> None:
+def _log_unavailable(exc: Exception) -> None:
     """Log an unavailable-guard warning, at most once per interval."""
     global _last_warning_at
     now = time.monotonic()
@@ -242,4 +242,4 @@ def _warn_unavailable(exc: Exception) -> None:
         if now - _last_warning_at < _WARNING_INTERVAL_SECONDS:
             return
         _last_warning_at = now
-    logger.warning("Chat input guard unavailable; allowing message: %s", exc)
+    logger.warning("Chat input guard unavailable; continuing without guard (fail-open): %s", exc)

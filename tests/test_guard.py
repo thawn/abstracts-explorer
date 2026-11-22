@@ -123,13 +123,21 @@ def test_low_probability_is_allowed():
         lambda request: httpx2.Response(200, json={"answers": {}}),
     ],
 )
-def test_guard_failures_fail_open(handler):
+def test_guard_failures_fail_open(handler, caplog, monkeypatch):
+    import abstracts_explorer.rag.guard as guard_module
+
+    monkeypatch.setattr(guard_module, "_last_warning_at", 0.0)
     guard = InputGuard(config=_config(), http_client=_client(handler))
-    decision = guard.check("Which papers discuss attention mechanisms?")
+
+    with caplog.at_level("WARNING", logger="abstracts_explorer.rag.guard"):
+        decision = guard.check("Which papers discuss attention mechanisms?")
 
     assert decision.blocked is False
     assert decision.checked is False
     assert decision.reason.startswith("guard_unavailable")
+    assert "Chat input guard unavailable" in caplog.text
+    assert "fail-open" in caplog.text
+    assert any(record.levelname == "WARNING" and "fail-open" in record.getMessage() for record in caplog.records)
 
 
 def test_request_payload_and_truncation():

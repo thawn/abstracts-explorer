@@ -380,6 +380,16 @@ class AgentMixin:
         try:
             guard_decision = self._safe_guard_check(question)
             if guard_decision.blocked:
+                logger.info(
+                    "Chat input blocked by guard: label=%s topic_probability=%s "
+                    "jailbreak_probability=%s model=%s reason=%s message=%r",
+                    guard_decision.label,
+                    guard_decision.probability,
+                    guard_decision.jailbreak_probability,
+                    self.model,
+                    guard_decision.reason,
+                    question,
+                )
                 return {
                     "response": self._input_guard.refusal_message,
                     "papers": [],
@@ -480,7 +490,7 @@ class AgentMixin:
         try:
             return self._input_guard.check(question)
         except Exception as exc:
-            logger.warning("Chat input guard failed; allowing message: %s", exc)
+            logger.warning("Chat input guard crashed; continuing without guard (fail-open): %s", exc)
             return GuardDecision(blocked=False, checked=False, reason="guard_unavailable")
 
     @staticmethod
