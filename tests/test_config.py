@@ -232,7 +232,7 @@ class TestConfig:
         assert config.max_context_papers == 5
         assert config.metadata_cache_ttl == 86400
         assert config.chat_temperature == 0.7
-        assert config.chat_max_tokens == 2000
+        assert config.chat_max_tokens == 4000
         assert config.cluster_label_model == "alias-fast"
         assert config.embedding_max_input_tokens == 8192
         assert config.rag_max_parallel_tools == 8
