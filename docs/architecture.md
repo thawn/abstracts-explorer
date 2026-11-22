@@ -13,7 +13,7 @@ The codebase comprises **~21,200 lines** of Python (plus the dev-only
 | `cli/` package | 4,640 | Command-line interface (`main.py` dispatch + `parsers.py` wiring + per-command modules) |
 | `db/` package | 4,061 | SQL database operations as `DatabaseManager` mixins (+ 27-line `database.py` facade) |
 | `plugins/` | 4,079 | Conference downloader plugins (11 plugins) |
-| `clustering/` package | — | BERTopic + UMAP, LLM labeling, hierarchy levels, cache |
+| `clustering/` package | — | BERTopic + UMAP, LLM labeling, hierarchy tree, cache |
 | `plugin/` package | 1,753 | Plugin framework, models, registry, HTTP, persistence |
 | `registry.py` | 1,684 | OCI registry upload/download |
 | `mcp/` package | 1,481 | MCP server, resources, cache, tool implementations (8 tools) |
@@ -303,7 +303,7 @@ graph TD
         CUMAP["BERTopic fit<br/>(5-D UMAP + Agglomerative)"]
         CKEYS["base c-TF-IDF keywords"]
         CLBL["LLM labels<br/>(flat + merged)"]
-        CHRCH["hierarchical_topics<br/>(10 level mappings)"]
+        CHRCH["hierarchical_topics<br/>(full merge tree)"]
         CRES["get_clustering_results"]
 
         subgraph "LLM retry and fallback"

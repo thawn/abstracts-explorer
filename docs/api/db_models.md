@@ -8,7 +8,6 @@ These models support both SQLite and PostgreSQL backends.
 - **Paper** — research paper with metadata (title, authors, abstract, year, conference, etc.)
 - **EmbeddingsMetadata** — tracks the embedding model used to generate vector embeddings
 - **ClusteringCache** — caches clustering results with visualization coordinates
-- **HierarchicalLabelCache** — caches hierarchical cluster labels
 - **ValidationData** — stores donated validation data for evaluation
 - **ChatDonation** — stores donated chat interaction data
 - **EvalQAPair** — evaluation question-answer pairs

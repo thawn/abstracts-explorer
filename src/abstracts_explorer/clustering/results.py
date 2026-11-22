@@ -10,8 +10,10 @@ from typing import Any, Dict, List, Mapping, Sequence, Union
 
 import numpy as np
 
+from abstracts_explorer.clustering.constants import DEFAULT_LEVEL_SCALE, DEFAULT_NR_LEVELS
 from abstracts_explorer.clustering.errors import ClusteringError
-from abstracts_explorer.clustering.hierarchy_levels import build_level_mappings
+from abstracts_explorer.clustering.hierarchy_levels import build_level_mappings_from_tree
+from abstracts_explorer.clustering.labels import split_label_description
 from abstracts_explorer.utils.json_utils import NumpyEncoder
 
 logger = logging.getLogger(__name__)
@@ -155,56 +157,115 @@ def _center_from_points(points: Sequence[Dict[str, Any]]) -> Dict[str, float]:
     }
 
 
-def build_hierarchy(
+def build_hierarchy_tree(
     hierarchical_topics: Any,
+    parent_labels: Mapping[int, str],
+    parent_descriptions: Mapping[int, str] | None = None,
+) -> List[Dict[str, Any]]:
+    """
+    Build the full BERTopic merge tree for the clustering cache.
+
+    Parameters
+    ----------
+    hierarchical_topics : pandas.DataFrame
+        Output of ``topic_model.hierarchical_topics()``.
+    parent_labels : mapping
+        Parent ID to label mapping.
+    parent_descriptions : mapping, optional
+        Parent ID to descriptive-sentence mapping.
+
+    Returns
+    -------
+    list of dict
+        One row per merge node, sorted in BERTopic order (parent ID
+        descending). Each row has ``id``, ``topics``, ``label``,
+        ``description``, ``distance``, ``child_left_id``, and
+        ``child_right_id`` keys.
+    """
+    if hierarchical_topics is None or len(hierarchical_topics) == 0:
+        return []
+
+    parent_labels = parent_labels or {}
+    parent_descriptions = parent_descriptions or {}
+    tree: List[Dict[str, Any]] = []
+    for row in hierarchical_topics.itertuples(index=False):
+        parent_id = int(row.Parent_ID)
+        raw_name = str(getattr(row, "Parent_Name", "") or "")
+        if parent_id in parent_labels:
+            label = parent_labels[parent_id]
+            description = parent_descriptions.get(parent_id, "")
+        else:
+            label, description = split_label_description(raw_name)
+        tree.append(
+            {
+                "id": parent_id,
+                "topics": [int(topic) for topic in (getattr(row, "Topics", None) or [])],
+                "label": str(label or "").replace("_", " "),
+                "description": str(description or ""),
+                "distance": float(getattr(row, "Distance", 0.0)),
+                "child_left_id": int(getattr(row, "Child_Left_ID", -1)),
+                "child_right_id": int(getattr(row, "Child_Right_ID", -1)),
+            }
+        )
+
+    tree.sort(key=lambda node: int(node["id"]), reverse=True)
+    return tree
+
+
+def _int_keyed_map(values: Mapping[Any, Any] | None) -> Dict[int, Any]:
+    """Normalize cached JSON mappings to integer keys."""
+    if not values:
+        return {}
+    return {int(key): value for key, value in values.items()}
+
+
+def build_hierarchy_levels(
+    tree: Sequence[Mapping[str, Any]],
     flat_topic_ids: Sequence[int],
-    flat_labels: Dict[int, str],
-    flat_keywords: Dict[int, List[str]],
+    flat_labels: Mapping[int, str],
+    flat_keywords: Mapping[int, List[str]],
     statistics: Dict[str, Any],
     points: Sequence[Dict[str, Any]],
-    parent_labels: Mapping[int, str],
-    nr_levels: int,
-    level_scale: str = "linear",
-    flat_descriptions: Dict[int, str] | None = None,
-    parent_descriptions: Mapping[int, str] | None = None,
+    flat_descriptions: Mapping[int, str] | None = None,
+    nr_levels: int = DEFAULT_NR_LEVELS,
+    level_scale: str = DEFAULT_LEVEL_SCALE,
 ) -> Dict[str, Any]:
     """
     Build the compact hierarchy payload used by the slider and MCP.
 
     Parameters
     ----------
-    hierarchical_topics : pandas.DataFrame
-        Output of ``topic_model.hierarchical_topics()``.
+    tree : sequence of mapping
+        Full merge tree stored in the clustering cache.
     flat_topic_ids : sequence of int
         Flat topic IDs (excluding outliers).
-    flat_labels : dict
+    flat_labels : mapping
         Flat topic labels.
-    flat_keywords : dict
+    flat_keywords : mapping
         Flat topic keywords.
     statistics : dict
         Flat cluster statistics.
     points : sequence of dict
         Visualization points.
-    parent_labels : dict
-        BERTopic parent ID to parent label mapping.
-    nr_levels : int
-        Requested number of hierarchy levels.
+    flat_descriptions : mapping, optional
+        Flat topic ID to descriptive-sentence mapping.
+    nr_levels : int, optional
+        Requested number of hierarchy levels (default 10).
     level_scale : str, optional
         Level scaling mode (default ``"linear"``).
-    flat_descriptions : dict, optional
-        Flat topic ID to descriptive-sentence mapping.
-    parent_descriptions : dict, optional
-        Parent ID to descriptive-sentence mapping.
 
     Returns
     -------
     dict
         Hierarchy payload with ``levels`` and metadata.
     """
-    level_mappings = build_level_mappings(hierarchical_topics, flat_topic_ids, nr_levels, level_scale)
-    cluster_sizes = statistics.get("cluster_sizes", {})
-    flat_descriptions = flat_descriptions or {}
-    parent_descriptions = parent_descriptions or {}
+    level_mappings = build_level_mappings_from_tree(tree, flat_topic_ids, nr_levels, level_scale)
+    cluster_sizes = _int_keyed_map(statistics.get("cluster_sizes"))
+    flat_labels = _int_keyed_map(flat_labels)
+    flat_keywords = _int_keyed_map(flat_keywords)
+    flat_descriptions = _int_keyed_map(flat_descriptions)
+    label_by_id = {int(node["id"]): str(node.get("label") or "") for node in tree}
+    description_by_id = {int(node["id"]): str(node.get("description") or "") for node in tree}
 
     levels: List[Dict[str, Any]] = []
     for level_mapping in level_mappings:
@@ -229,8 +290,8 @@ def build_hierarchy(
                 label = flat_labels[cluster_id]
                 description = flat_descriptions.get(cluster_id, "")
             else:
-                label = parent_labels.get(cluster_id, f"Cluster {cluster_id}").replace("_", " ")
-                description = parent_descriptions.get(cluster_id, "")
+                label = label_by_id.get(cluster_id, f"Cluster {cluster_id}") or f"Cluster {cluster_id}"
+                description = description_by_id.get(cluster_id, "")
 
             clusters.append(
                 {
@@ -263,6 +324,59 @@ def build_hierarchy(
     }
 
 
+def derive_hierarchy_levels(
+    results: Mapping[str, Any],
+    nr_levels: int = DEFAULT_NR_LEVELS,
+    level_scale: str = DEFAULT_LEVEL_SCALE,
+) -> Dict[str, Any]:
+    """
+    Derive hierarchy levels from the cached tree.
+
+    Legacy cache entries without a tree are returned unchanged.
+
+    Parameters
+    ----------
+    results : mapping
+        Cached clustering results.
+    nr_levels : int, optional
+        Requested number of hierarchy levels (default 10).
+    level_scale : str, optional
+        Level scaling mode (default ``"linear"``).
+
+    Returns
+    -------
+    dict
+        Hierarchy payload with derived ``levels``.
+
+    Raises
+    ------
+    ClusteringError
+        If the cached results do not contain a hierarchy tree.
+    """
+    hierarchy = results.get("hierarchy") or {}
+    if "tree" not in hierarchy:
+        raise ClusteringError(
+            "Cached clustering results are missing their hierarchy tree; "
+            "regenerate them with 'abstracts-explorer clustering pre-generate --force'."
+        )
+
+    tree = hierarchy.get("tree") or []
+    statistics = results.get("statistics") or {}
+    cluster_sizes = statistics.get("cluster_sizes") or {}
+    flat_topic_ids = sorted(int(cluster_id) for cluster_id in cluster_sizes if int(cluster_id) >= 0)
+    return build_hierarchy_levels(
+        tree=tree,
+        flat_topic_ids=flat_topic_ids,
+        flat_labels=_int_keyed_map(results.get("cluster_labels")),
+        flat_keywords=_int_keyed_map(results.get("cluster_keywords")),
+        statistics=statistics,
+        points=results.get("points") or [],
+        flat_descriptions=_int_keyed_map(results.get("cluster_descriptions")),
+        nr_levels=nr_levels,
+        level_scale=level_scale,
+    )
+
+
 def build_clustering_results(
     paper_ids: Sequence[str],
     reduced_embeddings: np.ndarray,
@@ -272,8 +386,6 @@ def build_clustering_results(
     flat_keywords: Dict[int, List[str]],
     hierarchical_topics: Any,
     parent_labels: Mapping[int, str],
-    nr_levels: int,
-    level_scale: str = "linear",
     flat_descriptions: Dict[int, str] | None = None,
     parent_descriptions: Mapping[int, str] | None = None,
 ) -> Dict[str, Any]:
@@ -298,10 +410,6 @@ def build_clustering_results(
         Output of ``topic_model.hierarchical_topics()``.
     parent_labels : dict
         BERTopic parent ID to parent label mapping.
-    nr_levels : int
-        Requested number of hierarchy levels.
-    level_scale : str, optional
-        Level scaling mode (default ``"linear"``).
     flat_descriptions : dict, optional
         Flat topic ID to descriptive-sentence mapping.
     parent_descriptions : dict, optional
@@ -310,27 +418,14 @@ def build_clustering_results(
     Returns
     -------
     dict
-        Clustering results with points, statistics, flat fields, and hierarchy.
+        Clustering results with points, statistics, flat fields, and the full
+        hierarchy tree.
     """
     statistics = build_statistics(topics)
     points = build_points(paper_ids, reduced_embeddings, metadatas, topics)
     centers = build_cluster_centers(reduced_embeddings, topics)
-    flat_topic_ids = sorted(cluster_id for cluster_id in statistics["cluster_sizes"] if cluster_id >= 0)
     flat_descriptions = flat_descriptions or {}
-
-    hierarchy = build_hierarchy(
-        hierarchical_topics=hierarchical_topics,
-        flat_topic_ids=flat_topic_ids,
-        flat_labels=flat_labels,
-        flat_keywords=flat_keywords,
-        statistics=statistics,
-        points=points,
-        parent_labels=parent_labels,
-        nr_levels=nr_levels,
-        level_scale=level_scale,
-        flat_descriptions=flat_descriptions,
-        parent_descriptions=parent_descriptions,
-    )
+    tree = build_hierarchy_tree(hierarchical_topics, parent_labels, parent_descriptions)
 
     return {
         "points": points,
@@ -340,7 +435,11 @@ def build_clustering_results(
         "cluster_labels": flat_labels,
         "cluster_descriptions": flat_descriptions,
         "cluster_keywords": flat_keywords,
-        "hierarchy": hierarchy,
+        "hierarchy": {
+            "method": "bertopic",
+            "n_topics": int(statistics.get("n_clusters", 0)),
+            "tree": tree,
+        },
     }
 
 

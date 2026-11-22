@@ -41,7 +41,7 @@ them with `--no-verify` unless explicitly asked.
   - `cli/`: `main.py` (dispatch), `parsers.py` (argparse wiring), `_common.py`, one module per command group.
   - `db/`: `DatabaseManager` mixins (`manager.py`); `database.py` is a re-export facade.
   - `embeddings/`: ChromaDB store, generation, queries, ingestion, artifacts.
-  - `clustering/`: BERTopic + UMAP, hierarchy levels, LLM labeling, results, cache/pipeline.
+  - `clustering/`: BERTopic + UMAP, hierarchy tree and derived levels, LLM labeling, results, cache/pipeline.
   - `plugin/`: plugin framework, models, registry, HTTP, persistence; `plugin.py` is no longer present.
   - `plugins/`: conference downloaders.
   - `mcp/`: MCP server, resources, cache, tools; `mcp_server.py` is a facade. `mcp_tools.py` is the tool registry/normalizer/formatter.

@@ -3,6 +3,7 @@ Tests for the BERTopic clustering pipeline.
 """
 
 import json
+import logging
 from unittest.mock import Mock
 
 import numpy as np
@@ -18,9 +19,9 @@ from abstracts_explorer.clustering import (
     clustering_params_for,
 )
 from abstracts_explorer.clustering.hierarchy_levels import (
-    build_level_mapping,
-    build_level_mappings,
-    compute_level_max_distances,
+    build_level_mapping_from_tree,
+    build_level_mappings_from_tree,
+    compute_level_max_distances_from_tree,
     level_parent_descriptions,
     level_parent_labels,
 )
@@ -41,9 +42,11 @@ from abstracts_explorer.clustering.representation import ProjectLLMRepresentatio
 from abstracts_explorer.clustering.results import (
     build_cluster_centers,
     build_clustering_results,
-    build_hierarchy,
+    build_hierarchy_levels,
+    build_hierarchy_tree,
     build_points,
     build_statistics,
+    derive_hierarchy_levels,
     export_results_to_json,
     results_have_flat_labels,
 )
@@ -131,55 +134,16 @@ class TestConstants:
         assert DEFAULT_CLUSTERING_PARAMS["pipeline_version"] == 2
 
     def test_clustering_params_for(self):
-        llm_params = clustering_params_for(True, nr_levels=7)
+        llm_params = clustering_params_for(True)
         ctfidf_params = clustering_params_for(False)
         assert llm_params["representation"] == "llm"
-        assert llm_params["nr_levels"] == 7
+        assert "nr_levels" not in llm_params
+        assert "level_scale" not in llm_params
         assert ctfidf_params["representation"] == "ctfidf"
-        assert DEFAULT_CLUSTERING_PARAMS["nr_levels"] == 10
-        llm_params["nr_levels"] = 99
-        assert DEFAULT_CLUSTERING_PARAMS["nr_levels"] == 10
 
 
 class TestHierarchyLevels:
     """Tests for the BERTopic hierarchy-level adapter."""
-
-    def test_compute_level_max_distances_linear(self):
-        distances = compute_level_max_distances(sample_hierarchy(), 3, "linear")
-        assert distances == [0.1, 0.2, 0.3]
-
-    def test_compute_level_max_distances_clamps_levels(self):
-        distances = compute_level_max_distances(sample_hierarchy(), 10, "linear")
-        assert distances == [0.1, 0.2, 0.3]
-
-    def test_compute_level_max_distances_log(self):
-        distances = compute_level_max_distances(sample_hierarchy(), 2, "log")
-        assert len(distances) == 2
-        assert distances == sorted(distances)
-
-    def test_compute_level_max_distances_empty(self):
-        assert compute_level_max_distances(pd.DataFrame({"Distance": []}), 3) == []
-        assert compute_level_max_distances(sample_hierarchy(), 0) == []
-
-    def test_compute_level_max_distances_invalid_scale(self):
-        with pytest.raises(ValueError):
-            compute_level_max_distances(sample_hierarchy(), 3, "quadratic")
-
-    def test_build_level_mapping_transitive(self):
-        mapping = build_level_mapping(sample_hierarchy(), 0.3, [0, 1, 2, 3])
-        assert mapping == {0: 6, 1: 6, 2: 6, 3: 6}
-
-    def test_build_level_mapping_partial(self):
-        mapping = build_level_mapping(sample_hierarchy(), 0.1, [0, 1, 2, 3])
-        assert mapping == {0: 4, 1: 4, 2: 2, 3: 3}
-
-    def test_build_level_mapping_empty(self):
-        assert build_level_mapping(None, 0.5, [0, 1]) == {0: 0, 1: 1}
-
-    def test_build_level_mappings(self):
-        levels = build_level_mappings(sample_hierarchy(), [0, 1, 2, 3], 3, "linear")
-        assert [level["level"] for level in levels] == [0, 1, 2]
-        assert [level["max_distance"] for level in levels] == [0.1, 0.2, 0.3]
 
     def test_level_parent_labels(self):
         labels = level_parent_labels(sample_hierarchy())
@@ -195,6 +159,16 @@ class TestHierarchyLevels:
         assert descriptions[4] == "Papers about alpha and beta."
         assert descriptions[5] == ""
         assert level_parent_descriptions(None) == {}
+
+    def test_tree_level_helpers(self):
+        hierarchy = sample_hierarchy()
+        tree = build_hierarchy_tree(hierarchy, level_parent_labels(hierarchy), {})
+        assert [node["id"] for node in tree] == [6, 5, 4]
+        assert compute_level_max_distances_from_tree(tree, 3, "linear") == [0.1, 0.2, 0.3]
+        levels = build_level_mappings_from_tree(tree, [0, 1, 2, 3], 3, "linear")
+        assert [level["level"] for level in levels] == [0, 1, 2]
+        assert [level["max_distance"] for level in levels] == [0.1, 0.2, 0.3]
+        assert build_level_mapping_from_tree(tree, 0.1, [0, 1, 2, 3]) == {0: 4, 1: 4, 2: 2, 3: 3}
 
 
 class TestResults:
@@ -224,7 +198,7 @@ class TestResults:
         assert centers[0] == {"x": 1.0, "y": 1.0}
         assert centers[1] == {"x": 10.0, "y": 10.0}
 
-    def test_build_hierarchy(self):
+    def test_build_hierarchy_levels_from_tree(self):
         points = [
             {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0},
             {"id": "p2", "x": 2.0, "y": 2.0, "cluster": 1},
@@ -232,16 +206,19 @@ class TestResults:
             {"id": "p4", "x": 12.0, "y": 12.0, "cluster": 3},
         ]
         stats = build_statistics([0, 1, 2, 3])
-        hierarchy = build_hierarchy(
-            hierarchical_topics=sample_hierarchy(),
+        tree = build_hierarchy_tree(
+            sample_hierarchy(),
+            level_parent_labels(sample_hierarchy()),
+            {4: "Papers about alpha and beta."},
+        )
+        hierarchy = build_hierarchy_levels(
+            tree=tree,
             flat_topic_ids=[0, 1, 2, 3],
             flat_labels={0: "A", 1: "B", 2: "C", 3: "D"},
             flat_descriptions={0: "Papers about A.", 1: "Papers about B."},
             flat_keywords={0: ["a"], 1: ["b"], 2: ["c"], 3: ["d"]},
             statistics=stats,
             points=points,
-            parent_labels=level_parent_labels(sample_hierarchy()),
-            parent_descriptions={4: "Papers about alpha and beta."},
             nr_levels=3,
         )
         assert hierarchy["method"] == "bertopic"
@@ -264,9 +241,9 @@ class TestResults:
         assert len(level2["clusters"]) == 1
         assert level2["clusters"][0]["id"] == 6
 
-    def test_build_hierarchy_empty(self):
-        hierarchy = build_hierarchy(
-            hierarchical_topics=pd.DataFrame({"Distance": []}),
+    def test_build_hierarchy_levels_empty_tree(self):
+        hierarchy = build_hierarchy_levels(
+            tree=[],
             flat_topic_ids=[0, 1],
             flat_labels={0: "A", 1: "B"},
             flat_keywords={0: ["a"], 1: ["b"]},
@@ -275,10 +252,42 @@ class TestResults:
                 {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0},
                 {"id": "p2", "x": 1.0, "y": 1.0, "cluster": 1},
             ],
-            parent_labels={},
             nr_levels=10,
         )
         assert hierarchy["levels"] == []
+
+    def test_derive_hierarchy_levels_uses_tree(self):
+        results = {
+            "points": [
+                {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0},
+                {"id": "p2", "x": 2.0, "y": 2.0, "cluster": 1},
+                {"id": "p3", "x": 10.0, "y": 10.0, "cluster": 2},
+                {"id": "p4", "x": 12.0, "y": 12.0, "cluster": 3},
+            ],
+            "statistics": build_statistics([0, 1, 2, 3]),
+            "cluster_labels": {0: "A", 1: "B", 2: "C", 3: "D"},
+            "cluster_descriptions": {0: "Papers about A."},
+            "cluster_keywords": {0: ["a"], 1: ["b"], 2: ["c"], 3: ["d"]},
+            "hierarchy": {
+                "method": "bertopic",
+                "n_topics": 4,
+                "tree": build_hierarchy_tree(
+                    sample_hierarchy(),
+                    level_parent_labels(sample_hierarchy()),
+                    {4: "Papers about alpha and beta."},
+                ),
+            },
+        }
+
+        derived = derive_hierarchy_levels(results, nr_levels=3)
+
+        assert derived["nr_levels"] == 3
+        assert len(derived["levels"]) == 3
+        assert derived["levels"][0]["mapping"] == {"0": 4, "1": 4, "2": 2, "3": 3}
+
+    def test_derive_hierarchy_levels_requires_tree(self):
+        with pytest.raises(ClusteringError, match="missing their hierarchy tree"):
+            derive_hierarchy_levels({"hierarchy": {"method": "bertopic"}})
 
     def test_build_clustering_results_schema(self):
         embeddings = np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0]])
@@ -293,7 +302,6 @@ class TestResults:
             hierarchical_topics=sample_hierarchy(),
             parent_labels=level_parent_labels(sample_hierarchy()),
             parent_descriptions={4: "Papers about A and B."},
-            nr_levels=3,
         )
         assert set(results) == {
             "points",
@@ -309,6 +317,9 @@ class TestResults:
         assert results["n_dimensions"] == 2
         assert results["cluster_descriptions"] == {0: "Papers about A."}
         assert len(results["points"]) == 4
+        assert "levels" not in results["hierarchy"]
+        assert len(results["hierarchy"]["tree"]) == 3
+        assert results["hierarchy"]["tree"][0]["id"] == 6
 
     def test_export_results(self, tmp_path):
         path = tmp_path / "nested" / "results.json"
@@ -388,6 +399,77 @@ class TestLLMHelpers:
         assert generate_llm_label(em, "system", "user") == "Label"
         assert chat.call_count == 2
         sleep.assert_called_once()
+
+    def test_generate_label_uses_base_budget_on_first_attempt(self, mocker):
+        config = mocker.Mock(
+            llm_max_attempts=1,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_request_timeout=5,
+            cluster_label_model="model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        chat = mocker.patch("abstracts_explorer.clustering.llm.chat_completion_text", return_value="Label")
+        em = mocker.Mock(openai_client=object())
+
+        generate_llm_label(em, "system", "user")
+
+        assert chat.call_args.kwargs["max_tokens"] == 600
+
+    def test_generate_label_doubles_budget_after_empty_response(self, mocker):
+        config = mocker.Mock(
+            llm_max_attempts=2,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_request_timeout=5,
+            cluster_label_model="model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
+        chat = mocker.patch("abstracts_explorer.clustering.llm.chat_completion_text", side_effect=["", "Label"])
+        em = mocker.Mock(openai_client=object())
+
+        assert generate_llm_label(em, "system", "user") == "Label"
+        budgets = [call.kwargs["max_tokens"] for call in chat.call_args_list]
+        assert budgets == [600, 1200]
+
+    def test_generate_label_caps_budget_at_max(self, mocker):
+        config = mocker.Mock(
+            llm_max_attempts=6,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_request_timeout=5,
+            cluster_label_model="model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
+        chat = mocker.patch("abstracts_explorer.clustering.llm.chat_completion_text", return_value="")
+        em = mocker.Mock(openai_client=object())
+
+        with pytest.raises(ValueError):
+            generate_llm_label(em, "system", "user")
+        budgets = [call.kwargs["max_tokens"] for call in chat.call_args_list]
+        assert budgets == [600, 1200, 2400, 2400, 2400, 2400]
+
+    def test_generate_label_does_not_escalate_after_non_empty_error(self, mocker):
+        config = mocker.Mock(
+            llm_max_attempts=3,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_request_timeout=5,
+            cluster_label_model="model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
+        chat = mocker.patch(
+            "abstracts_explorer.clustering.llm.chat_completion_text",
+            side_effect=["", MockError(status_code=503), "Label"],
+        )
+        em = mocker.Mock(openai_client=object())
+
+        assert generate_llm_label(em, "system", "user") == "Label"
+        budgets = [call.kwargs["max_tokens"] for call in chat.call_args_list]
+        assert budgets == [600, 1200, 1200]
 
     def test_generate_label_retries_retryable_error(self, mocker):
         config = mocker.Mock(
@@ -548,7 +630,7 @@ class TestRepresentation:
 
         assert updated[0] == [(combine_label_description("Nice Label", "Papers about nice things."), 1)]
 
-    def test_extract_topics_falls_back_to_keywords(self, mocker):
+    def test_extract_topics_falls_back_to_keywords(self, mocker, caplog):
         model = self._topic_model()
         representation = ProjectLLMRepresentation(mocker.Mock())
         mocker.patch(
@@ -557,9 +639,14 @@ class TestRepresentation:
         )
 
         topics = {0: [("alpha", 1.0), ("beta", 0.9), ("gamma", 0.8)], 1: [("delta", 1.0)]}
-        updated = representation.extract_topics(model, ["d"], None, topics)
+        with caplog.at_level(logging.WARNING, logger="abstracts_explorer.clustering.representation"):
+            updated = representation.extract_topics(model, ["d"], None, topics)
 
         assert updated[0] == [("alpha & beta & gamma", 1)]
+        assert "LLM label failed for topic 0" in caplog.text
+        assert "using keyword fallback. Prompt:" in caplog.text
+        assert "alpha, beta, gamma" in caplog.text
+        assert "doc one" in caplog.text
 
     def test_extract_topics_empty_label_falls_back(self, mocker):
         model = self._topic_model()
@@ -697,7 +784,7 @@ class TestClusteringManager:
             ),
         )
 
-        results = manager.fit(use_llm_labels=True, nr_levels=2)
+        results = manager.fit(use_llm_labels=True)
 
         assert results["statistics"]["n_clusters"] == 2
         assert results["cluster_labels"] == {0: "Alpha Topic", 1: "Beta Topic"}
@@ -705,7 +792,8 @@ class TestClusteringManager:
         assert manager.cluster_labels is not None
         assert manager.get_cluster_statistics()["total_papers"] == 4
         assert manager.get_clustering_results() is results
-        assert len(results["hierarchy"]["levels"]) == 1
+        assert len(results["hierarchy"]["tree"]) == 1
+        assert results["hierarchy"]["tree"][0]["id"] == 2
 
     def test_fit_collects_descriptions(self, mocker):
         manager = self._manager()
@@ -740,7 +828,7 @@ class TestClusteringManager:
             ),
         )
 
-        results = manager.fit(use_llm_labels=True, nr_levels=2)
+        results = manager.fit(use_llm_labels=True)
 
         assert results["cluster_labels"] == {0: "Alpha Topic", 1: "Beta Topic"}
         assert results["cluster_descriptions"] == {
@@ -748,7 +836,7 @@ class TestClusteringManager:
             1: "Papers about topic 1.",
         }
         assert manager.cluster_descriptions == results["cluster_descriptions"]
-        merged = results["hierarchy"]["levels"][0]["clusters"][0]
+        merged = results["hierarchy"]["tree"][0]
         assert merged["description"] == "Papers spanning both topics."
 
     def test_fit_passes_show_progress_to_representation(self, mocker):
@@ -760,7 +848,7 @@ class TestClusteringManager:
         )
         representation_class = mocker.patch("abstracts_explorer.clustering.manager.ProjectLLMRepresentation")
 
-        manager.fit(use_llm_labels=True, show_progress=True, nr_levels=2)
+        manager.fit(use_llm_labels=True, show_progress=True)
 
         representation_class.assert_called_once_with(manager.embeddings_manager, show_progress=True)
 
@@ -772,7 +860,7 @@ class TestClusteringManager:
             manager, "_make_umap", return_value=Mock(fit_transform=Mock(return_value=np.zeros((4, 2))))
         )
 
-        results = manager.fit(use_llm_labels=False, nr_levels=2)
+        results = manager.fit(use_llm_labels=False)
 
         assert results["cluster_labels"] == {0: "alpha & beta", 1: "beta & gamma"}
         fake_model.get_topic.assert_not_called()
@@ -815,7 +903,7 @@ def _fake_results():
         "cluster_centers": {0: {"x": 0, "y": 0}},
         "cluster_labels": {0: "A"},
         "cluster_keywords": {0: ["a"]},
-        "hierarchy": {"levels": [], "n_topics": 1},
+        "hierarchy": {"method": "bertopic", "tree": [], "n_topics": 1},
     }
 
 
@@ -860,10 +948,29 @@ class TestPipeline:
         )
 
         assert result is cached
-        backfill.assert_called_once_with(cached, embeddings, database)
+        backfill.assert_called_once_with(cached, embeddings, database, show_progress=False)
         database.update_clustering_cache_results.assert_called_once_with(42, cached)
         database.save_clustering_cache.assert_not_called()
         manager_class.assert_not_called()
+
+    def test_cache_hit_backfill_forwards_show_progress(self, mocker):
+        embeddings, database = self._deps()
+        cached = _fake_results()
+        database.get_clustering_cache_entry.return_value = {"id": 42, "results": cached}
+        backfill = mocker.patch(
+            "abstracts_explorer.clustering.pipeline._backfill_missing_labels",
+            return_value={"flat_updated": 0, "hierarchy_updated": 0},
+        )
+
+        compute_clusters_with_cache(
+            embeddings,
+            database,
+            "model",
+            backfill_missing_labels=True,
+            show_progress=True,
+        )
+
+        backfill.assert_called_once_with(cached, embeddings, database, show_progress=True)
 
     def test_cache_hit_backfill_noop_does_not_update_entry(self, mocker):
         embeddings, database = self._deps()

@@ -61,7 +61,7 @@ src/abstracts_explorer/
 ├── database.py          # Database manager (SQLAlchemy)
 ├── db_models.py         # Paper, EmbeddingsMetadata, ClusteringCache
 ├── embeddings.py        # ChromaDB embeddings
-├── clustering/          # BERTopic pipeline, hierarchy levels, labeling
+├── clustering/          # BERTopic pipeline, hierarchy tree, labeling
 ├── rag.py               # RAG chat (pydantic-ai)
 ├── mcp_server.py        # MCP server (mcp MCPServer)
 ├── mcp_tools.py         # MCP tool schemas and execution

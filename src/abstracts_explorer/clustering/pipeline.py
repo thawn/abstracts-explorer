@@ -11,9 +11,7 @@ from abstracts_explorer.clustering.constants import (
     DEFAULT_CLUSTERING_METHOD,
     DEFAULT_CLUSTERING_PARAMS,
     DEFAULT_CLUSTER_N_COMPONENTS,
-    DEFAULT_LEVEL_SCALE,
     DEFAULT_N_COMPONENTS,
-    DEFAULT_NR_LEVELS,
     DEFAULT_REDUCTION_METHOD,
 )
 from abstracts_explorer.clustering.errors import ClusteringError
@@ -26,8 +24,6 @@ logger = logging.getLogger(__name__)
 
 def _effective_params(
     use_llm_labels: bool,
-    nr_levels: int,
-    level_scale: str,
     clustering_kwargs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build the effective parameter dictionary used as the cache key."""
@@ -35,8 +31,6 @@ def _effective_params(
     for key, value in (clustering_kwargs or {}).items():
         if key in params:
             params[key] = value
-    params["nr_levels"] = int(nr_levels)
-    params["level_scale"] = level_scale
     params["representation"] = "llm" if use_llm_labels else "ctfidf"
     return params
 
@@ -74,8 +68,6 @@ def perform_clustering(
     conferences: Optional[List[str]] = None,
     years: Optional[List[int]] = None,
     use_llm_labels: bool = True,
-    nr_levels: int = DEFAULT_NR_LEVELS,
-    level_scale: str = DEFAULT_LEVEL_SCALE,
     cluster_n_components: int = DEFAULT_CLUSTER_N_COMPONENTS,
     requests_per_minute: Optional[int] = None,
     **kwargs: Any,
@@ -101,10 +93,6 @@ def perform_clustering(
         Filter by years.
     use_llm_labels : bool, optional
         Whether to use LLM labels (default True).
-    nr_levels : int, optional
-        Number of hierarchy levels (default 10).
-    level_scale : str, optional
-        Level scaling mode (default ``"linear"``).
     cluster_n_components : int, optional
         UMAP components used before clustering (default 5).
     requests_per_minute : int, optional
@@ -134,8 +122,6 @@ def perform_clustering(
             cm = ClusteringManager(em, db)
             cm.load_embeddings(limit=limit, conferences=conferences, years=years)
             results = cm.fit(
-                nr_levels=nr_levels,
-                level_scale=level_scale,
                 use_llm_labels=use_llm_labels,
                 show_progress=show_progress,
                 cluster_n_components=cluster_n_components,
@@ -159,8 +145,6 @@ def compute_clusters_with_cache(
     years: Optional[List[int]] = None,
     use_llm_labels: bool = True,
     show_progress: bool = False,
-    nr_levels: int = DEFAULT_NR_LEVELS,
-    level_scale: str = DEFAULT_LEVEL_SCALE,
     cluster_n_components: int = DEFAULT_CLUSTER_N_COMPONENTS,
     backfill_missing_labels: bool = False,
     **clustering_kwargs: Any,
@@ -189,10 +173,6 @@ def compute_clusters_with_cache(
         Whether to use LLM labels (default True).
     show_progress : bool, optional
         Enable BERTopic verbose output.
-    nr_levels : int, optional
-        Number of hierarchy levels (default 10).
-    level_scale : str, optional
-        Level scaling mode (default ``"linear"``).
     cluster_n_components : int, optional
         UMAP components used before clustering (default 5).
     backfill_missing_labels : bool, optional
@@ -214,7 +194,7 @@ def compute_clusters_with_cache(
     cache_conference = conferences[0] if conferences and len(conferences) == 1 else None
     cache_year = years[0] if years and len(years) == 1 else None
     cache_collection = getattr(embeddings_manager, "collection_name", None)
-    params = _effective_params(use_llm_labels, nr_levels, level_scale, clustering_kwargs)
+    params = _effective_params(use_llm_labels, clustering_kwargs)
 
     if not force and not limit:
         should_backfill = backfill_missing_labels and use_llm_labels
@@ -247,7 +227,7 @@ def compute_clusters_with_cache(
         if cached:
             logger.info("Using cached BERTopic clustering results")
             if should_backfill and cached_entry is not None:
-                report = _backfill_missing_labels(cached, embeddings_manager, database)
+                report = _backfill_missing_labels(cached, embeddings_manager, database, show_progress=show_progress)
                 if report["flat_updated"] or report["hierarchy_updated"]:
                     database.update_clustering_cache_results(cached_entry["id"], cached)
             return cached
@@ -256,8 +236,6 @@ def compute_clusters_with_cache(
     cm = ClusteringManager(embeddings_manager, database)
     cm.load_embeddings(limit=limit, conferences=conferences, years=years)
     results = cm.fit(
-        nr_levels=nr_levels,
-        level_scale=level_scale,
         use_llm_labels=use_llm_labels,
         show_progress=show_progress,
         cluster_n_components=cluster_n_components,

@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 _RETRYABLE_LLM_STATUS_CODES = frozenset({408, 409, 429, 500, 502, 503, 504})
 _rate_limit_cooldown = RateLimitCooldown()
 
+DEFAULT_LABEL_MAX_TOKENS = 600
+MAX_LABEL_MAX_TOKENS = 2400
+
 
 def _status_code(error: Exception) -> Optional[int]:
     """Return an HTTP status code from an LLM client error, if present."""
@@ -89,14 +92,15 @@ def generate_llm_label(
     embeddings_manager: Any,
     system_prompt: str,
     user_prompt: str,
-    max_tokens: int = 200,
+    max_tokens: int = DEFAULT_LABEL_MAX_TOKENS,
 ) -> str:
     """
     Generate one cluster label with retries.
 
     Empty responses, transient network errors, and retryable HTTP statuses are
     retried with exponential backoff. Non-retryable failures and exhausted
-    retries are raised to the caller.
+    retries are raised to the caller. After each empty response the token
+    budget doubles, up to :data:`MAX_LABEL_MAX_TOKENS`.
 
     Parameters
     ----------
@@ -107,7 +111,9 @@ def generate_llm_label(
     user_prompt : str
         User message for the LLM.
     max_tokens : int, optional
-        Maximum number of tokens to generate (default 200).
+        Base maximum number of tokens to generate (default
+        :data:`DEFAULT_LABEL_MAX_TOKENS`). Doubles after every empty response,
+        capped at :data:`MAX_LABEL_MAX_TOKENS`.
 
     Returns
     -------
@@ -130,7 +136,9 @@ def generate_llm_label(
     retry_max_delay = config.llm_retry_max_delay
 
     last_error: Optional[Exception] = None
+    empty_failures = 0
     for attempt in range(1, max_attempts + 1):
+        current_max_tokens = min(max_tokens * (2**empty_failures), MAX_LABEL_MAX_TOKENS)
         _rate_limit_cooldown.wait()
         try:
             content = chat_completion_text(
@@ -139,11 +147,12 @@ def generate_llm_label(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 temperature=0.3,
-                max_tokens=max_tokens,
+                max_tokens=current_max_tokens,
                 timeout=config.llm_request_timeout,
                 reasoning_effort="low",
             )
             if not content:
+                empty_failures += 1
                 raise ValueError("LLM returned empty content")
             return content.strip().strip("\"'")
         except Exception as error:
@@ -156,19 +165,21 @@ def generate_llm_label(
                 delay = retry_after if retry_after is not None else config.llm_rate_limit_delay
                 _rate_limit_cooldown.defer(delay)
                 logger.warning(
-                    "Cluster-label LLM call rate-limited (attempt %d/%d): %s; "
+                    "Cluster-label LLM call rate-limited (attempt %d/%d, max_tokens=%d): %s; "
                     "pausing all LLM label calls for %.1fs",
                     attempt,
                     max_attempts,
+                    current_max_tokens,
                     error,
                     delay,
                 )
             else:
                 delay = min(retry_base_delay * (2 ** (attempt - 1)), retry_max_delay)
                 logger.warning(
-                    "Cluster-label LLM call failed (attempt %d/%d): %s; retrying in %.1fs",
+                    "Cluster-label LLM call failed (attempt %d/%d, max_tokens=%d): %s; " "retrying in %.1fs",
                     attempt,
                     max_attempts,
+                    current_max_tokens,
                     error,
                     delay,
                 )

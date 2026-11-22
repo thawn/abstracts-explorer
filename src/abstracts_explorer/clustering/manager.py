@@ -15,9 +15,7 @@ from abstracts_explorer.clustering.constants import (
     DEFAULT_METRIC,
     DEFAULT_MIN_DIST,
     DEFAULT_N_NEIGHBORS,
-    DEFAULT_NR_LEVELS,
     DEFAULT_RANDOM_STATE,
-    DEFAULT_LEVEL_SCALE,
 )
 from abstracts_explorer.clustering.errors import ClusteringError
 from abstracts_explorer.clustering.hierarchy_levels import level_parent_descriptions, level_parent_labels
@@ -157,8 +155,6 @@ class ClusteringManager(LoadingMixin):
 
     def fit(
         self,
-        nr_levels: int = DEFAULT_NR_LEVELS,
-        level_scale: str = DEFAULT_LEVEL_SCALE,
         use_llm_labels: bool = True,
         show_progress: bool = False,
         cluster_n_components: int = DEFAULT_CLUSTER_N_COMPONENTS,
@@ -168,10 +164,6 @@ class ClusteringManager(LoadingMixin):
 
         Parameters
         ----------
-        nr_levels : int, optional
-            Number of hierarchy levels (default 10).
-        level_scale : str, optional
-            Level scaling mode (default ``"linear"``).
         use_llm_labels : bool, optional
             Whether flat and hierarchy topics use LLM labels (default True).
         show_progress : bool, optional
@@ -182,8 +174,8 @@ class ClusteringManager(LoadingMixin):
         Returns
         -------
         dict
-            Clustering results with points, statistics, flat fields, and
-            hierarchy levels.
+            Clustering results with points, statistics, flat fields, and the
+            full hierarchy tree.
         """
         if self.embeddings is None or self.paper_ids is None or self.metadatas is None:
             raise ClusteringError("No embeddings loaded. Call load_embeddings() first.")
@@ -244,8 +236,6 @@ class ClusteringManager(LoadingMixin):
             hierarchical_topics=hierarchical_topics,
             parent_labels=parent_labels,
             parent_descriptions=parent_descriptions,
-            nr_levels=nr_levels,
-            level_scale=level_scale,
         )
 
         self.results = results

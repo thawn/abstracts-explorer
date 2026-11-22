@@ -30,8 +30,6 @@ DEFAULT_CLUSTERING_PARAMS: Dict[str, Any] = {
     "n_neighbors": DEFAULT_N_NEIGHBORS,
     "min_dist": DEFAULT_MIN_DIST,
     "random_state": DEFAULT_RANDOM_STATE,
-    "nr_levels": DEFAULT_NR_LEVELS,
-    "level_scale": DEFAULT_LEVEL_SCALE,
     "representation": "llm",
     "pipeline_version": PIPELINE_VERSION,
 }
@@ -46,7 +44,8 @@ def clustering_params_for(use_llm_labels: bool = True, **overrides: Any) -> Dict
     use_llm_labels : bool, optional
         Whether flat and hierarchy topics use LLM labels (default True).
     **overrides
-        Parameter overrides, for example ``nr_levels`` or ``level_scale``.
+        Parameter overrides for clustering parameters only. Hierarchy level
+        presentation settings are intentionally not part of the cache key.
 
     Returns
     -------

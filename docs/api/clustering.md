@@ -9,7 +9,7 @@ imports Plotly; all rendering happens in the browser.
 - BERTopic with Agglomerative clustering (`distance_threshold=0.5`, ward,
   euclidean) on 5-D UMAP embeddings
 - 2-D UMAP coordinates for visualization
-- 10 linear hierarchy levels with per-level flat-topic mappings
+- Full BERTopic merge tree; hierarchy levels are derived on demand
 - LLM-generated labels for flat and merged topics, with retry and keyword
   fallback
 - Optional `Labeling clusters (LLM)` progress bar for flat-topic labeling;
@@ -17,7 +17,7 @@ imports Plotly; all rendering happens in the browser.
 - HTTP 429 handling honors `Retry-After` and pauses all LLM label calls for a
   shared cooldown, avoiding repeated retries against an exhausted quota
 - Base c-TF-IDF keyword extraction for every flat topic
-- Compact JSON cache (points, statistics, flat labels/keywords, hierarchy levels)
+- Compact JSON cache (points, statistics, flat labels/keywords, full hierarchy tree)
 - Export clustering results to JSON
 
 ## Quick Start
@@ -33,14 +33,27 @@ db = DatabaseManager()
 cm = ClusteringManager(em, db)
 n_papers = cm.load_embeddings()
 
-results = cm.fit(use_llm_labels=True, nr_levels=10)
+results = cm.fit(use_llm_labels=True)
 print(results["statistics"])
-print(len(results["hierarchy"]["levels"]))
+print(len(results["hierarchy"]["tree"]))
+
+from abstracts_explorer.clustering import derive_hierarchy_levels
+levels = derive_hierarchy_levels(results, nr_levels=10, level_scale="linear")
+print(len(levels["levels"]))
 ```
 
 Use `compute_clusters_with_cache()` for the CLI/web/MCP workflow. Old
 Agglomerative + t-SNE caches are invalid; regenerate them with
 `abstracts-explorer clustering pre-generate`.
+
+Hierarchy presentation settings (`nr_levels` and `level_scale`) are not part
+of the clustering cache key. The web API and MCP tools derive levels from the
+cached tree, so changing the level count or scale does not require
+re-clustering.
+
+Clustering caches must contain `hierarchy.tree`. Caches without a tree are
+considered outdated and are rejected by the web API and MCP tools; regenerate
+them with `abstracts-explorer clustering pre-generate --force`.
 
 ## API Reference
 

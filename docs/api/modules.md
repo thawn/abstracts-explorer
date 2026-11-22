@@ -35,7 +35,7 @@ for stable imports:
 
 - `abstracts_explorer.db` — `DatabaseManager` mixins (`database.py` facade)
 - `abstracts_explorer.embeddings` — ChromaDB store, generation, queries, artifacts
-- `abstracts_explorer.clustering` — BERTopic + UMAP, hierarchy levels, labeling, cache
+- `abstracts_explorer.clustering` — BERTopic + UMAP, hierarchy tree and derived levels, labeling, cache
 - `abstracts_explorer.plugin` — plugin framework, models, registry, HTTP, persistence
 - `abstracts_explorer.mcp` — MCP server/resources/cache/tools (`mcp_server.py` facade)
 - `abstracts_explorer.rag` — agent, tool wrappers, conversation, extraction
