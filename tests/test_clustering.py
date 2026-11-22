@@ -3,6 +3,7 @@ Tests for the BERTopic clustering pipeline.
 """
 
 import json
+import logging
 from unittest.mock import Mock
 
 import numpy as np
@@ -653,7 +654,7 @@ class TestRepresentation:
 
         assert updated[0] == [(combine_label_description("Nice Label", "Papers about nice things."), 1)]
 
-    def test_extract_topics_falls_back_to_keywords(self, mocker):
+    def test_extract_topics_falls_back_to_keywords(self, mocker, caplog):
         model = self._topic_model()
         representation = ProjectLLMRepresentation(mocker.Mock())
         mocker.patch(
@@ -662,9 +663,14 @@ class TestRepresentation:
         )
 
         topics = {0: [("alpha", 1.0), ("beta", 0.9), ("gamma", 0.8)], 1: [("delta", 1.0)]}
-        updated = representation.extract_topics(model, ["d"], None, topics)
+        with caplog.at_level(logging.WARNING, logger="abstracts_explorer.clustering.representation"):
+            updated = representation.extract_topics(model, ["d"], None, topics)
 
         assert updated[0] == [("alpha & beta & gamma", 1)]
+        assert "LLM label failed for topic 0" in caplog.text
+        assert "using keyword fallback. Prompt:" in caplog.text
+        assert "alpha, beta, gamma" in caplog.text
+        assert "doc one" in caplog.text
 
     def test_extract_topics_empty_label_falls_back(self, mocker):
         model = self._topic_model()

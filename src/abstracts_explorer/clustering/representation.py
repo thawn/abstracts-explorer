@@ -167,7 +167,12 @@ class ProjectLLMRepresentation(BaseRepresentation):
                         max_tokens=300,
                     )
                 except Exception as exc:
-                    logger.warning("LLM label failed for topic %s: %s; using keyword fallback", topic, exc)
+                    logger.warning(
+                        "LLM label failed for topic %s: %s; using keyword fallback. Prompt:\n%s",
+                        topic,
+                        exc,
+                        prompt,
+                    )
                     response = ""
 
                 label, description = parse_llm_label_response(response)
