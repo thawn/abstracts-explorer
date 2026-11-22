@@ -227,6 +227,32 @@ REGISTRY_REPOSITORY=ghcr.io/thawn/abstracts-data
 
 See [Registry documentation](registry.md) for complete usage instructions.
 
+### OpenReview Authentication (ICLR)
+
+The ICLR downloader uses OpenReview for years 2017–2019. The OpenReview API
+can be protected by a bot challenge; logging in with an account may avoid it.
+When an unauthenticated request is rejected and no credentials are configured,
+the downloader prompts for an OpenReview email and password in an interactive
+terminal. Leave the email empty to skip the prompt and use the Semantic Scholar
+fallback instead. In non-interactive environments, configure the variables
+below or pass the matching `--openreview-*` command-line options.
+
+- **OPENREVIEW_EMAIL**: OpenReview account email.
+- **OPENREVIEW_PASSWORD**: OpenReview account password.
+- **OPENREVIEW_TOKEN**: Existing OpenReview bearer token. Takes precedence over
+  email/password.
+
+The same values can be passed per command with `--openreview-email`,
+`--openreview-password`, and `--openreview-token`. Prefer environment variables
+or `.env` for the password so it does not appear in shell history.
+
+```bash
+# .env file — OpenReview authentication
+OPENREVIEW_EMAIL=you@example.org
+OPENREVIEW_PASSWORD=your_password
+# OPENREVIEW_TOKEN=alternative_existing_token
+```
+
 ## Example Configurations
 
 ### Local Development (SQLite)

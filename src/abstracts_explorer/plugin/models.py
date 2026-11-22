@@ -7,7 +7,7 @@ plugins, plus author/keyword serialization helpers used by the database layer.
 
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ValidationError, field_validator
 
@@ -40,8 +40,8 @@ class LightweightPaper(BaseModel):
 
     Optional Fields
     ---------------
-    original_id : int
-        Paper ID from the original source
+    original_id : int or str
+        Paper ID from the original source (numeric ID or source slug/hash).
     paper_pdf_url : str
         URL to paper PDF
     poster_image_url : str
@@ -70,7 +70,7 @@ class LightweightPaper(BaseModel):
     conference: str
 
     # Optional fields
-    original_id: Optional[int] = None
+    original_id: Optional[Union[int, str]] = None
     paper_pdf_url: Optional[str] = None
     poster_image_url: Optional[str] = None
     url: Optional[str] = None
