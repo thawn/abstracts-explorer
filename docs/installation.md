@@ -142,6 +142,9 @@ This command copies the necessary files from `node_modules` to `src/abstracts_ex
 
 ## Optional Dependencies
 
+The extras below install Python packages. The optional Ollaya chat guard runs
+as a separate Podman container and does not add a Python extra.
+
 You can install specific groups of optional dependencies:
 
 ```bash
@@ -157,6 +160,60 @@ uv sync --extra docs
 # All optional dependencies
 uv sync --all-extras
 ```
+
+### Ollaya Chat Input Guard (Optional, external)
+
+Ollaya is not a Python extra. It is a separate CPU-only container used only
+when `GUARD_ENABLED=true`. It provides the optional guard that classifies chat
+input before the RAG agent runs. The guard is fail-open: if Ollaya is not
+running, chat still works.
+
+Requirements: Podman.
+
+Pull the guard model once:
+
+```bash
+podman volume create abstracts-ollaya
+
+podman run --rm \
+  -v abstracts-ollaya:/home/ollaya/.ollaya \
+  ghcr.io/ollaya-dev/ollaya pull laya:multilingual
+```
+
+Start the server on loopback for a host-run development setup:
+
+```bash
+podman run -d --name abstracts-ollaya \
+  -p 127.0.0.1:11435:11435 \
+  -v abstracts-ollaya:/home/ollaya/.ollaya \
+  -e OLLAYA_HOST=0.0.0.0:11435 \
+  -e OLLAYA_PRELOAD=laya:multilingual \
+  -e OLLAYA_KEEP_ALIVE=-1 \
+  -e OLLAYA_MAX_LOADED_MODELS=1 \
+  -e OLLAYA_THREADS=4 \
+  -e OLLAYA_API_KEY=local-dev-key \
+  ghcr.io/ollaya-dev/ollaya
+```
+
+Enable the guard in `.env`:
+
+```bash
+GUARD_ENABLED=true
+GUARD_BACKEND_URL=http://127.0.0.1:11435
+GUARD_API_KEY=local-dev-key
+GUARD_MODEL=laya:multilingual
+GUARD_TIMEOUT=2.0
+GUARD_TOPIC_THRESHOLD=0.8
+GUARD_JAILBREAK_THRESHOLD=0.8
+```
+
+`OLLAYA_API_KEY` and `GUARD_API_KEY` must match. Keep `GUARD_ENABLED=false`
+if you do not want the guard.
+
+For the full host-development walkthrough, see
+[Local Ollaya Guard](contributing.md#5-optional-local-ollaya-guard). For the
+containerized app stack, see
+[Docker and Podman Setup](docker.md#optional-chat-input-guard-ollaya).
 
 ## Verify Installation
 
