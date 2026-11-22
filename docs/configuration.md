@@ -32,8 +32,8 @@ nano .env
 - **CHAT_MAX_TOKENS**: Maximum tokens in LLM responses (default: `2000`)
 - **CLUSTER_LABEL_MODEL**: Chat model used to auto-generate cluster labels during clustering (default: `alias-fast`)
 - **LLM_MAX_ATTEMPTS**: Maximum attempts for one cluster-label LLM request (default: `6`). Set to `1` to disable retries.
-- **LLM_RETRY_BASE_DELAY**: Base delay in seconds for exponential backoff between retries (default: `1.0`)
-- **LLM_RETRY_MAX_DELAY**: Maximum delay in seconds between retries (default: `10.0`)
+- **LLM_RETRY_BASE_DELAY**: Base delay in seconds for exponential backoff between retries (default: `2.0`)
+- **LLM_RETRY_MAX_DELAY**: Maximum delay in seconds between retries (default: `3600.0`)
 - **LLM_RATE_LIMIT_DELAY**: Delay in seconds applied after HTTP `429` responses when the backend does not send a `Retry-After` header (default: `60.0`). The delay is shared by all cluster-label calls in the process.
 
 ### Embedding Model Settings
