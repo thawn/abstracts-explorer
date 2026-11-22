@@ -864,9 +864,10 @@ class TestTopicEvolutionAndRelevance:
         assert result["topic"] == "deep learning"
         assert mock_db.search.call_args.kwargs["where_filters"] == filters
 
+    @patch("abstracts_explorer.mcp.tools.visualization.derive_hierarchy_levels")
     @patch("abstracts_explorer.mcp.resources._get_shared_database")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
-    def test_get_cluster_visualization(self, mock_config, mock_get_db):
+    def test_get_cluster_visualization(self, mock_config, mock_get_db, mock_derive):
         mock_config.return_value = Mock(collection_name="papers", embedding_model="test-model")
         mock_db = Mock()
         mock_get_db.return_value = mock_db
@@ -882,20 +883,66 @@ class TestTopicEvolutionAndRelevance:
             "cluster_descriptions": {"0": "First cluster", "1": "Second cluster"},
         }
 
+        levels = []
+        for index in range(10):
+            levels.append(
+                {
+                    "level": index,
+                    "mapping": {"0": index * 10, "1": index * 10 + 1},
+                    "clusters": [
+                        {
+                            "id": index * 10,
+                            "label": f"Level {index} A",
+                            "description": f"Level {index} first",
+                            "size": 1,
+                            "center": {"x": float(index), "y": float(index)},
+                        },
+                        {
+                            "id": index * 10 + 1,
+                            "label": f"Level {index} B",
+                            "description": f"Level {index} second",
+                            "size": 1,
+                            "center": {"x": float(index + 1), "y": float(index + 1)},
+                        },
+                    ],
+                }
+            )
+        mock_derive.return_value = {"levels": levels}
+
         from abstracts_explorer.mcp_server import get_cluster_visualization
 
         result = json.loads(get_cluster_visualization(conferences=["NeurIPS"]))
 
         assert result["n_dimensions"] == 2
         assert result["n_points"] == 2
-        assert result["cluster_centers"]["0"] == {"x": 0.0, "y": 0.0}
-        assert result["cluster_labels"] == {"0": "Cluster A", "1": "Cluster B"}
-        assert result["cluster_descriptions"] == {"0": "First cluster", "1": "Second cluster"}
+        assert [point["cluster"] for point in result["points"]] == [90, 91]
+        assert result["cluster_centers"]["90"] == {"x": 9.0, "y": 9.0}
+        assert result["cluster_labels"] == {"90": "Level 9 A", "91": "Level 9 B"}
+        assert result["cluster_descriptions"] == {"90": "Level 9 first", "91": "Level 9 second"}
+        assert result["statistics"]["n_clusters"] == 2
         mock_db.get_clustering_cache.assert_called_once()
 
     @patch("abstracts_explorer.mcp.resources._get_shared_database")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
-    def test_get_cluster_visualization_renumbers_multiple_conferences(self, mock_config, mock_get_db):
+    def test_get_cluster_visualization_requires_hierarchy_tree(self, mock_config, mock_get_db):
+        mock_config.return_value = Mock(collection_name="papers", embedding_model="test-model")
+        mock_db = Mock()
+        mock_get_db.return_value = mock_db
+        mock_db.get_clustering_cache.return_value = {
+            "points": [{"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0}],
+            "statistics": {"n_clusters": 1, "total_papers": 1},
+            "hierarchy": {"method": "bertopic"},
+        }
+
+        from abstracts_explorer.mcp_server import get_cluster_visualization
+
+        with pytest.raises(ToolError, match="missing their hierarchy tree"):
+            get_cluster_visualization(conferences=["NeurIPS"])
+
+    @patch("abstracts_explorer.mcp.tools.visualization._select_visualization_level")
+    @patch("abstracts_explorer.mcp.resources._get_shared_database")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
+    def test_get_cluster_visualization_renumbers_multiple_conferences(self, mock_config, mock_get_db, mock_select):
         mock_config.return_value = Mock(collection_name="papers", embedding_model="test-model")
         mock_db = Mock()
         mock_get_db.return_value = mock_db
@@ -913,6 +960,32 @@ class TestTopicEvolutionAndRelevance:
                 "cluster_centers": {"0": {"x": 5.0, "y": 5.0}},
                 "cluster_labels": {"0": "Second"},
                 "cluster_descriptions": {"0": "Second cluster"},
+            },
+        ]
+        mock_select.side_effect = [
+            {
+                "mapping": {"0": 10},
+                "clusters": [
+                    {
+                        "id": 10,
+                        "label": "First",
+                        "description": "First cluster",
+                        "size": 1,
+                        "center": {"x": 0.0, "y": 0.0},
+                    }
+                ],
+            },
+            {
+                "mapping": {"0": 20},
+                "clusters": [
+                    {
+                        "id": 20,
+                        "label": "Second",
+                        "description": "Second cluster",
+                        "size": 1,
+                        "center": {"x": 5.0, "y": 5.0},
+                    }
+                ],
             },
         ]
 
