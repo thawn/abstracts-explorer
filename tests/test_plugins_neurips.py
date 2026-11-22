@@ -7,6 +7,7 @@ pre-2020 proceedings scraper.
 """
 
 import json
+import logging
 from unittest.mock import Mock, patch
 
 import pytest
@@ -176,6 +177,39 @@ class TestNeurIPSLegacyDownload:
         assert len(failures) == 1
         assert failures[0]["type"] == "paper"
         assert "def456" in failures[0]["url"]
+
+    @patch("requests.Session.get")
+    def test_download_legacy_skips_papers_without_authors(self, mock_get, tmp_path, caplog):
+        """Skip records with no authors without recording a retriable failure."""
+        output_path = tmp_path / "neurips_2019.json"
+        index_html = """
+        <ul class="paper-list">
+        <li><div class="paper-content">
+          <a href="/paper_files/paper/2019/hash/abc123-Abstract.html">Paper One</a>
+          <span class="paper-authors">Alice Smith</span>
+        </div></li>
+        <li><div class="paper-content">
+          <a href="/paper_files/paper/2019/hash/def456-Abstract.html">Paper Two</a>
+          <span class="paper-authors"></span>
+        </div></li>
+        </ul>
+        """
+        mock_get.side_effect = [
+            make_text_response(index_html),
+            make_text_response(abstract_html("Paper One", "First abstract.", "")),
+            make_text_response(abstract_html("Paper Two", "Second abstract.", "")),
+        ]
+
+        with caplog.at_level(logging.WARNING):
+            papers = NeurIPSDownloaderPlugin().download(
+                year=2019,
+                output_path=str(output_path),
+                max_workers=1,
+            )
+
+        assert [paper.title for paper in papers] == ["Paper One"]
+        assert FailureSidecar(str(output_path), "NeurIPS", 2019).load() == []
+        assert "Authors list cannot be empty" not in caplog.text
 
     @patch("requests.Session.get")
     def test_download_legacy_retries_failures_from_cache(self, mock_get, tmp_path):

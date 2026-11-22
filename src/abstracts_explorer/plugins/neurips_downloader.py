@@ -123,6 +123,7 @@ class NeurIPSDownloaderPlugin(JSONConferenceDownloaderPlugin):
         papers: List[LightweightPaper] = []
         failures: List[Dict[str, Any]] = []
         seen_urls: set[str] = set()
+        skipped_incomplete = 0
         max_workers = max(1, options.max_workers)
         logger.info(
             "Fetching abstracts for %d NeurIPS %d papers using %d workers...", len(entries), year, max_workers
@@ -148,14 +149,11 @@ class NeurIPSDownloaderPlugin(JSONConferenceDownloaderPlugin):
                     )
                     continue
                 if paper is None:
-                    failures.append(
-                        {
-                            "url": entry["url"],
-                            "type": "paper",
-                            "title": entry.get("title", ""),
-                            "authors": entry.get("authors", []),
-                        }
+                    logger.debug(
+                        "Skipping NeurIPS paper with missing required metadata: %s",
+                        entry["url"],
                     )
+                    skipped_incomplete += 1
                     continue
                 if paper.url in seen_urls:
                     continue
@@ -163,6 +161,12 @@ class NeurIPSDownloaderPlugin(JSONConferenceDownloaderPlugin):
                 papers.append(paper)
 
         FailureSidecar(output_path, self.conference_name, year).save(failures)
+        if skipped_incomplete:
+            logger.info(
+                "Skipped %d NeurIPS %d paper(s) with missing required metadata",
+                skipped_incomplete,
+                year,
+            )
         if not papers and entries:
             raise RuntimeError(f"No valid NeurIPS papers with abstracts found for {year}")
         logger.info("Successfully downloaded %d NeurIPS %d papers from proceedings", len(papers), year)
@@ -230,7 +234,7 @@ class NeurIPSDownloaderPlugin(JSONConferenceDownloaderPlugin):
                 paper_pdf_url=pdf_url or None,
             )
         except ValidationError as exc:
-            logger.warning("Skipping NeurIPS paper %s: %s", entry["url"], exc)
+            logger.debug("Skipping NeurIPS paper %s: %s", entry["url"], exc)
             return None
 
     @staticmethod
@@ -271,8 +275,10 @@ class NeurIPSDownloaderPlugin(JSONConferenceDownloaderPlugin):
                 logger.warning("Retry failed for NeurIPS paper %s: %s", entry.get("url"), exc)
                 remaining.append(entry)
                 continue
-            if paper is None or (paper.url and paper.url in seen_urls):
-                remaining.append(entry)
+            if paper is None:
+                logger.debug("Skipping incomplete NeurIPS paper %s", entry.get("url"))
+                continue
+            if paper.url and paper.url in seen_urls:
                 continue
             papers.append(paper)
             if paper.url:
