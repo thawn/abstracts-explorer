@@ -1224,6 +1224,12 @@ class TestRAGChatVisualizationExtraction:
                             {"x": 3.0, "y": 4.0, "cluster": 1, "title": "Paper B"},
                             {"x": 1.5, "y": 2.5, "cluster": 0, "title": "Paper C"},
                         ],
+                        "cluster_centers": {
+                            "0": {"x": 1.25, "y": 2.25},
+                            "1": {"x": 3.0, "y": 4.0},
+                        },
+                        "cluster_labels": {"0": "Cluster A", "1": "Cluster B"},
+                        "cluster_descriptions": {"0": "First cluster", "1": "Second cluster"},
                     }
                 ),
             }
@@ -1235,6 +1241,9 @@ class TestRAGChatVisualizationExtraction:
         assert viz["type"] == "cluster_visualization"
         assert len(viz["points"]) == 3
         assert viz["statistics"]["n_clusters"] == 2
+        assert viz["cluster_centers"]["0"] == {"x": 1.25, "y": 2.25}
+        assert viz["cluster_labels"] == {"0": "Cluster A", "1": "Cluster B"}
+        assert viz["cluster_descriptions"] == {"0": "First cluster", "1": "Second cluster"}
 
     def test_extract_visualizations_skips_errors(self):
         """Test that tool results with errors are skipped."""
