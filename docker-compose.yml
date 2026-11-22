@@ -73,7 +73,7 @@ services:
       - GUARD_API_KEY=${OLLAYA_API_KEY:-}
       - GUARD_MODEL=${GUARD_MODEL:-laya:multilingual}
       - GUARD_TIMEOUT=${GUARD_TIMEOUT:-2.0}
-      - GUARD_THRESHOLD=${GUARD_THRESHOLD:-0.8}
+      - GUARD_TOPIC_THRESHOLD=${GUARD_TOPIC_THRESHOLD:-0.8}
       - GUARD_JAILBREAK_THRESHOLD=${GUARD_JAILBREAK_THRESHOLD:-0.8}
       
       # Logging configuration

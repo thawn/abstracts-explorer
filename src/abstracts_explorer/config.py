@@ -161,7 +161,7 @@ class Config:
         Ollaya model used for the guard decision (default: ``laya:multilingual``).
     guard_timeout : float
         Per-check HTTP timeout in seconds (default: 2.0).
-    guard_threshold : float
+    guard_topic_threshold : float
         Minimum probability for the abuse/off-topic choice to block a message
         (default: 0.8).
     guard_jailbreak_threshold : float
@@ -341,7 +341,7 @@ class Config:
         self.guard_api_key = self._get_env("GUARD_API_KEY", default="")
         self.guard_model = self._get_env("GUARD_MODEL", default="laya:multilingual")
         self.guard_timeout = max(0.1, self._get_env_float("GUARD_TIMEOUT", default=2.0))
-        self.guard_threshold = min(1.0, max(0.0, self._get_env_float("GUARD_THRESHOLD", default=0.8)))
+        self.guard_topic_threshold = min(1.0, max(0.0, self._get_env_float("GUARD_TOPIC_THRESHOLD", default=0.8)))
         self.guard_jailbreak_threshold = min(
             1.0, max(0.0, self._get_env_float("GUARD_JAILBREAK_THRESHOLD", default=0.8))
         )
@@ -546,7 +546,7 @@ class Config:
             "guard_api_key": "***" if self.guard_api_key else "",
             "guard_model": self.guard_model,
             "guard_timeout": self.guard_timeout,
-            "guard_threshold": self.guard_threshold,
+            "guard_topic_threshold": self.guard_topic_threshold,
             "guard_jailbreak_threshold": self.guard_jailbreak_threshold,
             "guard_max_chars": self.guard_max_chars,
             "guard_refusal_message": self.guard_refusal_message,

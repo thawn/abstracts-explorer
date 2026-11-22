@@ -48,6 +48,10 @@ npm install
 npm run install:vendor
 ```
 
+To run the optional chat input guard during development, see
+[Local Ollaya Guard](contributing.md#5-optional-local-ollaya-guard) and the
+[chat input guard configuration](configuration.md#chat-input-guard-ollaya).
+
 ## Python Dependencies
 
 The package will automatically install the following dependencies when you run `uv sync`:

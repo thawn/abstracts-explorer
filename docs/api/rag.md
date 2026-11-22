@@ -393,7 +393,7 @@ added to the conversation history.
 The guard is optional and **fail-open**: if Ollaya is disabled, unreachable,
 times out, or returns an unexpected payload, the query proceeds normally.
 Configuration lives in `GUARD_ENABLED`, `GUARD_BACKEND_URL`, `GUARD_MODEL`,
-`GUARD_THRESHOLD`, `GUARD_JAILBREAK_THRESHOLD`, and related settings. See
+`GUARD_TOPIC_THRESHOLD`, `GUARD_JAILBREAK_THRESHOLD`, and related settings. See
 [Configuration](../configuration.md#chat-input-guard-ollaya) and
 [Docker and Podman Setup](../docker.md#optional-chat-input-guard-ollaya).
 

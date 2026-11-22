@@ -16,7 +16,7 @@ def _config(**overrides):
         "guard_api_key": "",
         "guard_model": "laya:multilingual",
         "guard_timeout": 2.0,
-        "guard_threshold": 0.8,
+        "guard_topic_threshold": 0.8,
         "guard_jailbreak_threshold": 0.8,
         "guard_max_chars": 1500,
         "guard_refusal_message": "",

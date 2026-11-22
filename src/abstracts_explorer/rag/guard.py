@@ -210,7 +210,7 @@ class InputGuard:
         if isinstance(jailbreak_answer, dict):
             jailbreak_probability = _as_probability(jailbreak_answer.get("noul"))
 
-        threshold = float(getattr(self.config, "guard_threshold", 0.8))
+        threshold = float(getattr(self.config, "guard_topic_threshold", 0.8))
         jailbreak_threshold = float(getattr(self.config, "guard_jailbreak_threshold", 0.8))
 
         blocked_by_scope = label == "B" and scope_probability >= threshold

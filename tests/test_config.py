@@ -65,7 +65,7 @@ def clean_config_env_vars():
         "GUARD_API_KEY",
         "GUARD_MODEL",
         "GUARD_TIMEOUT",
-        "GUARD_THRESHOLD",
+        "GUARD_TOPIC_THRESHOLD",
         "GUARD_JAILBREAK_THRESHOLD",
         "GUARD_MAX_CHARS",
         "GUARD_REFUSAL_MESSAGE",
@@ -252,7 +252,7 @@ class TestConfig:
         assert config.guard_api_key == ""
         assert config.guard_model == "laya:multilingual"
         assert config.guard_timeout == 2.0
-        assert config.guard_threshold == 0.8
+        assert config.guard_topic_threshold == 0.8
         assert config.guard_jailbreak_threshold == 0.8
         assert config.guard_max_chars == 1500
         assert config.guard_refusal_message == ""
@@ -442,7 +442,7 @@ CHAT_MAX_TOKENS=500
             "GUARD_API_KEY",
             "GUARD_MODEL",
             "GUARD_TIMEOUT",
-            "GUARD_THRESHOLD",
+            "GUARD_TOPIC_THRESHOLD",
             "GUARD_JAILBREAK_THRESHOLD",
             "GUARD_MAX_CHARS",
             "GUARD_REFUSAL_MESSAGE",
@@ -454,7 +454,7 @@ CHAT_MAX_TOKENS=500
         monkeypatch.setenv("GUARD_API_KEY", "secret")
         monkeypatch.setenv("GUARD_MODEL", "decima:guard-small")
         monkeypatch.setenv("GUARD_TIMEOUT", "1.5")
-        monkeypatch.setenv("GUARD_THRESHOLD", "0.7")
+        monkeypatch.setenv("GUARD_TOPIC_THRESHOLD", "0.7")
         monkeypatch.setenv("GUARD_JAILBREAK_THRESHOLD", "0.6")
         monkeypatch.setenv("GUARD_MAX_CHARS", "900")
         monkeypatch.setenv("GUARD_REFUSAL_MESSAGE", "Nope.")
@@ -466,7 +466,7 @@ CHAT_MAX_TOKENS=500
         assert config.guard_api_key == "secret"
         assert config.guard_model == "decima:guard-small"
         assert config.guard_timeout == 1.5
-        assert config.guard_threshold == 0.7
+        assert config.guard_topic_threshold == 0.7
         assert config.guard_jailbreak_threshold == 0.6
         assert config.guard_max_chars == 900
         assert config.guard_refusal_message == "Nope."

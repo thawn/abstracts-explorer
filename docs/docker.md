@@ -71,12 +71,12 @@ The install script also creates the `ollaya-api-key` Podman secret. It is
 injected into both containers (as `OLLAYA_API_KEY` and `GUARD_API_KEY`).
 Guard settings live in `abstracts-explorer.env`:
 
-```env
+```bash
 GUARD_ENABLED=true
 GUARD_BACKEND_URL=http://abstracts-ollaya:11435
 GUARD_MODEL=laya:multilingual
 GUARD_TIMEOUT=2.0
-GUARD_THRESHOLD=0.8
+GUARD_TOPIC_THRESHOLD=0.8
 GUARD_JAILBREAK_THRESHOLD=0.8
 ```
 
