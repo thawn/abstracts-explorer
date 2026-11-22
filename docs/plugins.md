@@ -101,13 +101,15 @@ uv run abstracts-explorer download --conference iclr --year 2019
   [Semantic Scholar](https://www.semanticscholar.org/) fallback
 - **Fields**: Full schema with abstracts; pre-2020 records lack session/poster metadata
 
-The OpenReview API can be protected by a bot challenge. Log in with an
-OpenReview account to improve reliability, using `--openreview-email` and
-`--openreview-password` (or the `OPENREVIEW_EMAIL`/`OPENREVIEW_PASSWORD`
-environment variables), or pass an existing bearer token with
-`--openreview-token`. When OpenReview is unavailable, the downloader falls back
-to the Semantic Scholar bulk search API. Use `--request-delay` to slow down
-requests if the fallback rate-limits.
+The OpenReview API can be protected by a bot challenge. When an
+unauthenticated request is rejected and no credentials are configured, the
+downloader prompts for an OpenReview email and password in an interactive
+terminal (leave the email empty to skip). You can also provide credentials
+up-front with `--openreview-email` and `--openreview-password` (or the
+`OPENREVIEW_EMAIL`/`OPENREVIEW_PASSWORD` environment variables), or pass an
+existing bearer token with `--openreview-token`. When OpenReview is unavailable,
+the downloader falls back to the Semantic Scholar bulk search API. Use
+`--request-delay` to slow down requests if the fallback rate-limits.
 
 ### ml4ps
 

@@ -231,8 +231,11 @@ See [Registry documentation](registry.md) for complete usage instructions.
 
 The ICLR downloader uses OpenReview for years 2017–2019. The OpenReview API
 can be protected by a bot challenge; logging in with an account may avoid it.
-When no credentials are configured, the downloader tries OpenReview anonymously
-and then falls back to Semantic Scholar.
+When an unauthenticated request is rejected and no credentials are configured,
+the downloader prompts for an OpenReview email and password in an interactive
+terminal. Leave the email empty to skip the prompt and use the Semantic Scholar
+fallback instead. In non-interactive environments, configure the variables
+below or pass the matching `--openreview-*` command-line options.
 
 - **OPENREVIEW_EMAIL**: OpenReview account email.
 - **OPENREVIEW_PASSWORD**: OpenReview account password.

@@ -79,6 +79,96 @@ class TestICLRPlugin:
             plugin.validate_year(2016)
 
     @patch("abstracts_explorer.config.get_config")
+    @patch("getpass.getpass", return_value="secret")
+    @patch("builtins.input", return_value="user@example.org")
+    @patch("requests.Session.post")
+    @patch("requests.Session.get")
+    def test_download_legacy_prompts_for_login_on_auth_error(
+        self,
+        mock_get,
+        mock_post,
+        mock_input,
+        mock_getpass,
+        mock_get_config,
+        monkeypatch,
+    ):
+        """Prompt for OpenReview credentials after an authentication failure."""
+        mock_get_config.return_value = Mock(
+            openreview_token="",
+            openreview_email="",
+            openreview_password="",
+        )
+        monkeypatch.setattr(ICLRDownloaderPlugin, "_prompt_is_available", staticmethod(lambda: True))
+        auth_error = requests.exceptions.HTTPError("403 Client Error", response=Mock(status_code=403))
+        login_response = Mock()
+        login_response.json.return_value = {"token": "openreview-token"}
+        mock_post.return_value = login_response
+        notes_response = Mock()
+        notes_response.json.return_value = {
+            "notes": [
+                {
+                    "id": "forum1",
+                    "forum": "forum1",
+                    "content": {
+                        "title": "OpenReview Paper",
+                        "abstract": "OpenReview abstract.",
+                        "authors": ["Alice Smith"],
+                    },
+                }
+            ]
+        }
+        mock_get.side_effect = [auth_error, notes_response]
+
+        papers = ICLRDownloaderPlugin().download(year=2019)
+
+        assert len(papers) == 1
+        mock_input.assert_called_once()
+        mock_getpass.assert_called_once()
+        assert mock_post.call_args.kwargs["json"] == {"id": "user@example.org", "password": "secret"}
+        assert mock_get.call_args.kwargs["headers"] == {"Authorization": "Bearer openreview-token"}
+
+    @patch("abstracts_explorer.config.get_config")
+    @patch("builtins.input", return_value="")
+    @patch("requests.Session.post")
+    @patch("requests.Session.get")
+    def test_download_legacy_declined_prompt_falls_back(
+        self,
+        mock_get,
+        mock_post,
+        mock_input,
+        mock_get_config,
+        monkeypatch,
+    ):
+        """Fall back to Semantic Scholar when the user declines the prompt."""
+        mock_get_config.return_value = Mock(
+            openreview_token="",
+            openreview_email="",
+            openreview_password="",
+        )
+        monkeypatch.setattr(ICLRDownloaderPlugin, "_prompt_is_available", staticmethod(lambda: True))
+        auth_error = requests.exceptions.HTTPError("403 Client Error", response=Mock(status_code=403))
+        s2_response = Mock()
+        s2_response.json.return_value = {
+            "data": [
+                {
+                    "paperId": "s2-1",
+                    "title": "S2 Paper",
+                    "abstract": "S2 abstract.",
+                    "authors": [{"name": "Carol White"}],
+                }
+            ],
+            "token": None,
+        }
+        mock_get.side_effect = [auth_error, s2_response]
+
+        papers = ICLRDownloaderPlugin().download(year=2019)
+
+        assert len(papers) == 1
+        assert papers[0].title == "S2 Paper"
+        mock_post.assert_not_called()
+        assert "api.semanticscholar.org" in mock_get.call_args.args[0]
+
+    @patch("abstracts_explorer.config.get_config")
     @patch("requests.Session.post")
     @patch("requests.Session.get")
     def test_download_legacy_uses_config_token(self, mock_get, mock_post, mock_get_config):

@@ -9,7 +9,10 @@ Years 2020 and later use the EventHosts virtual-site JSON API. Earlier years
 when the OpenReview API is unavailable (for example, behind a bot challenge).
 """
 
+import getpass
 import logging
+import sys
+from dataclasses import replace
 from typing import Any, Dict, List, Optional
 
 from pydantic import ValidationError
@@ -45,6 +48,21 @@ class ICLRDownloaderPlugin(JSONConferenceDownloaderPlugin):
     _USER_AGENT = "abstracts-explorer ICLR downloader"
     _SOURCE_LABEL = "ICLR proceedings"
     _OPENREVIEW_API_URL = "https://api.openreview.net"
+
+    def __init__(self, timeout: float = 30, verify_ssl: bool = True) -> None:
+        """
+        Initialize the ICLR downloader.
+
+        Parameters
+        ----------
+        timeout : float, optional
+            HTTP timeout in seconds (default: 30).
+        verify_ssl : bool, optional
+            Verify TLS certificates (default: True).
+        """
+        super().__init__(timeout=timeout, verify_ssl=verify_ssl)
+        self._prompted_openreview_credentials: Optional[tuple[str, str]] = None
+        self._openreview_prompt_declined = False
 
     def get_url(self, year: int) -> str:
         """
@@ -96,11 +114,34 @@ class ICLRDownloaderPlugin(JSONConferenceDownloaderPlugin):
 
     def _download_legacy(self, year: int, options: DownloadOptions) -> List[LightweightPaper]:
         """Load ICLR papers from OpenReview, falling back to Semantic Scholar."""
+        options = self._apply_prompted_credentials(options)
         try:
             papers = self._fetch_openreview(year, options)
         except RuntimeError as exc:
-            logger.warning("OpenReview download failed for ICLR %d: %s", year, exc)
             papers = []
+            needs_login = self._is_auth_error(exc) and not self._has_openreview_credentials(options)
+            if needs_login and self._prompt_is_available():
+                logger.info("OpenReview requires authentication for ICLR %d", year)
+                credentials = self._prompt_openreview_credentials()
+                if credentials:
+                    retry_options = replace(
+                        options,
+                        openreview_email=credentials[0],
+                        openreview_password=credentials[1],
+                    )
+                    try:
+                        papers = self._fetch_openreview(year, retry_options)
+                    except RuntimeError as retry_exc:
+                        logger.warning("OpenReview login retry failed for ICLR %d: %s", year, retry_exc)
+                else:
+                    logger.info("OpenReview login was skipped; falling back to Semantic Scholar.")
+            else:
+                logger.warning("OpenReview download failed for ICLR %d: %s", year, exc)
+                if needs_login:
+                    logger.info(
+                        "Set OPENREVIEW_EMAIL/OPENREVIEW_PASSWORD or pass "
+                        "--openreview-email/--openreview-password to authenticate."
+                    )
 
         if papers:
             logger.info("Successfully downloaded %d ICLR %d papers from OpenReview", len(papers), year)
@@ -112,6 +153,70 @@ class ICLRDownloaderPlugin(JSONConferenceDownloaderPlugin):
             raise RuntimeError(f"No valid ICLR papers with abstracts found for {year}")
         logger.info("Successfully downloaded %d ICLR %d papers from Semantic Scholar", len(papers), year)
         return papers
+
+    def _apply_prompted_credentials(self, options: DownloadOptions) -> DownloadOptions:
+        """Return options carrying credentials entered earlier in this session."""
+        if self._prompted_openreview_credentials and not (options.openreview_email or options.openreview_password):
+            email, password = self._prompted_openreview_credentials
+            return replace(options, openreview_email=email, openreview_password=password)
+        return options
+
+    def _has_openreview_credentials(self, options: DownloadOptions) -> bool:
+        """Return whether any OpenReview credentials are available."""
+        if self._prompted_openreview_credentials:
+            return True
+        if options.openreview_token or options.openreview_email or options.openreview_password:
+            return True
+        from abstracts_explorer.config import get_config
+
+        config = get_config()
+        return bool(config.openreview_token or (config.openreview_email and config.openreview_password))
+
+    @staticmethod
+    def _is_auth_error(exc: Exception) -> bool:
+        """Return whether *exc* looks like an OpenReview authentication failure."""
+        message = str(exc)
+        return "HTTP 401" in message or "HTTP 403" in message
+
+    @staticmethod
+    def _prompt_is_available() -> bool:
+        """Return whether an interactive prompt can be shown."""
+        stdin = getattr(sys, "stdin", None)
+        return bool(stdin is not None and hasattr(stdin, "isatty") and stdin.isatty())
+
+    def _prompt_openreview_credentials(self) -> Optional[tuple[str, str]]:
+        """
+        Prompt for OpenReview credentials once per download session.
+
+        Returns
+        -------
+        tuple of (str, str) or None
+            Email and password, or ``None`` when prompting is unavailable or
+            the user declines.
+        """
+        if self._prompted_openreview_credentials:
+            return self._prompted_openreview_credentials
+        if self._openreview_prompt_declined or not self._prompt_is_available():
+            return None
+
+        try:
+            print("OpenReview requires a login to download ICLR papers.")
+            print("Leave the email empty to skip and use Semantic Scholar instead.")
+            email = input("OpenReview email: ").strip()
+            if not email:
+                self._openreview_prompt_declined = True
+                return None
+            password = getpass.getpass("OpenReview password: ")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            self._openreview_prompt_declined = True
+            return None
+
+        if not password:
+            self._openreview_prompt_declined = True
+            return None
+        self._prompted_openreview_credentials = (email, password)
+        return self._prompted_openreview_credentials
 
     def _fetch_openreview(self, year: int, options: DownloadOptions) -> List[LightweightPaper]:
         """Fetch accepted papers from the OpenReview API."""
