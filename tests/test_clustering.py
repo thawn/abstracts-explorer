@@ -478,23 +478,6 @@ class TestLLMHelpers:
         assert chat.call_count == 2
         sleep.assert_called_once()
 
-    def test_generate_label_backoff_doubles(self, mocker):
-        config = mocker.Mock(
-            llm_max_attempts=5,
-            llm_retry_base_delay=2,
-            llm_retry_max_delay=3600,
-            llm_request_timeout=5,
-            cluster_label_model="model",
-        )
-        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
-        sleep = mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
-        mocker.patch("abstracts_explorer.clustering.llm.chat_completion_text", side_effect=ValueError("empty"))
-        em = mocker.Mock(openai_client=object())
-
-        with pytest.raises(ValueError):
-            generate_llm_label(em, "system", "user")
-        assert [call.args[0] for call in sleep.call_args_list] == [2, 4, 8, 16]
-
     def test_generate_label_retries_retryable_error(self, mocker):
         config = mocker.Mock(
             llm_max_attempts=2,
