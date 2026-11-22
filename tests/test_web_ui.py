@@ -2610,6 +2610,7 @@ class TestClusteringEndpoint:
             "points": [{"id": "test", "x": 1.0, "y": 2.0, "cluster": 0}],
             "statistics": {"n_clusters": 1, "total_papers": 1},
             "cluster_centers": {"0": {"x": 1.0, "y": 2.0}},
+            "hierarchy": {"method": "bertopic", "n_topics": 1, "tree": []},
         }
 
         with app.test_client() as client:
@@ -2689,22 +2690,14 @@ class TestClusteringEndpoint:
                     assert level["mapping"] == {"0": 10, "1": 10}
                     assert level["clusters"][0]["label"] == "Parent"
 
-    def test_compute_clusters_legacy_levels_fallback(self):
-        """Legacy cached levels are returned unchanged."""
+    def test_compute_clusters_rejects_outdated_cache(self):
+        """Cached rows without a hierarchy tree return an outdated-cache error."""
         from abstracts_explorer.web_ui.app import app
 
-        legacy_levels = [
-            {
-                "level": 0,
-                "max_distance": 0.1,
-                "mapping": {"0": 0, "1": 1},
-                "clusters": [],
-            }
-        ]
         cached_results = {
             "points": [],
             "statistics": {"n_clusters": 2},
-            "hierarchy": {"method": "bertopic", "nr_levels": 1, "levels": legacy_levels},
+            "hierarchy": {"method": "bertopic", "levels": []},
         }
 
         with app.test_client() as client:
@@ -2717,9 +2710,8 @@ class TestClusteringEndpoint:
 
                     response = client.post("/api/clusters/compute", json={})
 
-                    assert response.status_code == 200
-                    data = response.get_json()
-                    assert data["hierarchy"]["levels"] == legacy_levels
+                    assert response.status_code == 409
+                    assert "outdated" in response.get_json()["error"].lower()
 
     def test_compute_clusters_rejects_invalid_level_scale(self):
         """Invalid hierarchy level scale values are rejected."""
@@ -2770,6 +2762,7 @@ class TestClusteringEndpoint:
         cached_results = {
             "points": [],
             "statistics": {"n_clusters": 0, "total_papers": 0},
+            "hierarchy": {"method": "bertopic", "n_topics": 0, "tree": []},
         }
 
         with app.test_client() as client:

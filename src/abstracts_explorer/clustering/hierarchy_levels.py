@@ -54,36 +54,6 @@ def _compute_max_distances(
     return list(reversed(max_distances))
 
 
-def compute_level_max_distances(
-    hierarchical_topics: Any,
-    nr_levels: int,
-    level_scale: str = "linear",
-) -> List[float]:
-    """
-    Compute the maximum distance for each hierarchy level.
-
-    The computation mirrors BERTopic's ``visualize_hierarchical_documents``:
-    distances are split into ``nr_levels`` chunks and the last distance of
-    each chunk is used as that level's maximum.
-
-    Parameters
-    ----------
-    hierarchical_topics : pandas.DataFrame
-        Output of ``topic_model.hierarchical_topics()`` containing a
-        ``Distance`` column in BERTopic's returned order.
-    nr_levels : int
-        Requested number of levels.
-    level_scale : str, optional
-        ``"linear"`` (default) or ``"log"``/``"logarithmic"``.
-
-    Returns
-    -------
-    list of float
-        Ascending maximum distances, one per level.
-    """
-    return _compute_max_distances(hierarchical_topics["Distance"].to_list(), nr_levels, level_scale)
-
-
 def compute_level_max_distances_from_tree(
     tree: Sequence[Mapping[str, Any]],
     nr_levels: int,
@@ -109,100 +79,6 @@ def compute_level_max_distances_from_tree(
     ordered = sorted(tree, key=lambda row: int(row.get("id", -1)), reverse=True)
     distances = [float(row.get("distance", 0.0)) for row in ordered]
     return _compute_max_distances(distances, nr_levels, level_scale)
-
-
-def build_level_mapping(
-    hierarchical_topics: Any,
-    max_distance: float,
-    flat_topic_ids: Sequence[int],
-) -> Dict[int, int]:
-    """
-    Build the flat-topic to level-cluster mapping for one level.
-
-    This mirrors the mapping loop in BERTopic's
-    ``visualize_hierarchical_documents``.
-
-    Parameters
-    ----------
-    hierarchical_topics : pandas.DataFrame
-        Output of ``topic_model.hierarchical_topics()``.
-    max_distance : float
-        Maximum hierarchy distance for the level.
-    flat_topic_ids : sequence of int
-        Flat topic IDs to include in the mapping.
-
-    Returns
-    -------
-    dict
-        Mapping from flat topic ID to the cluster ID at the level. The
-        mapping is resolved transitively so every value is a final cluster ID.
-    """
-    mapping: Dict[int, int] = {int(topic): int(topic) for topic in flat_topic_ids}
-
-    if hierarchical_topics is None or len(hierarchical_topics) == 0:
-        return mapping
-
-    selection = hierarchical_topics.loc[hierarchical_topics["Distance"] <= max_distance, :].copy()
-    if selection.empty:
-        return mapping
-
-    selection["Parent_ID"] = selection["Parent_ID"].astype(int)
-    selection = selection.sort_values("Parent_ID")
-
-    for row in selection.itertuples(index=False):
-        parent_id = int(row.Parent_ID)
-        for topic in row.Topics:
-            mapping[int(topic)] = parent_id
-
-    changed = True
-    while changed:
-        changed = False
-        for key, value in list(mapping.items()):
-            resolved = mapping.get(value, value)
-            if resolved != value:
-                mapping[key] = resolved
-                changed = True
-
-    return mapping
-
-
-def build_level_mappings(
-    hierarchical_topics: Any,
-    flat_topic_ids: Sequence[int],
-    nr_levels: int,
-    level_scale: str = "linear",
-) -> List[Dict[str, Any]]:
-    """
-    Build all hierarchy level mappings.
-
-    Parameters
-    ----------
-    hierarchical_topics : pandas.DataFrame
-        Output of ``topic_model.hierarchical_topics()``.
-    flat_topic_ids : sequence of int
-        Flat topic IDs, including ``-1`` when outliers exist.
-    nr_levels : int
-        Requested number of levels.
-    level_scale : str, optional
-        ``"linear"`` (default) or ``"log"``/``"logarithmic"``.
-
-    Returns
-    -------
-    list of dict
-        One entry per level with ``level``, ``max_distance``, and ``mapping``
-        keys. Returns an empty list when no hierarchy is available.
-    """
-    max_distances = compute_level_max_distances(hierarchical_topics, nr_levels, level_scale)
-    levels: List[Dict[str, Any]] = []
-    for index, max_distance in enumerate(max_distances):
-        levels.append(
-            {
-                "level": index,
-                "max_distance": max_distance,
-                "mapping": build_level_mapping(hierarchical_topics, max_distance, flat_topic_ids),
-            }
-        )
-    return levels
 
 
 def build_level_mapping_from_tree(

@@ -708,12 +708,17 @@ def compute_clusters():
     )
 
     if cached:
-        if cached.get("hierarchy"):
-            cached["hierarchy"] = derive_hierarchy_levels(
-                cached,
-                nr_levels=hierarchy_levels,
-                level_scale=level_scale,
+        if "tree" not in (cached.get("hierarchy") or {}):
+            raise ApiError(
+                "Cached clustering data is outdated. Regenerate it with "
+                "'abstracts-explorer clustering pre-generate --force'.",
+                409,
             )
+        cached["hierarchy"] = derive_hierarchy_levels(
+            cached,
+            nr_levels=hierarchy_levels,
+            level_scale=level_scale,
+        )
         return jsonify(cached)
 
     return (

@@ -51,10 +51,9 @@ of the clustering cache key. The web API and MCP tools derive levels from the
 cached tree, so changing the level count or scale does not require
 re-clustering.
 
-Existing cache rows that only contain legacy hierarchy levels can be upgraded
-in place with the one-off `scripts/migrate_full_hierarchy.py` migration. It
-reconstructs the tree, reuses recoverable labels/descriptions, and leaves the
-rest for the normal backfill.
+Clustering caches must contain `hierarchy.tree`. Caches without a tree are
+considered outdated and are rejected by the web API and MCP tools; regenerate
+them with `abstracts-explorer clustering pre-generate --force`.
 
 ## API Reference
 

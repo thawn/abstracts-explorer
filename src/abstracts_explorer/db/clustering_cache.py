@@ -17,15 +17,6 @@ from abstracts_explorer.db.session import SessionMixin
 
 logger = logging.getLogger(__name__)
 
-_LEGACY_LEVEL_PARAMS = frozenset({"nr_levels", "level_scale"})
-
-
-def _canonical_clustering_params(params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Return cache-key parameters without legacy hierarchy-level settings."""
-    if params is None:
-        return None
-    return {key: value for key, value in params.items() if key not in _LEGACY_LEVEL_PARAMS}
-
 
 class ClusteringCacheMixin(SessionMixin):
     """Clustering result cache repository."""
@@ -83,12 +74,12 @@ class ClusteringCacheMixin(SessionMixin):
                 return result
             return None
 
-        params_json = json.dumps(_canonical_clustering_params(clustering_params), sort_keys=True)
+        params_json = json.dumps(clustering_params, sort_keys=True)
         for result in results:
             if result.clustering_params is None:
                 continue
             cached_params = json.loads(str(result.clustering_params))
-            cached_params_json = json.dumps(_canonical_clustering_params(cached_params), sort_keys=True)
+            cached_params_json = json.dumps(cached_params, sort_keys=True)
             if cached_params_json == params_json:
                 return result
 
@@ -320,6 +311,48 @@ class ClusteringCacheMixin(SessionMixin):
                 raise ValueError(f"Clustering cache entry {cache_id} not found")
             self.session.commit()
             logger.info("Updated clustering cache entry %s with backfilled labels", cache_id)
+        except Exception as e:
+            raise self._db_error(f"Failed to update clustering cache entry {cache_id}", e)
+
+    def update_clustering_cache_entry(
+        self,
+        cache_id: int,
+        *,
+        results: Optional[Dict[str, Any]] = None,
+        clustering_params: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Update the stored results and/or clustering parameters of a cache row.
+
+        Parameters
+        ----------
+        cache_id : int
+            Primary key of the cache row to update.
+        results : dict, optional
+            Replacement clustering results payload.
+        clustering_params : dict, optional
+            Replacement clustering parameter dictionary.
+
+        Raises
+        ------
+        DatabaseError
+            If the row does not exist or the update fails.
+        """
+        values: Dict[str, Any] = {}
+        if results is not None:
+            values["results_json"] = json.dumps(results)
+        if clustering_params is not None:
+            values["clustering_params"] = json.dumps(clustering_params)
+        if not values:
+            return
+        try:
+            stmt = update(ClusteringCache).where(ClusteringCache.id == cache_id).values(**values)
+            result = self.session.execute(stmt)
+            rowcount = getattr(result, "rowcount", 0) or 0
+            if rowcount == 0:
+                raise ValueError(f"Clustering cache entry {cache_id} not found")
+            self.session.commit()
+            logger.info("Updated clustering cache entry %s", cache_id)
         except Exception as e:
             raise self._db_error(f"Failed to update clustering cache entry {cache_id}", e)
 

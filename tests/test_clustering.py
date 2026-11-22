@@ -19,11 +19,8 @@ from abstracts_explorer.clustering import (
     clustering_params_for,
 )
 from abstracts_explorer.clustering.hierarchy_levels import (
-    build_level_mapping,
     build_level_mapping_from_tree,
-    build_level_mappings,
     build_level_mappings_from_tree,
-    compute_level_max_distances,
     compute_level_max_distances_from_tree,
     level_parent_descriptions,
     level_parent_labels,
@@ -45,7 +42,6 @@ from abstracts_explorer.clustering.representation import ProjectLLMRepresentatio
 from abstracts_explorer.clustering.results import (
     build_cluster_centers,
     build_clustering_results,
-    build_hierarchy,
     build_hierarchy_levels,
     build_hierarchy_tree,
     build_points,
@@ -149,43 +145,6 @@ class TestConstants:
 class TestHierarchyLevels:
     """Tests for the BERTopic hierarchy-level adapter."""
 
-    def test_compute_level_max_distances_linear(self):
-        distances = compute_level_max_distances(sample_hierarchy(), 3, "linear")
-        assert distances == [0.1, 0.2, 0.3]
-
-    def test_compute_level_max_distances_clamps_levels(self):
-        distances = compute_level_max_distances(sample_hierarchy(), 10, "linear")
-        assert distances == [0.1, 0.2, 0.3]
-
-    def test_compute_level_max_distances_log(self):
-        distances = compute_level_max_distances(sample_hierarchy(), 2, "log")
-        assert len(distances) == 2
-        assert distances == sorted(distances)
-
-    def test_compute_level_max_distances_empty(self):
-        assert compute_level_max_distances(pd.DataFrame({"Distance": []}), 3) == []
-        assert compute_level_max_distances(sample_hierarchy(), 0) == []
-
-    def test_compute_level_max_distances_invalid_scale(self):
-        with pytest.raises(ValueError):
-            compute_level_max_distances(sample_hierarchy(), 3, "quadratic")
-
-    def test_build_level_mapping_transitive(self):
-        mapping = build_level_mapping(sample_hierarchy(), 0.3, [0, 1, 2, 3])
-        assert mapping == {0: 6, 1: 6, 2: 6, 3: 6}
-
-    def test_build_level_mapping_partial(self):
-        mapping = build_level_mapping(sample_hierarchy(), 0.1, [0, 1, 2, 3])
-        assert mapping == {0: 4, 1: 4, 2: 2, 3: 3}
-
-    def test_build_level_mapping_empty(self):
-        assert build_level_mapping(None, 0.5, [0, 1]) == {0: 0, 1: 1}
-
-    def test_build_level_mappings(self):
-        levels = build_level_mappings(sample_hierarchy(), [0, 1, 2, 3], 3, "linear")
-        assert [level["level"] for level in levels] == [0, 1, 2]
-        assert [level["max_distance"] for level in levels] == [0.1, 0.2, 0.3]
-
     def test_level_parent_labels(self):
         labels = level_parent_labels(sample_hierarchy())
         assert labels == {4: "alpha_beta", 5: "gamma_delta", 6: "alpha_beta_gamma_delta"}
@@ -201,19 +160,15 @@ class TestHierarchyLevels:
         assert descriptions[5] == ""
         assert level_parent_descriptions(None) == {}
 
-    def test_tree_level_helpers_match_dataframe_helpers(self):
+    def test_tree_level_helpers(self):
         hierarchy = sample_hierarchy()
         tree = build_hierarchy_tree(hierarchy, level_parent_labels(hierarchy), {})
         assert [node["id"] for node in tree] == [6, 5, 4]
-        assert compute_level_max_distances_from_tree(tree, 3, "linear") == compute_level_max_distances(
-            hierarchy, 3, "linear"
-        )
-        assert build_level_mappings_from_tree(tree, [0, 1, 2, 3], 3, "linear") == build_level_mappings(
-            hierarchy, [0, 1, 2, 3], 3, "linear"
-        )
-        assert build_level_mapping_from_tree(tree, 0.1, [0, 1, 2, 3]) == build_level_mapping(
-            hierarchy, 0.1, [0, 1, 2, 3]
-        )
+        assert compute_level_max_distances_from_tree(tree, 3, "linear") == [0.1, 0.2, 0.3]
+        levels = build_level_mappings_from_tree(tree, [0, 1, 2, 3], 3, "linear")
+        assert [level["level"] for level in levels] == [0, 1, 2]
+        assert [level["max_distance"] for level in levels] == [0.1, 0.2, 0.3]
+        assert build_level_mapping_from_tree(tree, 0.1, [0, 1, 2, 3]) == {0: 4, 1: 4, 2: 2, 3: 3}
 
 
 class TestResults:
@@ -243,7 +198,7 @@ class TestResults:
         assert centers[0] == {"x": 1.0, "y": 1.0}
         assert centers[1] == {"x": 10.0, "y": 10.0}
 
-    def test_build_hierarchy(self):
+    def test_build_hierarchy_levels_from_tree(self):
         points = [
             {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0},
             {"id": "p2", "x": 2.0, "y": 2.0, "cluster": 1},
@@ -251,16 +206,19 @@ class TestResults:
             {"id": "p4", "x": 12.0, "y": 12.0, "cluster": 3},
         ]
         stats = build_statistics([0, 1, 2, 3])
-        hierarchy = build_hierarchy(
-            hierarchical_topics=sample_hierarchy(),
+        tree = build_hierarchy_tree(
+            sample_hierarchy(),
+            level_parent_labels(sample_hierarchy()),
+            {4: "Papers about alpha and beta."},
+        )
+        hierarchy = build_hierarchy_levels(
+            tree=tree,
             flat_topic_ids=[0, 1, 2, 3],
             flat_labels={0: "A", 1: "B", 2: "C", 3: "D"},
             flat_descriptions={0: "Papers about A.", 1: "Papers about B."},
             flat_keywords={0: ["a"], 1: ["b"], 2: ["c"], 3: ["d"]},
             statistics=stats,
             points=points,
-            parent_labels=level_parent_labels(sample_hierarchy()),
-            parent_descriptions={4: "Papers about alpha and beta."},
             nr_levels=3,
         )
         assert hierarchy["method"] == "bertopic"
@@ -283,9 +241,9 @@ class TestResults:
         assert len(level2["clusters"]) == 1
         assert level2["clusters"][0]["id"] == 6
 
-    def test_build_hierarchy_empty(self):
-        hierarchy = build_hierarchy(
-            hierarchical_topics=pd.DataFrame({"Distance": []}),
+    def test_build_hierarchy_levels_empty_tree(self):
+        hierarchy = build_hierarchy_levels(
+            tree=[],
             flat_topic_ids=[0, 1],
             flat_labels={0: "A", 1: "B"},
             flat_keywords={0: ["a"], 1: ["b"]},
@@ -294,45 +252,9 @@ class TestResults:
                 {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0},
                 {"id": "p2", "x": 1.0, "y": 1.0, "cluster": 1},
             ],
-            parent_labels={},
             nr_levels=10,
         )
         assert hierarchy["levels"] == []
-
-    def test_build_hierarchy_levels_from_tree_matches_dataframe_wrapper(self):
-        points = [
-            {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0},
-            {"id": "p2", "x": 2.0, "y": 2.0, "cluster": 1},
-            {"id": "p3", "x": 10.0, "y": 10.0, "cluster": 2},
-            {"id": "p4", "x": 12.0, "y": 12.0, "cluster": 3},
-        ]
-        stats = build_statistics([0, 1, 2, 3])
-        hierarchy = sample_hierarchy()
-        parent_labels = level_parent_labels(hierarchy)
-        tree = build_hierarchy_tree(hierarchy, parent_labels, {4: "Papers about alpha and beta."})
-        from_tree = build_hierarchy_levels(
-            tree=tree,
-            flat_topic_ids=[0, 1, 2, 3],
-            flat_labels={0: "A", 1: "B", 2: "C", 3: "D"},
-            flat_descriptions={0: "Papers about A."},
-            flat_keywords={0: ["a"], 1: ["b"], 2: ["c"], 3: ["d"]},
-            statistics=stats,
-            points=points,
-            nr_levels=3,
-        )
-        from_dataframe = build_hierarchy(
-            hierarchical_topics=hierarchy,
-            flat_topic_ids=[0, 1, 2, 3],
-            flat_labels={0: "A", 1: "B", 2: "C", 3: "D"},
-            flat_descriptions={0: "Papers about A."},
-            flat_keywords={0: ["a"], 1: ["b"], 2: ["c"], 3: ["d"]},
-            statistics=stats,
-            points=points,
-            parent_labels=parent_labels,
-            parent_descriptions={4: "Papers about alpha and beta."},
-            nr_levels=3,
-        )
-        assert from_tree == from_dataframe
 
     def test_derive_hierarchy_levels_uses_tree(self):
         results = {
@@ -363,9 +285,9 @@ class TestResults:
         assert len(derived["levels"]) == 3
         assert derived["levels"][0]["mapping"] == {"0": 4, "1": 4, "2": 2, "3": 3}
 
-    def test_derive_hierarchy_levels_returns_legacy_hierarchy(self):
-        legacy = {"method": "bertopic", "nr_levels": 2, "levels": [{"level": 0}]}
-        assert derive_hierarchy_levels({"hierarchy": legacy}) is legacy
+    def test_derive_hierarchy_levels_requires_tree(self):
+        with pytest.raises(ClusteringError, match="missing their hierarchy tree"):
+            derive_hierarchy_levels({"hierarchy": {"method": "bertopic"}})
 
     def test_build_clustering_results_schema(self):
         embeddings = np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0]])
@@ -981,7 +903,7 @@ def _fake_results():
         "cluster_centers": {0: {"x": 0, "y": 0}},
         "cluster_labels": {0: "A"},
         "cluster_keywords": {0: ["a"]},
-        "hierarchy": {"levels": [], "n_topics": 1},
+        "hierarchy": {"method": "bertopic", "tree": [], "n_topics": 1},
     }
 
 

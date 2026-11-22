@@ -41,16 +41,6 @@ def _set_map_value(mapping: Dict[Any, Any], cluster_id: int, value: Any) -> None
         mapping[cluster_id] = value
 
 
-def _level_members(level: Mapping[str, Any]) -> Dict[int, frozenset[int]]:
-    """Invert one hierarchy level's flat-to-cluster mapping."""
-    members: Dict[int, List[int]] = {}
-    for flat_id, cluster_id in _normalize_int_map(level.get("mapping")).items():
-        if flat_id < 0:
-            continue
-        members.setdefault(int(cluster_id), []).append(flat_id)
-    return {cluster_id: frozenset(topic_ids) for cluster_id, topic_ids in members.items()}
-
-
 def find_flat_clusters_missing_descriptions(results: Mapping[str, Any]) -> List[int]:
     """
     Return flat cluster IDs without an LLM-generated description.
@@ -77,7 +67,7 @@ def find_flat_clusters_missing_descriptions(results: Mapping[str, Any]) -> List[
 
 def find_hierarchy_clusters_missing_descriptions(results: Mapping[str, Any]) -> Dict[int, frozenset[int]]:
     """
-    Return merged hierarchy clusters without an LLM-generated description.
+    Return merged hierarchy nodes without an LLM-generated description.
 
     Parameters
     ----------
@@ -87,53 +77,34 @@ def find_hierarchy_clusters_missing_descriptions(results: Mapping[str, Any]) -> 
     Returns
     -------
     dict
-        Mapping of hierarchy cluster ID to its member flat topic IDs.
-    """
-    missing: Dict[int, frozenset[int]] = {}
-    hierarchy = results.get("hierarchy") or {}
-    tree = hierarchy.get("tree") or []
-    if tree:
-        for node in tree:
-            members = frozenset(int(topic) for topic in node.get("topics") or [] if int(topic) >= 0)
-            if len(members) <= 1:
-                continue
-            if _has_description(node.get("description")):
-                continue
-            missing.setdefault(int(node.get("id", -1)), members)
-        return missing
+        Mapping of hierarchy node ID to its member flat topic IDs.
 
-    for level in hierarchy.get("levels") or []:
-        members_by_cluster = _level_members(level)
-        for cluster in level.get("clusters") or []:
-            cluster_id = int(cluster.get("id", -1))
-            if _has_description(cluster.get("description")):
-                continue
-            members = members_by_cluster.get(cluster_id, frozenset({cluster_id}))
-            if len(members) <= 1:
-                continue
-            missing.setdefault(cluster_id, members)
+    Raises
+    ------
+    ClusteringError
+        If the cached results do not contain a hierarchy tree.
+    """
+    hierarchy = results.get("hierarchy") or {}
+    if "tree" not in hierarchy:
+        raise ClusteringError(
+            "Cached clustering results are missing their hierarchy tree; "
+            "regenerate them with 'abstracts-explorer clustering pre-generate --force'."
+        )
+
+    missing: Dict[int, frozenset[int]] = {}
+    for node in hierarchy.get("tree") or []:
+        members = frozenset(int(topic) for topic in node.get("topics") or [] if int(topic) >= 0)
+        if len(members) <= 1:
+            continue
+        if _has_description(node.get("description")):
+            continue
+        missing.setdefault(int(node.get("id", -1)), members)
     return missing
 
 
 def _hierarchy_labels_by_members(results: Mapping[str, Any]) -> Dict[frozenset[int], str]:
     """Collect successful hierarchy labels keyed by their member flat topics."""
-    hierarchy = results.get("hierarchy") or {}
-    if hierarchy.get("tree"):
-        return _tree_labels_by_members(results)
-
-    labels: Dict[frozenset[int], str] = {}
-    for level in hierarchy.get("levels") or []:
-        members_by_cluster = _level_members(level)
-        for cluster in level.get("clusters") or []:
-            cluster_id = int(cluster.get("id", -1))
-            description = cluster.get("description")
-            if not _has_description(description):
-                continue
-            members = members_by_cluster.get(cluster_id, frozenset({cluster_id}))
-            if len(members) <= 1:
-                continue
-            labels[members] = combine_label_description(cluster.get("label", ""), description)
-    return labels
+    return _tree_labels_by_members(results)
 
 
 def _load_documents(
@@ -305,69 +276,35 @@ def _apply_flat_labels(
     return len(labels)
 
 
-def _propagate_flat_labels(results: Dict[str, Any]) -> None:
-    """Copy successful flat labels into legacy flat-level hierarchy clusters."""
-    flat_labels = _normalize_int_map(results.get("cluster_labels"))
-    flat_descriptions = _normalize_int_map(results.get("cluster_descriptions"))
-    hierarchy = results.get("hierarchy") or {}
-    if hierarchy.get("tree"):
-        return
-    for level in hierarchy.get("levels") or []:
-        for cluster in level.get("clusters") or []:
-            cluster_id = int(cluster.get("id", -1))
-            if _has_description(cluster.get("description")):
-                continue
-            description = flat_descriptions.get(cluster_id)
-            if not _has_description(description):
-                continue
-            cluster["label"] = flat_labels.get(cluster_id, f"Topic {cluster_id}")
-            cluster["description"] = description
-
-
 def _apply_hierarchy_labels(
     results: Dict[str, Any],
     labels: Mapping[frozenset[int], str],
 ) -> int:
     """Apply generated hierarchy labels and return the number of updates."""
-    updated = 0
     hierarchy = results.get("hierarchy") or {}
-    tree = hierarchy.get("tree") or []
-    if tree:
-        nodes_by_members = {
-            frozenset(int(topic) for topic in node.get("topics") or [] if int(topic) >= 0): node for node in tree
-        }
-        for members, encoded in labels.items():
-            node = nodes_by_members.get(members)
-            if node is None:
-                continue
-            if _has_description(node.get("description")):
-                continue
-            label, description = split_label_description(encoded)
-            if not _has_description(description):
-                continue
-            node["label"] = label or node.get("label", "")
-            node["description"] = description
-            updated += 1
-        return updated
+    if "tree" not in hierarchy:
+        raise ClusteringError(
+            "Cached clustering results are missing their hierarchy tree; "
+            "regenerate them with 'abstracts-explorer clustering pre-generate --force'."
+        )
 
-    for level in hierarchy.get("levels") or []:
-        members_by_cluster = _level_members(level)
-        for cluster in level.get("clusters") or []:
-            cluster_id = int(cluster.get("id", -1))
-            if _has_description(cluster.get("description")):
-                continue
-            members = members_by_cluster.get(cluster_id, frozenset({cluster_id}))
-            if len(members) <= 1:
-                continue
-            encoded_label = labels.get(members)
-            if encoded_label is None:
-                continue
-            label, description = split_label_description(encoded_label)
-            if not _has_description(description):
-                continue
-            cluster["label"] = label or cluster.get("label", f"Cluster {cluster_id}")
-            cluster["description"] = description
-            updated += 1
+    updated = 0
+    nodes_by_members = {
+        frozenset(int(topic) for topic in node.get("topics") or [] if int(topic) >= 0): node
+        for node in hierarchy.get("tree") or []
+    }
+    for members, encoded in labels.items():
+        node = nodes_by_members.get(members)
+        if node is None:
+            continue
+        if _has_description(node.get("description")):
+            continue
+        label, description = split_label_description(encoded)
+        if not _has_description(description):
+            continue
+        node["label"] = label or node.get("label", "")
+        node["description"] = description
+        updated += 1
     return updated
 
 
@@ -464,7 +401,6 @@ def backfill_missing_labels(
         raise ClusteringError(f"Failed to backfill cluster labels: {exc}") from exc
 
     report["flat_updated"] = _apply_flat_labels(results, new_flat)
-    _propagate_flat_labels(results)
     report["hierarchy_updated"] = _apply_hierarchy_labels(results, new_hierarchy)
     report["failed"] = len(find_flat_clusters_missing_descriptions(results)) + len(
         find_hierarchy_clusters_missing_descriptions(results)

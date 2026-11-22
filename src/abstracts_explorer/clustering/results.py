@@ -324,69 +324,6 @@ def build_hierarchy_levels(
     }
 
 
-def build_hierarchy(
-    hierarchical_topics: Any,
-    flat_topic_ids: Sequence[int],
-    flat_labels: Mapping[int, str],
-    flat_keywords: Mapping[int, List[str]],
-    statistics: Dict[str, Any],
-    points: Sequence[Dict[str, Any]],
-    parent_labels: Mapping[int, str],
-    nr_levels: int = DEFAULT_NR_LEVELS,
-    level_scale: str = DEFAULT_LEVEL_SCALE,
-    flat_descriptions: Mapping[int, str] | None = None,
-    parent_descriptions: Mapping[int, str] | None = None,
-) -> Dict[str, Any]:
-    """
-    Build hierarchy levels directly from BERTopic's hierarchy DataFrame.
-
-    This convenience wrapper is not used by the clustering cache. New cache
-    entries store the full tree and derive levels at read time.
-
-    Parameters
-    ----------
-    hierarchical_topics : pandas.DataFrame
-        Output of ``topic_model.hierarchical_topics()``.
-    flat_topic_ids : sequence of int
-        Flat topic IDs (excluding outliers).
-    flat_labels : mapping
-        Flat topic labels.
-    flat_keywords : mapping
-        Flat topic keywords.
-    statistics : dict
-        Flat cluster statistics.
-    points : sequence of dict
-        Visualization points.
-    parent_labels : mapping
-        BERTopic parent ID to parent label mapping.
-    nr_levels : int, optional
-        Requested number of hierarchy levels (default 10).
-    level_scale : str, optional
-        Level scaling mode (default ``"linear"``).
-    flat_descriptions : mapping, optional
-        Flat topic ID to descriptive-sentence mapping.
-    parent_descriptions : mapping, optional
-        Parent ID to descriptive-sentence mapping.
-
-    Returns
-    -------
-    dict
-        Hierarchy payload with ``levels`` and metadata.
-    """
-    tree = build_hierarchy_tree(hierarchical_topics, parent_labels, parent_descriptions)
-    return build_hierarchy_levels(
-        tree=tree,
-        flat_topic_ids=flat_topic_ids,
-        flat_labels=flat_labels,
-        flat_keywords=flat_keywords,
-        statistics=statistics,
-        points=points,
-        flat_descriptions=flat_descriptions,
-        nr_levels=nr_levels,
-        level_scale=level_scale,
-    )
-
-
 def derive_hierarchy_levels(
     results: Mapping[str, Any],
     nr_levels: int = DEFAULT_NR_LEVELS,
@@ -409,14 +346,21 @@ def derive_hierarchy_levels(
     Returns
     -------
     dict
-        Hierarchy payload with derived ``levels``, or the legacy hierarchy
-        unchanged when no tree is present.
+        Hierarchy payload with derived ``levels``.
+
+    Raises
+    ------
+    ClusteringError
+        If the cached results do not contain a hierarchy tree.
     """
     hierarchy = results.get("hierarchy") or {}
-    tree = hierarchy.get("tree") or []
-    if not tree:
-        return hierarchy
+    if "tree" not in hierarchy:
+        raise ClusteringError(
+            "Cached clustering results are missing their hierarchy tree; "
+            "regenerate them with 'abstracts-explorer clustering pre-generate --force'."
+        )
 
+    tree = hierarchy.get("tree") or []
     statistics = results.get("statistics") or {}
     cluster_sizes = statistics.get("cluster_sizes") or {}
     flat_topic_ids = sorted(int(cluster_id) for cluster_id in cluster_sizes if int(cluster_id) >= 0)

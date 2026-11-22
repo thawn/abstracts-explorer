@@ -1519,50 +1519,6 @@ class TestClusteringCache:
             is None
         )
 
-    def test_legacy_level_params_match_new_lookup(self, connected_db):
-        """Legacy nr_levels/level_scale keys are ignored for cache matching."""
-        results = {"points": [], "statistics": {"n_clusters": 1}}
-        connected_db.save_clustering_cache(
-            embedding_model="model1",
-            reduction_method="umap",
-            n_components=2,
-            clustering_method="agglomerative",
-            results=results,
-            n_clusters=1,
-            clustering_params={"distance_threshold": 0.5, "nr_levels": 10, "level_scale": "linear"},
-            conference="AAAI",
-            year=2026,
-            collection_name="papers",
-        )
-
-        cached = connected_db.get_clustering_cache(
-            embedding_model="model1",
-            reduction_method="umap",
-            n_components=2,
-            clustering_method="agglomerative",
-            n_clusters=1,
-            clustering_params={"distance_threshold": 0.5},
-            conference="AAAI",
-            year=2026,
-            collection_name="papers",
-        )
-        assert cached == results
-
-        assert (
-            connected_db.get_clustering_cache(
-                embedding_model="model1",
-                reduction_method="umap",
-                n_components=2,
-                clustering_method="agglomerative",
-                n_clusters=1,
-                clustering_params={"distance_threshold": 0.6},
-                conference="AAAI",
-                year=2026,
-                collection_name="papers",
-            )
-            is None
-        )
-
     def test_list_clustering_cache_entries(self, connected_db):
         """Cache listing returns decoded results and filterable scope metadata."""
         results = {"points": [], "statistics": {"n_clusters": 1}, "hierarchy": {"tree": []}}

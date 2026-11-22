@@ -664,7 +664,7 @@ class TestExecuteMCPToolE2E:
     # ------------------------------------------------------------------
 
     def test_get_conference_topics_real_execution(self):
-        """get_conference_topics reads the fixed hierarchy level from cache."""
+        """get_conference_topics derives the fixed hierarchy level from the tree."""
         points = [
             {"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0, "title": "Paper 1"},
             {"id": "p2", "cluster": 0, "x": 0.1, "y": 0.1, "title": "Paper 2"},
@@ -672,47 +672,6 @@ class TestExecuteMCPToolE2E:
             {"id": "p4", "cluster": 1, "x": 1.1, "y": 1.1, "title": "Paper 4"},
             {"id": "p5", "cluster": 0, "x": 0.2, "y": 0.2, "title": "Paper 5"},
         ]
-        flat_level = {
-            "level": 0,
-            "max_distance": 0.1,
-            "clusters": [
-                {
-                    "id": 0,
-                    "label": "Machine Learning",
-                    "size": 3,
-                    "keywords": ["ml", "deep"],
-                    "source_topic_count": 1,
-                },
-                {"id": 1, "label": "NLP", "size": 2, "keywords": ["nlp", "bert"], "source_topic_count": 1},
-            ],
-            "mapping": {"0": 0, "1": 1},
-        }
-        levels = [dict(flat_level, level=index) for index in range(6)]
-        levels.append(
-            {
-                "level": 6,
-                "max_distance": 0.42,
-                "clusters": [
-                    {
-                        "id": 10,
-                        "label": "Machine Learning",
-                        "description": "Papers apply learning methods to practical problems.",
-                        "size": 3,
-                        "keywords": ["ml", "deep"],
-                        "source_topic_count": 1,
-                    },
-                    {
-                        "id": 11,
-                        "label": "NLP",
-                        "description": "Papers study language processing models.",
-                        "size": 2,
-                        "keywords": ["nlp", "bert"],
-                        "source_topic_count": 1,
-                    },
-                ],
-                "mapping": {"0": 10, "1": 11},
-            }
-        )
         cached = {
             "points": points,
             "statistics": {
@@ -723,7 +682,21 @@ class TestExecuteMCPToolE2E:
             },
             "cluster_labels": {"0": "Machine Learning", "1": "NLP"},
             "cluster_keywords": {"0": ["ml", "deep"], "1": ["nlp", "bert"]},
-            "hierarchy": {"levels": levels},
+            "hierarchy": {
+                "method": "bertopic",
+                "n_topics": 2,
+                "tree": [
+                    {
+                        "id": 10,
+                        "topics": [0, 1],
+                        "label": "Machine Learning",
+                        "description": "Papers apply learning methods to practical problems.",
+                        "distance": 0.42,
+                        "child_left_id": 0,
+                        "child_right_id": 1,
+                    }
+                ],
+            },
         }
 
         mock_db = Mock()
@@ -738,23 +711,18 @@ class TestExecuteMCPToolE2E:
 
         data = json.loads(result)
         assert "error" not in data
-        assert data["n_topics"] == 2
-        assert data["hierarchy_level"] == 6
+        assert data["n_topics"] == 1
+        assert data["hierarchy_level"] == 0
         assert data["hierarchy_max_distance"] == 0.42
-        assert list(data["topic_sizes"].keys()) == [
-            "Papers apply learning methods to practical problems.",
-            "Papers study language processing models.",
-        ]
+        assert data["topic_sizes"] == {"Papers apply learning methods to practical problems.": 5}
         assert data["topics"][0]["topic"] == "Papers apply learning methods to practical problems."
         assert data["topics"][0]["label"] == "Machine Learning"
-        assert data["topics"][0]["paper_count"] == 3
-        assert data["topics"][0]["sample_titles"] == ["Paper 1", "Paper 2", "Paper 5"]
-        assert data["topics"][1]["topic"] == "Papers study language processing models."
-        assert data["topics"][1]["label"] == "NLP"
-        assert data["topics"][1]["source_topic_count"] == 1
+        assert data["topics"][0]["paper_count"] == 5
+        assert data["topics"][0]["sample_titles"] == ["Paper 1", "Paper 2", "Paper 3", "Paper 4", "Paper 5"]
+        assert data["topics"][0]["source_topic_count"] == 2
 
-    def test_get_conference_topics_falls_back_to_flat(self):
-        """get_conference_topics falls back to flat clusters without hierarchy."""
+    def test_get_conference_topics_rejects_missing_tree(self):
+        """get_conference_topics reports outdated caches without a tree."""
         points = [
             {"id": "p1", "cluster": 0, "title": "Paper 1"},
             {"id": "p2", "cluster": 1, "title": "Paper 2"},
@@ -782,10 +750,8 @@ class TestExecuteMCPToolE2E:
             result = execute_mcp_tool("get_conference_topics", {"conferences": ["NeurIPS"]})
 
         data = json.loads(result)
-        assert data["n_topics"] == 2
-        assert data["topics"][0]["topic"] == "Papers about A."
-        assert data["topics"][0]["label"] == "A"
-        assert data["topics"][0]["sample_titles"] == ["Paper 1"]
+        assert "error" in data
+        assert "missing their hierarchy tree" in data["error"]
 
     # ------------------------------------------------------------------
     # get_topic_evolution

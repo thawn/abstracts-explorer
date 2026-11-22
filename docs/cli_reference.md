@@ -301,10 +301,9 @@ are written back to the existing cache row. If the paper metadata needed to
 rebuild representative documents is unavailable, the command reports an error
 instead of falling back to truncated cached titles.
 
-Legacy cache rows that only contain hierarchy levels can be upgraded in place
-with the one-off `scripts/migrate_full_hierarchy.py` script. It reconstructs the
-tree and reuses recoverable labels; the normal backfill then labels any
-remaining descriptions.
+Clustering caches must contain `hierarchy.tree`. Outdated caches without a tree
+are rejected by the web API and MCP tools and must be regenerated with
+`clustering pre-generate --force`.
 
 ```text
 usage: abstracts-explorer clustering pre-generate [-h] [--collection COLLECTION]

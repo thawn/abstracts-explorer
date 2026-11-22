@@ -27,35 +27,22 @@ def _flat_results():
         "cluster_labels": {0: "Fallback Label", 1: "Good Label"},
         "cluster_descriptions": {1: "Papers about good things."},
         "cluster_keywords": {0: ["alpha"], 1: ["beta"]},
-        "hierarchy": {"levels": []},
+        "hierarchy": {
+            "method": "bertopic",
+            "n_topics": 2,
+            "tree": [
+                {
+                    "id": 2,
+                    "topics": [0, 1],
+                    "label": "Parent",
+                    "description": "Parent description.",
+                    "distance": 0.1,
+                    "child_left_id": 0,
+                    "child_right_id": 1,
+                }
+            ],
+        },
     }
-
-
-def _hierarchy_results():
-    results = _flat_results()
-    results["hierarchy"] = {
-        "nr_levels": 1,
-        "level_scale": "linear",
-        "levels": [
-            {
-                "level": 0,
-                "max_distance": 0.1,
-                "mapping": {"0": 2, "1": 2},
-                "clusters": [
-                    {
-                        "id": 2,
-                        "label": "Fallback Parent",
-                        "description": "",
-                        "size": 2,
-                        "center": {"x": 0.0, "y": 0.0},
-                        "keywords": ["alpha", "beta"],
-                        "source_topic_count": 2,
-                    }
-                ],
-            }
-        ],
-    }
-    return results
 
 
 def _tree_results():
@@ -112,26 +99,16 @@ class TestDetection:
         assert find_flat_clusters_missing_descriptions(results) == []
 
     def test_hierarchy_missing_returns_parent_members(self):
-        results = _hierarchy_results()
+        results = _tree_results()
 
         assert find_hierarchy_clusters_missing_descriptions(results) == {2: frozenset({0, 1})}
 
-    def test_hierarchy_missing_ignores_flat_level_clusters(self):
-        results = _hierarchy_results()
-        results["hierarchy"]["levels"][0]["mapping"] = {"0": 0, "1": 1}
-        results["hierarchy"]["levels"][0]["clusters"] = [
-            {
-                "id": 0,
-                "label": "Fallback Label",
-                "description": "",
-                "size": 1,
-                "center": {"x": 0.0, "y": 0.0},
-                "keywords": ["alpha"],
-                "source_topic_count": 1,
-            }
-        ]
+    def test_hierarchy_missing_requires_tree(self):
+        results = _flat_results()
+        results["hierarchy"] = {"method": "bertopic"}
 
-        assert find_hierarchy_clusters_missing_descriptions(results) == {}
+        with pytest.raises(ClusteringError, match="missing their hierarchy tree"):
+            find_hierarchy_clusters_missing_descriptions(results)
 
 
 class TestCachedLabelRepresentation:
@@ -335,7 +312,8 @@ class TestBackfill:
             backfill_missing_labels(results, Mock(), database)
 
     def test_updates_flat_and_hierarchy_labels(self, mocker):
-        results = _hierarchy_results()
+        results = _tree_results()
+        results["cluster_descriptions"].pop(0)
         database = Mock()
         database.get_paper_summaries_by_uids.return_value = _papers("p0", "p1")
 
@@ -361,8 +339,8 @@ class TestBackfill:
         assert results["cluster_descriptions"][0] == "New flat description."
         assert results["cluster_labels"][1] == "Good Label"
         assert results["cluster_descriptions"][1] == "Papers about good things."
-        assert results["hierarchy"]["levels"][0]["clusters"][0]["label"] == "New Parent"
-        assert results["hierarchy"]["levels"][0]["clusters"][0]["description"] == "New parent description."
+        assert results["hierarchy"]["tree"][0]["label"] == "New Parent"
+        assert results["hierarchy"]["tree"][0]["description"] == "New parent description."
         assert report["flat_updated"] == 1
         assert report["hierarchy_updated"] == 1
         assert report["failed"] == 0

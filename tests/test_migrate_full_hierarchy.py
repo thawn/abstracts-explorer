@@ -7,7 +7,7 @@ import importlib.util
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "migrate_full_hierarchy.py"
+SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "archive" / "migrate_full_hierarchy.py"
 SPEC = importlib.util.spec_from_file_location("migrate_full_hierarchy", SCRIPT_PATH)
 assert SPEC is not None and SPEC.loader is not None
 migration = importlib.util.module_from_spec(SPEC)

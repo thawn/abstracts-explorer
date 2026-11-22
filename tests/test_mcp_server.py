@@ -440,31 +440,19 @@ class TestMCPTools:
             },
             "cluster_keywords": {"0": ["neural", "deep"], "1": ["nlp", "bert"]},
             "hierarchy": {
-                "levels": [
+                "method": "bertopic",
+                "n_topics": 2,
+                "tree": [
                     {
-                        "level": 6,
-                        "max_distance": 0.5,
-                        "clusters": [
-                            {
-                                "id": 10,
-                                "label": "Machine Learning",
-                                "description": "Papers apply neural networks to learning problems.",
-                                "size": 2,
-                                "keywords": ["neural", "deep"],
-                                "source_topic_count": 1,
-                            },
-                            {
-                                "id": 11,
-                                "label": "Natural Language Processing",
-                                "description": "Papers process language with transformer models.",
-                                "size": 2,
-                                "keywords": ["nlp", "bert"],
-                                "source_topic_count": 1,
-                            },
-                        ],
-                        "mapping": {"0": 10, "1": 11},
+                        "id": 10,
+                        "topics": [0, 1],
+                        "label": "Machine Learning",
+                        "description": "Papers apply neural networks to learning problems.",
+                        "distance": 0.5,
+                        "child_left_id": 0,
+                        "child_right_id": 1,
                     }
-                ]
+                ],
             },
         }
 
@@ -473,20 +461,15 @@ class TestMCPTools:
         result_str = get_conference_topics(conferences=["NeurIPS"])
         result = json.loads(result_str)
 
-        assert result["n_topics"] == 2
+        assert result["n_topics"] == 1
         assert result["total_papers"] == 4
-        assert result["hierarchy_level"] == 6
-        assert result["topic_sizes"] == {
-            "Papers apply neural networks to learning problems.": 2,
-            "Papers process language with transformer models.": 2,
-        }
-        assert len(result["topics"]) == 2
+        assert result["hierarchy_level"] == 0
+        assert result["topic_sizes"] == {"Papers apply neural networks to learning problems.": 4}
+        assert len(result["topics"]) == 1
         assert result["topics"][0]["topic"] == "Papers apply neural networks to learning problems."
         assert result["topics"][0]["label"] == "Machine Learning"
-        assert result["topics"][0]["keywords"] == ["neural", "deep"]
-        assert result["topics"][0]["sample_titles"] == ["Paper 1", "Paper 2"]
-        assert result["topics"][1]["topic"] == "Papers process language with transformer models."
-        assert result["topics"][1]["label"] == "Natural Language Processing"
+        assert result["topics"][0]["keywords"] == ["neural", "deep", "nlp", "bert"]
+        assert result["topics"][0]["sample_titles"] == ["Paper 1", "Paper 2", "Paper 3", "Paper 4"]
         assert result["conference"] == "NeurIPS"
         mock_db.get_clustering_cache.assert_called_once()
 
@@ -536,24 +519,7 @@ class TestMCPTools:
             "statistics": {"n_clusters": 1, "n_noise": 0, "cluster_sizes": {0: 2}, "total_papers": 2},
             "cluster_labels": {"0": "Deep Learning"},
             "cluster_keywords": {"0": ["neural", "deep"]},
-            "hierarchy": {
-                "levels": [
-                    {
-                        "level": 0,
-                        "max_distance": 0.1,
-                        "clusters": [
-                            {
-                                "id": 0,
-                                "label": "Deep Learning",
-                                "size": 2,
-                                "keywords": ["neural", "deep"],
-                                "source_topic_count": 1,
-                            }
-                        ],
-                        "mapping": {"0": 0},
-                    }
-                ]
-            },
+            "hierarchy": {"method": "bertopic", "n_topics": 1, "tree": []},
         }
 
         from abstracts_explorer.mcp_server import get_conference_topics
