@@ -85,6 +85,13 @@ slow, chat continues normally. Tune `OLLAYA_THREADS` in the
 `abstracts-ollaya.container` unit to the number of physical cores; values above
 that can regress CPU throughput.
 
+**macOS development note:** the image is Linux (`linux/amd64` and
+`linux/arm64`), so it runs inside Podman’s Linux VM on macOS. Give that VM at
+least 4 GB; the default 2 GB fails to load `laya:multilingual` with
+`MODEL_LOAD_FAILED`. The ONNX Runtime
+`Unknown CPU vendor. cpuinfo_vendor value: 0` warning is harmless. If needed,
+use the native Ollaya installer for macOS instead.
+
 ### Automated install
 
 An install script automates the full setup:

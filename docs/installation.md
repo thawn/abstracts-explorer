@@ -215,6 +215,42 @@ For the full host-development walkthrough, see
 containerized app stack, see
 [Docker and Podman Setup](docker.md#optional-chat-input-guard-ollaya).
 
+#### macOS
+
+Ollaya’s image is a Linux image (`linux/amd64` and `linux/arm64`). On macOS,
+run it inside Podman’s Linux VM and give the VM at least 4 GB of memory.
+
+1. Configure the Podman VM memory:
+
+   ```bash
+   podman machine stop
+   podman machine set --memory 4096
+   podman machine start
+   podman machine ssh 'free -m'
+   ```
+
+2. On Apple Silicon, confirm the VM architecture is arm64:
+
+   ```bash
+   podman info --format '{{.Host.Arch}}'
+   ```
+
+3. Continue with the pull and start commands above. Ollaya may print
+   `onnxruntime cpuid_info warning: Unknown CPU vendor. cpuinfo_vendor value: 0`;
+   this is expected and does not affect inference.
+
+4. To run without a VM, install Ollaya natively on macOS and point
+   `GUARD_BACKEND_URL` at the native server:
+
+   ```bash
+   curl -fsSL https://ollaya.dev/install.sh | sh
+   ollaya serve
+   ```
+
+   ```bash
+   GUARD_BACKEND_URL=http://127.0.0.1:11435
+   ```
+
 ## Verify Installation
 
 Check that the package is installed correctly:
