@@ -91,6 +91,17 @@ def find_hierarchy_clusters_missing_descriptions(results: Mapping[str, Any]) -> 
     """
     missing: Dict[int, frozenset[int]] = {}
     hierarchy = results.get("hierarchy") or {}
+    tree = hierarchy.get("tree") or []
+    if tree:
+        for node in tree:
+            members = frozenset(int(topic) for topic in node.get("topics") or [] if int(topic) >= 0)
+            if len(members) <= 1:
+                continue
+            if _has_description(node.get("description")):
+                continue
+            missing.setdefault(int(node.get("id", -1)), members)
+        return missing
+
     for level in hierarchy.get("levels") or []:
         members_by_cluster = _level_members(level)
         for cluster in level.get("clusters") or []:
@@ -106,8 +117,11 @@ def find_hierarchy_clusters_missing_descriptions(results: Mapping[str, Any]) -> 
 
 def _hierarchy_labels_by_members(results: Mapping[str, Any]) -> Dict[frozenset[int], str]:
     """Collect successful hierarchy labels keyed by their member flat topics."""
-    labels: Dict[frozenset[int], str] = {}
     hierarchy = results.get("hierarchy") or {}
+    if hierarchy.get("tree"):
+        return _tree_labels_by_members(results)
+
+    labels: Dict[frozenset[int], str] = {}
     for level in hierarchy.get("levels") or []:
         members_by_cluster = _level_members(level)
         for cluster in level.get("clusters") or []:
@@ -164,6 +178,20 @@ def _load_documents(
     return documents, topics
 
 
+def _tree_labels_by_members(results: Mapping[str, Any]) -> Dict[frozenset[int], str]:
+    """Collect tree labels/descriptions keyed by their member flat topics."""
+    labels: Dict[frozenset[int], str] = {}
+    hierarchy = results.get("hierarchy") or {}
+    for node in hierarchy.get("tree") or []:
+        members = frozenset(int(topic) for topic in node.get("topics") or [] if int(topic) >= 0)
+        if len(members) <= 1:
+            continue
+        if not _has_description(node.get("description")):
+            continue
+        labels[members] = combine_label_description(node.get("label", ""), node.get("description"))
+    return labels
+
+
 class CachedLabelRepresentation(ProjectLLMRepresentation):
     """Reuse existing labels and generate only missing cluster descriptions."""
 
@@ -175,6 +203,8 @@ class CachedLabelRepresentation(ProjectLLMRepresentation):
         flat_descriptions: Mapping[int, str],
         hierarchy_labels: Mapping[frozenset[int], str],
         flat_topics: Sequence[int],
+        target_flat_ids: set[int] | None = None,
+        target_hierarchy_members: set[frozenset[int]] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(embeddings_manager, **kwargs)
@@ -182,6 +212,8 @@ class CachedLabelRepresentation(ProjectLLMRepresentation):
         self._flat_descriptions = dict(flat_descriptions)
         self._hierarchy_labels = dict(hierarchy_labels)
         self._flat_topics = list(flat_topics)
+        self._target_flat_ids = None if target_flat_ids is None else set(target_flat_ids)
+        self._target_hierarchy_members = None if target_hierarchy_members is None else set(target_hierarchy_members)
 
     def _resolve_cached_label(self, topic: Any, documents: Any) -> str | None:
         if int(topic) == -1:
@@ -202,7 +234,7 @@ class CachedLabelRepresentation(ProjectLLMRepresentation):
             if 0 <= document_id < len(self._flat_topics)
         )
         if not members:
-            return None
+            return combine_label_description("Merged cluster", "")
         if members == frozenset({-1}):
             return combine_label_description("Outliers", "")
 
@@ -212,8 +244,17 @@ class CachedLabelRepresentation(ProjectLLMRepresentation):
             if _has_description(description):
                 label = self._flat_labels.get(cluster_id) or f"Topic {cluster_id}"
                 return combine_label_description(label, description)
+            if self._target_flat_ids is None or cluster_id in self._target_flat_ids:
+                return None
+            label = self._flat_labels.get(cluster_id) or f"Topic {cluster_id}"
+            return combine_label_description(label, "")
 
-        return self._hierarchy_labels.get(members)
+        cached = self._hierarchy_labels.get(members)
+        if cached is not None:
+            return cached
+        if self._target_hierarchy_members is None or members in self._target_hierarchy_members:
+            return None
+        return combine_label_description("Merged cluster", "")
 
 
 def _new_flat_labels(
@@ -265,10 +306,12 @@ def _apply_flat_labels(
 
 
 def _propagate_flat_labels(results: Dict[str, Any]) -> None:
-    """Copy successful flat labels into flat-level hierarchy clusters."""
+    """Copy successful flat labels into legacy flat-level hierarchy clusters."""
     flat_labels = _normalize_int_map(results.get("cluster_labels"))
     flat_descriptions = _normalize_int_map(results.get("cluster_descriptions"))
     hierarchy = results.get("hierarchy") or {}
+    if hierarchy.get("tree"):
+        return
     for level in hierarchy.get("levels") or []:
         for cluster in level.get("clusters") or []:
             cluster_id = int(cluster.get("id", -1))
@@ -288,6 +331,25 @@ def _apply_hierarchy_labels(
     """Apply generated hierarchy labels and return the number of updates."""
     updated = 0
     hierarchy = results.get("hierarchy") or {}
+    tree = hierarchy.get("tree") or []
+    if tree:
+        nodes_by_members = {
+            frozenset(int(topic) for topic in node.get("topics") or [] if int(topic) >= 0): node for node in tree
+        }
+        for members, encoded in labels.items():
+            node = nodes_by_members.get(members)
+            if node is None:
+                continue
+            if _has_description(node.get("description")):
+                continue
+            label, description = split_label_description(encoded)
+            if not _has_description(description):
+                continue
+            node["label"] = label or node.get("label", "")
+            node["description"] = description
+            updated += 1
+        return updated
+
     for level in hierarchy.get("levels") or []:
         members_by_cluster = _level_members(level)
         for cluster in level.get("clusters") or []:
@@ -297,10 +359,10 @@ def _apply_hierarchy_labels(
             members = members_by_cluster.get(cluster_id, frozenset({cluster_id}))
             if len(members) <= 1:
                 continue
-            encoded = labels.get(members)
-            if encoded is None:
+            encoded_label = labels.get(members)
+            if encoded_label is None:
                 continue
-            label, description = split_label_description(encoded)
+            label, description = split_label_description(encoded_label)
             if not _has_description(description):
                 continue
             cluster["label"] = label or cluster.get("label", f"Cluster {cluster_id}")
@@ -371,6 +433,8 @@ def backfill_missing_labels(
         flat_descriptions=flat_descriptions,
         hierarchy_labels=_hierarchy_labels_by_members(results),
         flat_topics=topics,
+        target_flat_ids=set(flat_missing),
+        target_hierarchy_members=set(hierarchy_missing.values()),
         nr_docs=nr_docs,
         diversity=diversity,
         doc_length=doc_length,

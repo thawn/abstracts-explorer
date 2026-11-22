@@ -2638,6 +2638,109 @@ class TestClusteringEndpoint:
                     assert call_kwargs["conference"] is None
                     assert call_kwargs["year"] is None
 
+    def test_compute_clusters_derives_levels_from_tree(self):
+        """Cached trees are converted to hierarchy levels and the tree is not returned."""
+        from abstracts_explorer.web_ui.app import app
+
+        cached_results = {
+            "points": [
+                {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0},
+                {"id": "p2", "x": 1.0, "y": 1.0, "cluster": 1},
+            ],
+            "statistics": {"n_clusters": 2, "cluster_sizes": {0: 1, 1: 1}, "total_papers": 2},
+            "cluster_labels": {"0": "A", "1": "B"},
+            "cluster_descriptions": {"0": "A desc.", "1": "B desc."},
+            "cluster_keywords": {"0": ["a"], "1": ["b"]},
+            "hierarchy": {
+                "method": "bertopic",
+                "n_topics": 2,
+                "tree": [
+                    {
+                        "id": 10,
+                        "topics": [0, 1],
+                        "label": "Parent",
+                        "description": "Parent desc.",
+                        "distance": 0.1,
+                        "child_left_id": 0,
+                        "child_right_id": 1,
+                    }
+                ],
+            },
+        }
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
+                    mock_config.return_value = Mock(embedding_model="test-model")
+                    mock_db = Mock()
+                    mock_db.get_clustering_cache.return_value = cached_results
+                    mock_get_db.return_value = mock_db
+
+                    response = client.post(
+                        "/api/clusters/compute",
+                        json={"hierarchy_levels": 1},
+                    )
+
+                    assert response.status_code == 200
+                    data = response.get_json()
+                    assert "tree" not in data["hierarchy"]
+                    assert len(data["hierarchy"]["levels"]) == 1
+                    level = data["hierarchy"]["levels"][0]
+                    assert level["mapping"] == {"0": 10, "1": 10}
+                    assert level["clusters"][0]["label"] == "Parent"
+
+    def test_compute_clusters_legacy_levels_fallback(self):
+        """Legacy cached levels are returned unchanged."""
+        from abstracts_explorer.web_ui.app import app
+
+        legacy_levels = [
+            {
+                "level": 0,
+                "max_distance": 0.1,
+                "mapping": {"0": 0, "1": 1},
+                "clusters": [],
+            }
+        ]
+        cached_results = {
+            "points": [],
+            "statistics": {"n_clusters": 2},
+            "hierarchy": {"method": "bertopic", "nr_levels": 1, "levels": legacy_levels},
+        }
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
+                    mock_config.return_value = Mock(embedding_model="test-model")
+                    mock_db = Mock()
+                    mock_db.get_clustering_cache.return_value = cached_results
+                    mock_get_db.return_value = mock_db
+
+                    response = client.post("/api/clusters/compute", json={})
+
+                    assert response.status_code == 200
+                    data = response.get_json()
+                    assert data["hierarchy"]["levels"] == legacy_levels
+
+    def test_compute_clusters_rejects_invalid_level_scale(self):
+        """Invalid hierarchy level scale values are rejected."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
+                    mock_config.return_value = Mock(embedding_model="test-model")
+                    mock_db = Mock()
+                    mock_db.get_clustering_cache.return_value = {"points": [], "statistics": {}}
+                    mock_get_db.return_value = mock_db
+
+                    response = client.post(
+                        "/api/clusters/compute",
+                        json={"hierarchy_level_scale": "quadratic"},
+                    )
+
+                    assert response.status_code == 400
+                    assert "hierarchy_level_scale" in response.get_json()["error"]
+
     def test_compute_clusters_returns_404_when_no_cache(self, tmp_path):
         """Test that compute_clusters returns 404 when no cached data is available."""
         from abstracts_explorer.web_ui.app import app

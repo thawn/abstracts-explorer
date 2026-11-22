@@ -282,19 +282,29 @@ the web UI serves them instantly.
 - With `--conference` and `--year`: generates for that specific
   conference/year only.
 
-The clustering cache stores the complete BERTopic result atomically. A cache
-hit avoids recomputing clusters and reuses successful labels. `--force`
-recomputes clustering and labels; there is no separate resumable label cache.
+The clustering cache stores the complete BERTopic result atomically, including
+the full hierarchy tree. A cache hit avoids recomputing clusters and reuses
+successful labels. `--force` recomputes clustering and labels; there is no
+separate resumable label cache.
+
+Hierarchy level settings (`nr_levels`, `level_scale`) are presentation
+settings, not clustering parameters. They are not part of the cache key; the
+web API and MCP tools derive levels from the cached tree on demand.
 
 A cache hit also repairs labels whose LLM attempt failed. A failed attempt is
 identified by a missing descriptive sentence, so only flat clusters and merged
-hierarchy clusters without a description are retried. Existing successful labels
+hierarchy nodes without a description are retried. Existing successful labels
 are reused through the same BERTopic representation pipeline, without
 re-clustering and without LLM calls. A fully labeled cache is a no-op, and
 `--no-llm-labels` (c-TF-IDF) cache entries are never modified. Repaired results
 are written back to the existing cache row. If the paper metadata needed to
 rebuild representative documents is unavailable, the command reports an error
 instead of falling back to truncated cached titles.
+
+Legacy cache rows that only contain hierarchy levels can be upgraded in place
+with the one-off `scripts/migrate_full_hierarchy.py` script. It reconstructs the
+tree and reuses recoverable labels; the normal backfill then labels any
+remaining descriptions.
 
 ```text
 usage: abstracts-explorer clustering pre-generate [-h] [--collection COLLECTION]

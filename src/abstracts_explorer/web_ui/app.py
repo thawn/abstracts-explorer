@@ -20,8 +20,11 @@ from abstracts_explorer.db.errors import DatabaseError
 from abstracts_explorer.clustering import (
     DEFAULT_CLUSTERING_METHOD,
     DEFAULT_CLUSTERING_PARAMS,
+    DEFAULT_LEVEL_SCALE,
     DEFAULT_N_COMPONENTS,
+    DEFAULT_NR_LEVELS,
     DEFAULT_REDUCTION_METHOD,
+    derive_hierarchy_levels,
 )
 from abstracts_explorer.embeddings import QueryEmbedding
 from abstracts_explorer.export_utils import export_papers_to_zip
@@ -652,12 +655,30 @@ def compute_clusters():
     Returns
     -------
     dict
-        Clustering results with points, statistics, hierarchy levels, and metadata
+        Clustering results with points, statistics, hierarchy levels derived
+        from the cached tree, and metadata
     """
     data = get_json_object()
 
     conferences = coerce_str_list(data.get("conferences"), "conferences", max_items=_MAX_FILTER_ITEMS) or None
     years = coerce_int_list(data.get("years"), "years", max_items=_MAX_FILTER_ITEMS) or None
+    hierarchy_levels = coerce_limit(
+        data.get("hierarchy_levels"),
+        default=DEFAULT_NR_LEVELS,
+        minimum=1,
+        maximum=100,
+    )
+    level_scale = (
+        coerce_text(
+            data.get("hierarchy_level_scale"),
+            "hierarchy_level_scale",
+            max_length=32,
+            default=DEFAULT_LEVEL_SCALE,
+        ).strip()
+        or DEFAULT_LEVEL_SCALE
+    )
+    if level_scale not in ("linear", "lin", "log", "logarithmic"):
+        raise ApiError("hierarchy_level_scale must be 'linear' or 'log'", 400)
 
     # Get config and database
     config = services.get_config()
@@ -687,6 +708,12 @@ def compute_clusters():
     )
 
     if cached:
+        if cached.get("hierarchy"):
+            cached["hierarchy"] = derive_hierarchy_levels(
+                cached,
+                nr_levels=hierarchy_levels,
+                level_scale=level_scale,
+            )
         return jsonify(cached)
 
     return (

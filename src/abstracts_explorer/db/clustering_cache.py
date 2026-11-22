@@ -4,7 +4,7 @@ Clustering result and hierarchical label cache repositories.
 
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select, delete, update, func, and_
 
@@ -16,6 +16,15 @@ from abstracts_explorer.db_models import ClusteringCache
 from abstracts_explorer.db.session import SessionMixin
 
 logger = logging.getLogger(__name__)
+
+_LEGACY_LEVEL_PARAMS = frozenset({"nr_levels", "level_scale"})
+
+
+def _canonical_clustering_params(params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Return cache-key parameters without legacy hierarchy-level settings."""
+    if params is None:
+        return None
+    return {key: value for key, value in params.items() if key not in _LEGACY_LEVEL_PARAMS}
 
 
 class ClusteringCacheMixin(SessionMixin):
@@ -74,12 +83,12 @@ class ClusteringCacheMixin(SessionMixin):
                 return result
             return None
 
-        params_json = json.dumps(clustering_params, sort_keys=True)
+        params_json = json.dumps(_canonical_clustering_params(clustering_params), sort_keys=True)
         for result in results:
             if result.clustering_params is None:
                 continue
             cached_params = json.loads(str(result.clustering_params))
-            cached_params_json = json.dumps(cached_params, sort_keys=True)
+            cached_params_json = json.dumps(_canonical_clustering_params(cached_params), sort_keys=True)
             if cached_params_json == params_json:
                 return result
 
@@ -226,6 +235,64 @@ class ClusteringCacheMixin(SessionMixin):
             return {"id": int(row.id), "results": json.loads(str(row.results_json))}
         except Exception as e:
             raise self._db_error("Failed to get clustering cache entry", e)
+
+    def list_clustering_cache_entries(
+        self,
+        conference: Optional[str] = None,
+        year: Optional[int] = None,
+        embedding_model: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Return cached clustering rows with decoded results.
+
+        Parameters
+        ----------
+        conference : str, optional
+            Only return entries for this conference.
+        year : int, optional
+            Only return entries for this year.
+        embedding_model : str, optional
+            Only return entries for this embedding model.
+
+        Returns
+        -------
+        list of dict
+            Cache rows with ``id``, scope metadata, clustering parameters,
+            and decoded ``results``.
+
+        Raises
+        ------
+        DatabaseError
+            If the query fails.
+        """
+        try:
+            stmt = select(ClusteringCache)
+            if conference is not None:
+                stmt = stmt.where(ClusteringCache.conference == conference)
+            if year is not None:
+                stmt = stmt.where(ClusteringCache.year == year)
+            if embedding_model is not None:
+                stmt = stmt.where(ClusteringCache.embedding_model == embedding_model)
+            stmt = stmt.order_by(ClusteringCache.conference, ClusteringCache.year, ClusteringCache.created_at)
+            rows = self.session.execute(stmt).scalars().all()
+            entries: List[Dict[str, Any]] = []
+            for row in rows:
+                entries.append(
+                    {
+                        "id": int(row.id),
+                        "conference": row.conference,
+                        "year": row.year,
+                        "embedding_model": row.embedding_model,
+                        "clustering_method": row.clustering_method,
+                        "clustering_params": (
+                            json.loads(str(row.clustering_params)) if row.clustering_params is not None else None
+                        ),
+                        "results": json.loads(str(row.results_json)),
+                    }
+                )
+            return entries
+        except Exception as e:
+            raise self._db_error("Failed to list clustering cache entries", e)
 
     def update_clustering_cache_results(self, cache_id: int, results: Dict[str, Any]) -> None:
         """

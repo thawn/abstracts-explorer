@@ -19,6 +19,41 @@ from abstracts_explorer.clustering.labels import split_label_description
 logger = logging.getLogger(__name__)
 
 
+def _compute_max_distances(
+    distances: Sequence[float],
+    nr_levels: int,
+    level_scale: str,
+) -> List[float]:
+    """Compute level maximum distances from BERTopic-ordered distances."""
+    if not distances or nr_levels <= 0:
+        return []
+
+    nr_levels = min(int(nr_levels), len(distances))
+
+    if level_scale in ("log", "logarithmic"):
+        if len(distances) < 2:
+            return [float(distances[0])]
+        log_indices = (
+            np.round(
+                np.logspace(
+                    start=math.log(1, 10),
+                    stop=math.log(len(distances) - 1, 10),
+                    num=nr_levels,
+                )
+            )
+            .astype(int)
+            .tolist()
+        )
+        log_indices.reverse()
+        return [float(distances[index]) for index in log_indices]
+
+    if level_scale not in ("lin", "linear"):
+        raise ValueError("level_scale needs to be one of 'log' or 'linear'")
+
+    max_distances = [float(distances[indices[-1]]) for indices in np.array_split(range(len(distances)), nr_levels)]
+    return list(reversed(max_distances))
+
+
 def compute_level_max_distances(
     hierarchical_topics: Any,
     nr_levels: int,
@@ -46,36 +81,34 @@ def compute_level_max_distances(
     list of float
         Ascending maximum distances, one per level.
     """
-    distances = hierarchical_topics["Distance"].to_list()
-    if not distances or nr_levels <= 0:
-        return []
+    return _compute_max_distances(hierarchical_topics["Distance"].to_list(), nr_levels, level_scale)
 
-    nr_levels = min(int(nr_levels), len(distances))
 
-    if level_scale in ("log", "logarithmic"):
-        if len(distances) < 2:
-            return [float(distances[0])]
-        log_indices = (
-            np.round(
-                np.logspace(
-                    start=math.log(1, 10),
-                    stop=math.log(len(distances) - 1, 10),
-                    num=nr_levels,
-                )
-            )
-            .astype(int)
-            .tolist()
-        )
-        log_indices.reverse()
-        return [float(distances[index]) for index in log_indices]
+def compute_level_max_distances_from_tree(
+    tree: Sequence[Mapping[str, Any]],
+    nr_levels: int,
+    level_scale: str = "linear",
+) -> List[float]:
+    """
+    Compute level maximum distances from a cached hierarchy tree.
 
-    if level_scale not in ("lin", "linear"):
-        raise ValueError("level_scale needs to be one of 'log' or 'linear'")
+    Parameters
+    ----------
+    tree : sequence of mapping
+        Cached merge-tree rows. Each row must contain ``id`` and ``distance``.
+    nr_levels : int
+        Requested number of levels.
+    level_scale : str, optional
+        ``"linear"`` (default) or ``"log"``/``"logarithmic"``.
 
-    max_distances = [
-        float(distances[indices[-1]]) for indices in np.array_split(range(len(hierarchical_topics)), nr_levels)
-    ]
-    return list(reversed(max_distances))
+    Returns
+    -------
+    list of float
+        Ascending maximum distances, one per level.
+    """
+    ordered = sorted(tree, key=lambda row: int(row.get("id", -1)), reverse=True)
+    distances = [float(row.get("distance", 0.0)) for row in ordered]
+    return _compute_max_distances(distances, nr_levels, level_scale)
 
 
 def build_level_mapping(
@@ -167,6 +200,92 @@ def build_level_mappings(
                 "level": index,
                 "max_distance": max_distance,
                 "mapping": build_level_mapping(hierarchical_topics, max_distance, flat_topic_ids),
+            }
+        )
+    return levels
+
+
+def build_level_mapping_from_tree(
+    tree: Sequence[Mapping[str, Any]],
+    max_distance: float,
+    flat_topic_ids: Sequence[int],
+) -> Dict[int, int]:
+    """
+    Build the flat-topic to level-cluster mapping from a cached tree.
+
+    Parameters
+    ----------
+    tree : sequence of mapping
+        Cached merge-tree rows with ``id``, ``topics``, and ``distance`` keys.
+    max_distance : float
+        Maximum hierarchy distance for the level.
+    flat_topic_ids : sequence of int
+        Flat topic IDs to include in the mapping.
+
+    Returns
+    -------
+    dict
+        Mapping from flat topic ID to the cluster ID at the level.
+    """
+    mapping: Dict[int, int] = {int(topic): int(topic) for topic in flat_topic_ids}
+
+    selection = [row for row in tree if float(row.get("distance", 0.0)) <= max_distance]
+    if not selection:
+        return mapping
+
+    selection.sort(key=lambda row: int(row.get("id", -1)))
+
+    for row in selection:
+        parent_id = int(row.get("id", -1))
+        for topic in row.get("topics") or []:
+            mapping[int(topic)] = parent_id
+
+    changed = True
+    while changed:
+        changed = False
+        for key, value in list(mapping.items()):
+            resolved = mapping.get(value, value)
+            if resolved != value:
+                mapping[key] = resolved
+                changed = True
+
+    return mapping
+
+
+def build_level_mappings_from_tree(
+    tree: Sequence[Mapping[str, Any]],
+    flat_topic_ids: Sequence[int],
+    nr_levels: int,
+    level_scale: str = "linear",
+) -> List[Dict[str, Any]]:
+    """
+    Build all hierarchy level mappings from a cached tree.
+
+    Parameters
+    ----------
+    tree : sequence of mapping
+        Cached merge-tree rows.
+    flat_topic_ids : sequence of int
+        Flat topic IDs, including ``-1`` when outliers exist.
+    nr_levels : int
+        Requested number of levels.
+    level_scale : str, optional
+        ``"linear"`` (default) or ``"log"``/``"logarithmic"``.
+
+    Returns
+    -------
+    list of dict
+        One entry per level with ``level``, ``max_distance``, and ``mapping``
+        keys. Returns an empty list when the tree is empty.
+    """
+    max_distances = compute_level_max_distances_from_tree(tree, nr_levels, level_scale)
+    levels: List[Dict[str, Any]] = []
+    for index, max_distance in enumerate(max_distances):
+        levels.append(
+            {
+                "level": index,
+                "max_distance": max_distance,
+                "mapping": build_level_mapping_from_tree(tree, max_distance, flat_topic_ids),
             }
         )
     return levels

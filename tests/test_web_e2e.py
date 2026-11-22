@@ -287,7 +287,6 @@ def _prepopulate_clustering_cache(test_database, em, collection_name):
         flat_keywords=keywords,
         hierarchical_topics=pd.DataFrame(columns=["Parent_ID", "Parent_Name", "Topics", "Distance"]),
         parent_labels={},
-        nr_levels=10,
     )
 
     clustering_params = dict(DEFAULT_CLUSTERING_PARAMS)

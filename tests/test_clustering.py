@@ -19,8 +19,11 @@ from abstracts_explorer.clustering import (
 )
 from abstracts_explorer.clustering.hierarchy_levels import (
     build_level_mapping,
+    build_level_mapping_from_tree,
     build_level_mappings,
+    build_level_mappings_from_tree,
     compute_level_max_distances,
+    compute_level_max_distances_from_tree,
     level_parent_descriptions,
     level_parent_labels,
 )
@@ -42,8 +45,11 @@ from abstracts_explorer.clustering.results import (
     build_cluster_centers,
     build_clustering_results,
     build_hierarchy,
+    build_hierarchy_levels,
+    build_hierarchy_tree,
     build_points,
     build_statistics,
+    derive_hierarchy_levels,
     export_results_to_json,
     results_have_flat_labels,
 )
@@ -131,14 +137,12 @@ class TestConstants:
         assert DEFAULT_CLUSTERING_PARAMS["pipeline_version"] == 2
 
     def test_clustering_params_for(self):
-        llm_params = clustering_params_for(True, nr_levels=7)
+        llm_params = clustering_params_for(True)
         ctfidf_params = clustering_params_for(False)
         assert llm_params["representation"] == "llm"
-        assert llm_params["nr_levels"] == 7
+        assert "nr_levels" not in llm_params
+        assert "level_scale" not in llm_params
         assert ctfidf_params["representation"] == "ctfidf"
-        assert DEFAULT_CLUSTERING_PARAMS["nr_levels"] == 10
-        llm_params["nr_levels"] = 99
-        assert DEFAULT_CLUSTERING_PARAMS["nr_levels"] == 10
 
 
 class TestHierarchyLevels:
@@ -195,6 +199,20 @@ class TestHierarchyLevels:
         assert descriptions[4] == "Papers about alpha and beta."
         assert descriptions[5] == ""
         assert level_parent_descriptions(None) == {}
+
+    def test_tree_level_helpers_match_dataframe_helpers(self):
+        hierarchy = sample_hierarchy()
+        tree = build_hierarchy_tree(hierarchy, level_parent_labels(hierarchy), {})
+        assert [node["id"] for node in tree] == [6, 5, 4]
+        assert compute_level_max_distances_from_tree(tree, 3, "linear") == compute_level_max_distances(
+            hierarchy, 3, "linear"
+        )
+        assert build_level_mappings_from_tree(tree, [0, 1, 2, 3], 3, "linear") == build_level_mappings(
+            hierarchy, [0, 1, 2, 3], 3, "linear"
+        )
+        assert build_level_mapping_from_tree(tree, 0.1, [0, 1, 2, 3]) == build_level_mapping(
+            hierarchy, 0.1, [0, 1, 2, 3]
+        )
 
 
 class TestResults:
@@ -280,6 +298,74 @@ class TestResults:
         )
         assert hierarchy["levels"] == []
 
+    def test_build_hierarchy_levels_from_tree_matches_dataframe_wrapper(self):
+        points = [
+            {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0},
+            {"id": "p2", "x": 2.0, "y": 2.0, "cluster": 1},
+            {"id": "p3", "x": 10.0, "y": 10.0, "cluster": 2},
+            {"id": "p4", "x": 12.0, "y": 12.0, "cluster": 3},
+        ]
+        stats = build_statistics([0, 1, 2, 3])
+        hierarchy = sample_hierarchy()
+        parent_labels = level_parent_labels(hierarchy)
+        tree = build_hierarchy_tree(hierarchy, parent_labels, {4: "Papers about alpha and beta."})
+        from_tree = build_hierarchy_levels(
+            tree=tree,
+            flat_topic_ids=[0, 1, 2, 3],
+            flat_labels={0: "A", 1: "B", 2: "C", 3: "D"},
+            flat_descriptions={0: "Papers about A."},
+            flat_keywords={0: ["a"], 1: ["b"], 2: ["c"], 3: ["d"]},
+            statistics=stats,
+            points=points,
+            nr_levels=3,
+        )
+        from_dataframe = build_hierarchy(
+            hierarchical_topics=hierarchy,
+            flat_topic_ids=[0, 1, 2, 3],
+            flat_labels={0: "A", 1: "B", 2: "C", 3: "D"},
+            flat_descriptions={0: "Papers about A."},
+            flat_keywords={0: ["a"], 1: ["b"], 2: ["c"], 3: ["d"]},
+            statistics=stats,
+            points=points,
+            parent_labels=parent_labels,
+            parent_descriptions={4: "Papers about alpha and beta."},
+            nr_levels=3,
+        )
+        assert from_tree == from_dataframe
+
+    def test_derive_hierarchy_levels_uses_tree(self):
+        results = {
+            "points": [
+                {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0},
+                {"id": "p2", "x": 2.0, "y": 2.0, "cluster": 1},
+                {"id": "p3", "x": 10.0, "y": 10.0, "cluster": 2},
+                {"id": "p4", "x": 12.0, "y": 12.0, "cluster": 3},
+            ],
+            "statistics": build_statistics([0, 1, 2, 3]),
+            "cluster_labels": {0: "A", 1: "B", 2: "C", 3: "D"},
+            "cluster_descriptions": {0: "Papers about A."},
+            "cluster_keywords": {0: ["a"], 1: ["b"], 2: ["c"], 3: ["d"]},
+            "hierarchy": {
+                "method": "bertopic",
+                "n_topics": 4,
+                "tree": build_hierarchy_tree(
+                    sample_hierarchy(),
+                    level_parent_labels(sample_hierarchy()),
+                    {4: "Papers about alpha and beta."},
+                ),
+            },
+        }
+
+        derived = derive_hierarchy_levels(results, nr_levels=3)
+
+        assert derived["nr_levels"] == 3
+        assert len(derived["levels"]) == 3
+        assert derived["levels"][0]["mapping"] == {"0": 4, "1": 4, "2": 2, "3": 3}
+
+    def test_derive_hierarchy_levels_returns_legacy_hierarchy(self):
+        legacy = {"method": "bertopic", "nr_levels": 2, "levels": [{"level": 0}]}
+        assert derive_hierarchy_levels({"hierarchy": legacy}) is legacy
+
     def test_build_clustering_results_schema(self):
         embeddings = np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0]])
         results = build_clustering_results(
@@ -293,7 +379,6 @@ class TestResults:
             hierarchical_topics=sample_hierarchy(),
             parent_labels=level_parent_labels(sample_hierarchy()),
             parent_descriptions={4: "Papers about A and B."},
-            nr_levels=3,
         )
         assert set(results) == {
             "points",
@@ -309,6 +394,9 @@ class TestResults:
         assert results["n_dimensions"] == 2
         assert results["cluster_descriptions"] == {0: "Papers about A."}
         assert len(results["points"]) == 4
+        assert "levels" not in results["hierarchy"]
+        assert len(results["hierarchy"]["tree"]) == 3
+        assert results["hierarchy"]["tree"][0]["id"] == 6
 
     def test_export_results(self, tmp_path):
         path = tmp_path / "nested" / "results.json"
@@ -697,7 +785,7 @@ class TestClusteringManager:
             ),
         )
 
-        results = manager.fit(use_llm_labels=True, nr_levels=2)
+        results = manager.fit(use_llm_labels=True)
 
         assert results["statistics"]["n_clusters"] == 2
         assert results["cluster_labels"] == {0: "Alpha Topic", 1: "Beta Topic"}
@@ -705,7 +793,8 @@ class TestClusteringManager:
         assert manager.cluster_labels is not None
         assert manager.get_cluster_statistics()["total_papers"] == 4
         assert manager.get_clustering_results() is results
-        assert len(results["hierarchy"]["levels"]) == 1
+        assert len(results["hierarchy"]["tree"]) == 1
+        assert results["hierarchy"]["tree"][0]["id"] == 2
 
     def test_fit_collects_descriptions(self, mocker):
         manager = self._manager()
@@ -740,7 +829,7 @@ class TestClusteringManager:
             ),
         )
 
-        results = manager.fit(use_llm_labels=True, nr_levels=2)
+        results = manager.fit(use_llm_labels=True)
 
         assert results["cluster_labels"] == {0: "Alpha Topic", 1: "Beta Topic"}
         assert results["cluster_descriptions"] == {
@@ -748,7 +837,7 @@ class TestClusteringManager:
             1: "Papers about topic 1.",
         }
         assert manager.cluster_descriptions == results["cluster_descriptions"]
-        merged = results["hierarchy"]["levels"][0]["clusters"][0]
+        merged = results["hierarchy"]["tree"][0]
         assert merged["description"] == "Papers spanning both topics."
 
     def test_fit_passes_show_progress_to_representation(self, mocker):
@@ -760,7 +849,7 @@ class TestClusteringManager:
         )
         representation_class = mocker.patch("abstracts_explorer.clustering.manager.ProjectLLMRepresentation")
 
-        manager.fit(use_llm_labels=True, show_progress=True, nr_levels=2)
+        manager.fit(use_llm_labels=True, show_progress=True)
 
         representation_class.assert_called_once_with(manager.embeddings_manager, show_progress=True)
 
@@ -772,7 +861,7 @@ class TestClusteringManager:
             manager, "_make_umap", return_value=Mock(fit_transform=Mock(return_value=np.zeros((4, 2))))
         )
 
-        results = manager.fit(use_llm_labels=False, nr_levels=2)
+        results = manager.fit(use_llm_labels=False)
 
         assert results["cluster_labels"] == {0: "alpha & beta", 1: "beta & gamma"}
         fake_model.get_topic.assert_not_called()

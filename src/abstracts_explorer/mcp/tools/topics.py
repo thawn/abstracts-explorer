@@ -7,6 +7,7 @@ import logging
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
+from abstracts_explorer.clustering import derive_hierarchy_levels
 from abstracts_explorer.mcp import cache, resources, shared_dependencies
 from abstracts_explorer.mcp.errors import ClusterAnalysisError, ToolError
 from abstracts_explorer.mcp.server import mcp
@@ -116,7 +117,8 @@ def _sample_titles(points: List[Dict[str, Any]], limit: int = 5) -> List[str]:
 
 def _select_hierarchy_level(cached: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Return the fixed MCP hierarchy level, clamped to available levels."""
-    levels = (cached.get("hierarchy") or {}).get("levels") or []
+    hierarchy = derive_hierarchy_levels(cached)
+    levels = hierarchy.get("levels") or []
     if not levels:
         return None
     return levels[min(MCP_HIERARCHY_LEVEL, len(levels) - 1)]

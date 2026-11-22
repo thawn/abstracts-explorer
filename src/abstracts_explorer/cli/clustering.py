@@ -15,7 +15,6 @@ from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.clustering import (
     perform_clustering,
     compute_clusters_with_cache,
-    DEFAULT_NR_LEVELS,
     ClusteringError,
 )
 
@@ -269,7 +268,6 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
                             years=c_years,
                             use_llm_labels=not getattr(args, "no_llm_labels", False),
                             show_progress=True,
-                            nr_levels=DEFAULT_NR_LEVELS,
                             backfill_missing_labels=True,
                         )
 

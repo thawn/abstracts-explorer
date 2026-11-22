@@ -2864,7 +2864,6 @@ class TestCLI:
         # Verify BERTopic parameters on all calls
         for call in mock_compute.call_args_list:
             kw = call[1]
-            assert kw["nr_levels"] == 10
             assert kw["use_llm_labels"] is True
             assert kw["show_progress"] is True
             assert kw["backfill_missing_labels"] is True

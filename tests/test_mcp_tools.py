@@ -1711,3 +1711,33 @@ def test_format_suggest_search_terms_from_orcid_result_empty():
 
     assert "No search terms could be derived" in result
     assert "No public works." in result
+
+
+def test_select_hierarchy_level_derives_from_tree():
+    """MCP selects its fixed level from a tree-derived hierarchy."""
+    from abstracts_explorer.mcp.tools.topics import MCP_HIERARCHY_LEVEL, _select_hierarchy_level
+
+    tree = [
+        {
+            "id": 10 + index,
+            "topics": [0, 1],
+            "label": f"Parent {index}",
+            "description": "",
+            "distance": 0.1 * (index + 1),
+            "child_left_id": 0,
+            "child_right_id": 1,
+        }
+        for index in range(7)
+    ]
+    cached = {
+        "points": [],
+        "statistics": {"n_clusters": 2, "cluster_sizes": {0: 1, 1: 1}},
+        "cluster_labels": {"0": "A", "1": "B"},
+        "cluster_keywords": {"0": ["a"], "1": ["b"]},
+        "hierarchy": {"method": "bertopic", "n_topics": 2, "tree": tree},
+    }
+
+    level = _select_hierarchy_level(cached)
+
+    assert level is not None
+    assert level["level"] == MCP_HIERARCHY_LEVEL
