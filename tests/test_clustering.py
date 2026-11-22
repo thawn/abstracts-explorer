@@ -949,10 +949,29 @@ class TestPipeline:
         )
 
         assert result is cached
-        backfill.assert_called_once_with(cached, embeddings, database)
+        backfill.assert_called_once_with(cached, embeddings, database, show_progress=False)
         database.update_clustering_cache_results.assert_called_once_with(42, cached)
         database.save_clustering_cache.assert_not_called()
         manager_class.assert_not_called()
+
+    def test_cache_hit_backfill_forwards_show_progress(self, mocker):
+        embeddings, database = self._deps()
+        cached = _fake_results()
+        database.get_clustering_cache_entry.return_value = {"id": 42, "results": cached}
+        backfill = mocker.patch(
+            "abstracts_explorer.clustering.pipeline._backfill_missing_labels",
+            return_value={"flat_updated": 0, "hierarchy_updated": 0},
+        )
+
+        compute_clusters_with_cache(
+            embeddings,
+            database,
+            "model",
+            backfill_missing_labels=True,
+            show_progress=True,
+        )
+
+        backfill.assert_called_once_with(cached, embeddings, database, show_progress=True)
 
     def test_cache_hit_backfill_noop_does_not_update_entry(self, mocker):
         embeddings, database = self._deps()

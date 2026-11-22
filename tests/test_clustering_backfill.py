@@ -401,6 +401,19 @@ class TestBackfill:
         assert report["flat_updated"] == 1
         assert report["failed"] == 0
 
+    def test_backfill_passes_show_progress_to_representation(self, mocker):
+        results = _flat_results()
+        database = Mock()
+        database.get_paper_summaries_by_uids.return_value = _papers("p0", "p1")
+        representation = mocker.patch("abstracts_explorer.clustering.backfill.CachedLabelRepresentation")
+        fake_model = Mock()
+        fake_model.get_topic.return_value = []
+        mocker.patch("abstracts_explorer.clustering.backfill.BERTopic", return_value=fake_model)
+
+        backfill_missing_labels(results, mocker.Mock(), database, show_progress=True)
+
+        assert representation.call_args.kwargs["show_progress"] is True
+
     def test_second_run_is_noop(self, mocker):
         results = _flat_results()
         results["cluster_descriptions"] = {0: "A desc.", 1: "Good description."}

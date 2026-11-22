@@ -227,7 +227,7 @@ def compute_clusters_with_cache(
         if cached:
             logger.info("Using cached BERTopic clustering results")
             if should_backfill and cached_entry is not None:
-                report = _backfill_missing_labels(cached, embeddings_manager, database)
+                report = _backfill_missing_labels(cached, embeddings_manager, database, show_progress=show_progress)
                 if report["flat_updated"] or report["hierarchy_updated"]:
                     database.update_clustering_cache_results(cached_entry["id"], cached)
             return cached

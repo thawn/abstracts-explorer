@@ -381,6 +381,7 @@ def backfill_missing_labels(
     embeddings_manager: Any,
     database: Any,
     *,
+    show_progress: bool = False,
     doc_length: int = 500,
     nr_docs: int = 4,
     diversity: float | None = 0.1,
@@ -399,6 +400,8 @@ def backfill_missing_labels(
         Manager exposing the OpenAI-compatible LLM client.
     database : DatabaseManager
         Database used to rebuild paper documents.
+    show_progress : bool, optional
+        Show tqdm progress bars for the LLM labeling batches (default False).
     doc_length : int, optional
         Maximum characters per representative document (default 500).
     nr_docs : int, optional
@@ -438,7 +441,7 @@ def backfill_missing_labels(
         nr_docs=nr_docs,
         diversity=diversity,
         doc_length=doc_length,
-        show_progress=False,
+        show_progress=show_progress,
     )
 
     try:
