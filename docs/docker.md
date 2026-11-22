@@ -109,7 +109,10 @@ curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scrip
 ```
 
 The script:
-1. Downloads all quadlet, configuration, and environment files
+1. Downloads all quadlet, configuration, and environment files. If
+   `abstracts-explorer.env` already exists, it is merged with the new template:
+   existing values are kept, new keys are added, and old-only keys are
+   retained.
 2. Saves `ABSTRACTS_EXPLORER_TAG` in the user's `environment.d` configuration
 3. Installs the system socket units (requires `sudo`)
 4. Enables lingering for your user
