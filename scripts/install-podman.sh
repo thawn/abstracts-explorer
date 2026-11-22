@@ -121,10 +121,12 @@ for f in \
     abstracts-explorer.container \
     abstracts-postgres.container \
     abstracts-chromadb.container \
+    abstracts-ollaya.container \
     abstracts.network \
     abstracts-data.volume \
     abstracts-chromadb-data.volume \
-    abstracts-postgres-data.volume; do
+    abstracts-postgres-data.volume \
+    abstracts-ollaya.volume; do
     download "$BASE_URL/systemd/user/$f" "$QUADLET_DIR/$f"
 done
 
@@ -193,6 +195,16 @@ else
     ok "Podman secret 'postgres-password' created"
 fi
 
+# ── 4b. Generate Ollaya guard API key and store as Podman secret ────────────
+if podman secret inspect ollaya-api-key >/dev/null 2>&1; then
+    ok "Podman secret 'ollaya-api-key' already exists — keeping it"
+else
+    info "Generating Ollaya API key"
+    GUARD_API_KEY=$(generate_password)
+    printf '%s' "$GUARD_API_KEY" | podman secret create ollaya-api-key -
+    ok "Podman secret 'ollaya-api-key' created"
+fi
+
 # ── 5. Enable log-retention timer (GDPR: 7 days) ────────────────────────────
 info "Enabling log-retention timer (GDPR: 7-day vacuum)"
 # The timer runs 'journalctl --user --vacuum-time=7d' daily so container logs
@@ -222,6 +234,9 @@ echo "  printf '%s' 'YOUR_TOKEN' | podman secret create llm-backend-auth-token -
 echo ""
 warn "Review and edit the environment file:"
 echo "  $DEPLOY_DIR/abstracts-explorer.env"
+echo ""
+warn "After starting the services, pull the Ollaya guard model:"
+echo "  podman exec abstracts-ollaya ollaya pull laya:multilingual"
 echo ""
 
 # ── 7. Print next steps ──────────────────────────────────────────────────────
@@ -255,7 +270,7 @@ fi
 cat <<EOF
 
   4. Start all services:
-       systemctl --user start abstracts-postgres abstracts-chromadb abstracts-explorer
+       systemctl --user start abstracts-postgres abstracts-chromadb abstracts-ollaya abstracts-explorer
 EOF
 
 if [ "$VARIANT" = "nginx" ]; then

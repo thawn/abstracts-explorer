@@ -83,6 +83,14 @@ jobs:
                       exit 1
                   fi
 
+            - name: Upload PR docs artifact
+              if: github.event_name == 'pull_request'
+              uses: actions/upload-artifact@v4
+              with:
+                  name: pr-docs-${{ github.event.pull_request.number }}
+                  path: docs/_build/html
+                  retention-days: 14
+
             # ---------------------------------------------------------------
             # Deployment build: build both stable (main) and dev (develop)
             # and combine into a single artifact for GitHub Pages.

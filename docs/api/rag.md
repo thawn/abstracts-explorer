@@ -374,6 +374,29 @@ chat.query(
 )
 ```
 
+## Input Guardrails
+
+`RAGChat` can classify each user message with a local
+[Ollaya](https://ollaya.dev/) decision model before doing any retrieval or LLM
+work. The guard asks two typed questions:
+
+- a `choice` question separating conference-data requests (`A`), coding or
+  general-purpose LLM requests (`B`), and unrelated input (`C`);
+- a `noul` question asking whether the message tries to override the
+  assistant's instructions.
+
+A message is refused when the `B` probability or the jailbreak probability
+exceeds its configured threshold. The refusal is returned as a normal chat
+response with an empty paper list and `metadata.guard.blocked = true`; it is not
+added to the conversation history.
+
+The guard is optional and **fail-open**: if Ollaya is disabled, unreachable,
+times out, or returns an unexpected payload, the query proceeds normally.
+Configuration lives in `GUARD_ENABLED`, `GUARD_BACKEND_URL`, `GUARD_MODEL`,
+`GUARD_TOPIC_THRESHOLD`, `GUARD_JAILBREAK_THRESHOLD`, and related settings. See
+[Configuration](../configuration.md#chat-input-guard-ollaya) and
+[Docker and Podman Setup](../docker.md#optional-chat-input-guard-ollaya).
+
 ## Error Handling
 
 ```python

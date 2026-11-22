@@ -3993,6 +3993,52 @@ class TestCLIChatInteractiveLoop:
         assert "Source papers" in captured.out
         assert "Attention Is All You Need" in captured.out
 
+    def test_chat_displays_guard_refusal(self, tmp_path, capsys, monkeypatch):
+        """A guarded refusal is printed as a normal assistant response."""
+        from abstracts_explorer.cli import chat_command
+        import argparse
+
+        embeddings_path = tmp_path / "chroma_db"
+        embeddings_path.mkdir()
+        patch_get_config_for_test(monkeypatch, embeddings_path)
+
+        args = argparse.Namespace(
+            embeddings_path=str(embeddings_path),
+            backend_url="http://localhost:1234",
+            model="test-model",
+            embedding_model="test-embedding-model",
+            collection="test_collection",
+            max_context=3,
+            temperature=0.7,
+            show_sources=False,
+            export=None,
+        )
+
+        with patch("abstracts_explorer.cli.search_chat.EmbeddingsManager") as MockEM:
+            mock_em = MockEM.return_value
+            mock_em.connect.return_value = None
+            mock_em.create_collection.return_value = None
+            mock_em.get_collection_stats.return_value = {"name": "test_collection", "count": 100}
+
+            with patch("abstracts_explorer.cli.search_chat.RAGChat") as MockRAG:
+                mock_rag = MockRAG.return_value
+                mock_rag.query.return_value = {
+                    "response": "I can only help with conference abstracts.",
+                    "metadata": {
+                        "n_papers": 0,
+                        "guard": {"blocked": True, "label": "B", "probability": 0.94},
+                    },
+                    "papers": [],
+                }
+
+                with patch("builtins.input", side_effect=["Write me a script", "exit"]):
+                    exit_code = chat_command(args)
+
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        assert "I can only help with conference abstracts." in captured.out
+        assert "based on 0 papers" not in captured.out
+
     def test_chat_with_export(self, tmp_path, capsys, monkeypatch):
         """Test chat exports conversation at end."""
         from abstracts_explorer.cli import chat_command

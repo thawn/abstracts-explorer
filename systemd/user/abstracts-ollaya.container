@@ -1,0 +1,50 @@
+# Ollaya decision-model server used by the optional chat input guard.
+# Documentation: https://ollaya.dev/
+#
+# The container is CPU-only and is not published to the host. After the
+# service is running, pull the guard model into the volume once:
+#
+#   podman exec abstracts-ollaya ollaya pull laya:multilingual
+#   systemctl --user restart abstracts-ollaya
+#
+# The API key is injected as a Podman secret so the app container can
+# authenticate with the same value.
+
+[Unit]
+Description=Ollaya decision-model server for Abstracts Explorer
+After=abstracts-ollaya-volume.service
+Requires=abstracts-ollaya-volume.service
+
+[Container]
+Image=ghcr.io/ollaya-dev/ollaya:latest
+ContainerName=abstracts-ollaya
+Network=abstracts.network
+
+Volume=abstracts-ollaya.volume:/home/ollaya/.ollaya
+
+Environment=OLLAYA_HOST=0.0.0.0:11435
+Environment=OLLAYA_PRELOAD=laya:multilingual
+Environment=OLLAYA_KEEP_ALIVE=-1
+Environment=OLLAYA_MAX_LOADED_MODELS=1
+Environment=OLLAYA_THREADS=4
+Environment=OLLAYA_LOG=info
+
+# Optional bearer token. Created by scripts/install-podman.sh.
+Secret=ollaya-api-key,type=env,target=OLLAYA_API_KEY
+
+HealthCmd=/usr/local/bin/ollaya-healthcheck
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+HealthStartPeriod=15s
+HealthStartupCmd=/usr/local/bin/ollaya-healthcheck
+HealthStartupInterval=15s
+HealthStartupRetries=0
+HealthStartupSuccess=1
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=600
+
+[Install]
+WantedBy=default.target

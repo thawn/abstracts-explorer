@@ -150,6 +150,27 @@ class Config:
         Whether to enable query rewriting for better semantic search.
     query_similarity_threshold : float
         Similarity threshold for determining when to retrieve new papers (0.0-1.0).
+    guard_enabled : bool
+        Whether to classify chat input with a local Ollaya decision model before
+        running the RAG agent (default: False).
+    guard_backend_url : str
+        Base URL of the Ollaya server (default: ``http://127.0.0.1:11435``).
+    guard_api_key : str
+        Optional bearer token for the Ollaya server.
+    guard_model : str
+        Ollaya model used for the guard decision (default: ``laya:multilingual``).
+    guard_timeout : float
+        Per-check HTTP timeout in seconds (default: 2.0).
+    guard_topic_threshold : float
+        Minimum probability for the abuse/off-topic choice to block a message
+        (default: 0.8).
+    guard_jailbreak_threshold : float
+        Minimum probability for the jailbreak yes/no question to block a message
+        (default: 0.8).
+    guard_max_chars : int
+        Maximum number of characters sent to Ollaya (default: 1500).
+    guard_refusal_message : str
+        Optional custom refusal text. Empty uses the built-in message.
     database_url : str
         SQLAlchemy database URL (supports SQLite, PostgreSQL, etc.).
         Automatically constructed from PAPER_DB config variable.
@@ -313,6 +334,19 @@ class Config:
         # Query Rewriting Settings
         self.enable_query_rewriting = self._get_env_bool("ENABLE_QUERY_REWRITING", default=True)
         self.query_similarity_threshold = self._get_env_float("QUERY_SIMILARITY_THRESHOLD", default=0.7)
+
+        # Chat Input Guard Settings (Ollaya decision model)
+        self.guard_enabled = self._get_env_bool("GUARD_ENABLED", default=False)
+        self.guard_backend_url = self._get_env("GUARD_BACKEND_URL", default="http://127.0.0.1:11435")
+        self.guard_api_key = self._get_env("GUARD_API_KEY", default="")
+        self.guard_model = self._get_env("GUARD_MODEL", default="laya:multilingual")
+        self.guard_timeout = max(0.1, self._get_env_float("GUARD_TIMEOUT", default=2.0))
+        self.guard_topic_threshold = min(1.0, max(0.0, self._get_env_float("GUARD_TOPIC_THRESHOLD", default=0.8)))
+        self.guard_jailbreak_threshold = min(
+            1.0, max(0.0, self._get_env_float("GUARD_JAILBREAK_THRESHOLD", default=0.8))
+        )
+        self.guard_max_chars = max(1, self._get_env_int("GUARD_MAX_CHARS", default=1500))
+        self.guard_refusal_message = self._get_env("GUARD_REFUSAL_MESSAGE", default="")
 
         # Web UI Default Filters
         self.default_conference = self._get_env("DEFAULT_CONFERENCE", default="ML4PS")
@@ -507,6 +541,15 @@ class Config:
             "llm_rate_limit_delay": self.llm_rate_limit_delay,
             "web_rate_limit_per_minute": self.web_rate_limit_per_minute,
             "web_ui_threads": self.web_ui_threads,
+            "guard_enabled": self.guard_enabled,
+            "guard_backend_url": self.guard_backend_url,
+            "guard_api_key": "***" if self.guard_api_key else "",
+            "guard_model": self.guard_model,
+            "guard_timeout": self.guard_timeout,
+            "guard_topic_threshold": self.guard_topic_threshold,
+            "guard_jailbreak_threshold": self.guard_jailbreak_threshold,
+            "guard_max_chars": self.guard_max_chars,
+            "guard_refusal_message": self.guard_refusal_message,
         }
 
     def _mask_database_url(self, url: str) -> str:

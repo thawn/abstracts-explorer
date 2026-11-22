@@ -60,6 +60,15 @@ def clean_config_env_vars():
         "LLM_REQUEST_TIMEOUT",
         "GITHUB_TOKEN",
         "REGISTRY_REPOSITORY",
+        "GUARD_ENABLED",
+        "GUARD_BACKEND_URL",
+        "GUARD_API_KEY",
+        "GUARD_MODEL",
+        "GUARD_TIMEOUT",
+        "GUARD_TOPIC_THRESHOLD",
+        "GUARD_JAILBREAK_THRESHOLD",
+        "GUARD_MAX_CHARS",
+        "GUARD_REFUSAL_MESSAGE",
     }
     for var in env_vars:
         if var in os.environ:
@@ -238,6 +247,15 @@ class TestConfig:
         assert config.proxy_x_prefix == 0
         assert config.web_rate_limit_per_minute == 30
         assert config.web_ui_threads == 6
+        assert config.guard_enabled is False
+        assert config.guard_backend_url == "http://127.0.0.1:11435"
+        assert config.guard_api_key == ""
+        assert config.guard_model == "laya:multilingual"
+        assert config.guard_timeout == 2.0
+        assert config.guard_topic_threshold == 0.8
+        assert config.guard_jailbreak_threshold == 0.8
+        assert config.guard_max_chars == 1500
+        assert config.guard_refusal_message == ""
 
     def test_web_ui_threads_from_env(self, tmp_path):
         """WEB_UI_THREADS overrides the default Waitress thread count."""
@@ -416,6 +434,43 @@ CHAT_MAX_TOKENS=500
         config = Config(env_path=env_file)
         assert config.chat_temperature == 0.7  # Default
 
+    def test_guard_settings_from_env(self, tmp_path, monkeypatch):
+        """Test custom guard settings load from the environment."""
+        for key in (
+            "GUARD_ENABLED",
+            "GUARD_BACKEND_URL",
+            "GUARD_API_KEY",
+            "GUARD_MODEL",
+            "GUARD_TIMEOUT",
+            "GUARD_TOPIC_THRESHOLD",
+            "GUARD_JAILBREAK_THRESHOLD",
+            "GUARD_MAX_CHARS",
+            "GUARD_REFUSAL_MESSAGE",
+        ):
+            monkeypatch.delenv(key, raising=False)
+
+        monkeypatch.setenv("GUARD_ENABLED", "true")
+        monkeypatch.setenv("GUARD_BACKEND_URL", "http://guard:9000")
+        monkeypatch.setenv("GUARD_API_KEY", "secret")
+        monkeypatch.setenv("GUARD_MODEL", "decima:guard-small")
+        monkeypatch.setenv("GUARD_TIMEOUT", "1.5")
+        monkeypatch.setenv("GUARD_TOPIC_THRESHOLD", "0.7")
+        monkeypatch.setenv("GUARD_JAILBREAK_THRESHOLD", "0.6")
+        monkeypatch.setenv("GUARD_MAX_CHARS", "900")
+        monkeypatch.setenv("GUARD_REFUSAL_MESSAGE", "Nope.")
+
+        config = Config(env_path=tmp_path / "missing.env")
+
+        assert config.guard_enabled is True
+        assert config.guard_backend_url == "http://guard:9000"
+        assert config.guard_api_key == "secret"
+        assert config.guard_model == "decima:guard-small"
+        assert config.guard_timeout == 1.5
+        assert config.guard_topic_threshold == 0.7
+        assert config.guard_jailbreak_threshold == 0.6
+        assert config.guard_max_chars == 900
+        assert config.guard_refusal_message == "Nope."
+
     def test_config_to_dict(self):
         """Test converting configuration to dictionary."""
         config = Config()
@@ -435,6 +490,10 @@ CHAT_MAX_TOKENS=500
         assert "llm_connect_timeout" in config_dict
         assert "llm_request_timeout" in config_dict
         assert "web_ui_threads" in config_dict
+        assert "guard_enabled" in config_dict
+        assert "guard_backend_url" in config_dict
+        assert "guard_model" in config_dict
+        assert "guard_api_key" in config_dict
 
     def test_config_to_dict_hides_token(self, tmp_path):
         """Test that to_dict hides auth token."""
@@ -448,6 +507,17 @@ CHAT_MAX_TOKENS=500
         assert config_dict["llm_backend_auth_token"] == "***"
         # But original value is still accessible
         assert config.llm_backend_auth_token == "secret-token-123"
+
+    def test_config_to_dict_hides_guard_api_key(self, tmp_path):
+        """Test that to_dict hides the guard API key."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("GUARD_API_KEY=guard-secret")
+
+        config = Config(env_path=env_file)
+        config_dict = config.to_dict()
+
+        assert config_dict["guard_api_key"] == "***"
+        assert config.guard_api_key == "guard-secret"
 
     def test_config_repr(self):
         """Test configuration string representation."""

@@ -43,6 +43,84 @@ cp .env.example .env
 # Edit .env with your settings
 ```
 
+### 5. Optional: Local Ollaya Guard
+
+The chat input guard uses [Ollaya](https://ollaya.dev/) in a Podman container.
+For host-run development (`uv run abstracts-explorer ...`), publish Ollaya on
+loopback and point the app at it.
+
+```bash
+podman volume create abstracts-ollaya
+
+podman run --rm \
+  -v abstracts-ollaya:/home/ollaya/.ollaya \
+  ghcr.io/ollaya-dev/ollaya pull laya:multilingual
+
+podman run -d --name abstracts-ollaya \
+  -p 127.0.0.1:11435:11435 \
+  -v abstracts-ollaya:/home/ollaya/.ollaya \
+  -e OLLAYA_HOST=0.0.0.0:11435 \
+  -e OLLAYA_PRELOAD=laya:multilingual \
+  -e OLLAYA_KEEP_ALIVE=-1 \
+  -e OLLAYA_MAX_LOADED_MODELS=1 \
+  -e OLLAYA_THREADS=4 \
+  -e OLLAYA_API_KEY=local-dev-key \
+  ghcr.io/ollaya-dev/ollaya
+```
+
+Add the matching settings to `.env`:
+
+```bash
+GUARD_ENABLED=true
+GUARD_BACKEND_URL=http://127.0.0.1:11435
+GUARD_API_KEY=local-dev-key
+GUARD_MODEL=laya:multilingual
+GUARD_TIMEOUT=2.0
+GUARD_TOPIC_THRESHOLD=0.8
+GUARD_JAILBREAK_THRESHOLD=0.8
+```
+
+`OLLAYA_API_KEY` and `GUARD_API_KEY` must match. If both are empty, Ollaya
+ignores the `Authorization` header.
+
+Verify the service before starting the app:
+
+```bash
+curl -s http://127.0.0.1:11435/
+curl -s http://127.0.0.1:11435/api/tags \
+  -H 'Authorization: Bearer local-dev-key'
+```
+
+The guard is fail-open, so the app still works if Ollaya is stopped.
+
+On macOS, Ollaya runs in Podman’s Linux VM and that VM needs at least 4 GB of
+memory. The default 2 GB is too small for `laya:multilingual`: model loading
+fails with `MODEL_LOAD_FAILED`. The ONNX Runtime warning
+`Unknown CPU vendor. cpuinfo_vendor value: 0` is harmless.
+
+```bash
+podman machine stop
+podman machine set --memory 4096
+podman machine start
+podman machine ssh 'free -m'
+```
+
+The multilingual Laya model peaks around 1.9 GB. On Linux, keep
+`OLLAYA_THREADS` at or below the number of physical cores. If the container
+still does not run on macOS, install Ollaya natively from
+<https://ollaya.dev/install.sh>.
+
+Clean up the container while keeping the downloaded model:
+
+```bash
+podman rm -f abstracts-ollaya
+```
+
+Remove the model volume as well with `podman volume rm abstracts-ollaya`.
+
+For the containerized app stack, the Quadlet and Compose setups already include
+Ollaya; see [Docker and Podman Setup](docker.md#optional-chat-input-guard-ollaya).
+
 ## Docker Development Setup
 
 For containerized development with Podman or Docker:
