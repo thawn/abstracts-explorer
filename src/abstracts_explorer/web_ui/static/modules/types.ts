@@ -43,6 +43,9 @@ export interface Visualization {
     topics?: string[];
     conference_data?: Record<string, Record<string, { year_relative?: Record<string, number> }>>;
     points?: ClusterPoint[];
+    cluster_centers?: Record<string, { x: number; y: number; z?: number }>;
+    cluster_labels?: Record<string, string>;
+    cluster_descriptions?: Record<string, string>;
     statistics?: {
         total_papers?: number;
         n_clusters?: number;

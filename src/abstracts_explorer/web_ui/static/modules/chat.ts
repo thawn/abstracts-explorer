@@ -5,7 +5,7 @@
  * and conversation management.
  */
 
-import { API_BASE } from './utils/constants.js';
+import { API_BASE, PLOTLY_COLORS } from './utils/constants.js';
 import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
 import { parseJsonResponse } from './utils/api-utils.js';
 import { renderEmptyState } from './utils/ui-utils.js';
@@ -560,16 +560,83 @@ function _renderClusterVisualizationChart(plotId: string, viz: Visualization): v
         clusters[cid].text.push(p.title || '');
     }
 
-    const traces = Object.keys(clusters).map(cid => ({
+    const centers = viz.cluster_centers || {};
+    const labels = viz.cluster_labels || {};
+    const descriptions = viz.cluster_descriptions || {};
+
+    const clusterIds = Object.keys(clusters);
+    const colorById: Record<string, string> = {};
+    clusterIds.forEach((cid, index) => {
+        colorById[cid] = PLOTLY_COLORS[index % PLOTLY_COLORS.length];
+    });
+
+    const traces: any[] = clusterIds.map(cid => ({
         x: clusters[cid].x,
         y: clusters[cid].y,
         text: clusters[cid].text,
         mode: 'markers',
         type: 'scatter',
         name: `Cluster ${cid}`,
-        marker: { size: 4, opacity: 0.7 },
+        marker: { size: 4, opacity: 0.7, color: colorById[cid] },
         hovertemplate: `%{text}<extra>Cluster ${cid}</extra>`
     }));
+
+    const starX: number[] = [];
+    const starY: number[] = [];
+    const starText: string[] = [];
+    const starCustomdata: Array<{ size: number; description: string }> = [];
+    const starColors: string[] = [];
+
+    clusterIds.forEach(cid => {
+        const numericId = Number(cid);
+        if (!Number.isNaN(numericId) && numericId < 0) return;
+
+        const clusterPoints = clusters[cid];
+        const label = labels[cid] || `Cluster ${cid}`;
+        const description = descriptions[cid] || '';
+        const center = centers[cid];
+        const resolvedCenter = center || {
+            x: clusterPoints.x.reduce((sum, value) => sum + value, 0) / clusterPoints.x.length,
+            y: clusterPoints.y.reduce((sum, value) => sum + value, 0) / clusterPoints.y.length
+        };
+
+        starX.push(resolvedCenter.x);
+        starY.push(resolvedCenter.y);
+        starText.push(label);
+        starColors.push(colorById[cid]);
+        starCustomdata.push({ size: clusterPoints.x.length, description });
+    });
+
+    if (starX.length > 0) {
+        const hasDescriptions = starCustomdata.some(item => Boolean(item.description));
+        const starHoverTemplate = hasDescriptions
+            ? '<b>%{text}</b><br>' +
+              '%{customdata.description}<br>' +
+              '%{customdata.size} papers<br>' +
+              '<extra></extra>'
+            : '<b>%{text}</b><br>' +
+              '%{customdata.size} papers<br>' +
+              '<extra></extra>';
+
+        traces.push({
+            x: starX,
+            y: starY,
+            text: starText,
+            customdata: starCustomdata,
+            mode: 'markers',
+            type: 'scatter',
+            name: 'Clusters',
+            marker: {
+                size: 16,
+                opacity: 1.0,
+                symbol: 'star',
+                color: starColors,
+                line: { color: 'white', width: 2 }
+            },
+            hovertemplate: starHoverTemplate,
+            showlegend: false
+        });
+    }
 
     const stats = viz.statistics || {};
     const title = `Cluster Visualization (${stats.total_papers || points.length} papers, ${stats.n_clusters || Object.keys(clusters).length} clusters)`;

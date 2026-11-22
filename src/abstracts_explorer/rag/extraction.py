@@ -109,6 +109,9 @@ class ExtractionMixin:
                             "type": "cluster_visualization",
                             "points": points,
                             "statistics": data.get("statistics", {}),
+                            "cluster_centers": data.get("cluster_centers", {}),
+                            "cluster_labels": data.get("cluster_labels", {}),
+                            "cluster_descriptions": data.get("cluster_descriptions", {}),
                         }
                     )
 

@@ -877,6 +877,9 @@ class TestTopicEvolutionAndRelevance:
             ],
             "statistics": {"n_clusters": 2, "n_noise": 0, "cluster_sizes": {0: 1, 1: 1}, "total_papers": 2},
             "n_dimensions": 2,
+            "cluster_centers": {"0": {"x": 0.0, "y": 0.0}, "1": {"x": 1.0, "y": 1.0}},
+            "cluster_labels": {"0": "Cluster A", "1": "Cluster B"},
+            "cluster_descriptions": {"0": "First cluster", "1": "Second cluster"},
         }
 
         from abstracts_explorer.mcp_server import get_cluster_visualization
@@ -885,7 +888,45 @@ class TestTopicEvolutionAndRelevance:
 
         assert result["n_dimensions"] == 2
         assert result["n_points"] == 2
+        assert result["cluster_centers"]["0"] == {"x": 0.0, "y": 0.0}
+        assert result["cluster_labels"] == {"0": "Cluster A", "1": "Cluster B"}
+        assert result["cluster_descriptions"] == {"0": "First cluster", "1": "Second cluster"}
         mock_db.get_clustering_cache.assert_called_once()
+
+    @patch("abstracts_explorer.mcp.resources._get_shared_database")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
+    def test_get_cluster_visualization_renumbers_multiple_conferences(self, mock_config, mock_get_db):
+        mock_config.return_value = Mock(collection_name="papers", embedding_model="test-model")
+        mock_db = Mock()
+        mock_get_db.return_value = mock_db
+        mock_db.get_clustering_cache.side_effect = [
+            {
+                "points": [{"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0, "title": "Paper 1"}],
+                "statistics": {"n_clusters": 1, "total_papers": 1},
+                "cluster_centers": {"0": {"x": 0.0, "y": 0.0}},
+                "cluster_labels": {"0": "First"},
+                "cluster_descriptions": {"0": "First cluster"},
+            },
+            {
+                "points": [{"id": "p2", "x": 5.0, "y": 5.0, "cluster": 0, "title": "Paper 2"}],
+                "statistics": {"n_clusters": 1, "total_papers": 1},
+                "cluster_centers": {"0": {"x": 5.0, "y": 5.0}},
+                "cluster_labels": {"0": "Second"},
+                "cluster_descriptions": {"0": "Second cluster"},
+            },
+        ]
+
+        from abstracts_explorer.mcp_server import get_cluster_visualization
+
+        result = json.loads(get_cluster_visualization(conferences=["NeurIPS", "ICLR"]))
+
+        assert [point["cluster"] for point in result["points"]] == [0, 1]
+        assert result["cluster_centers"]["0"] == {"x": 0.0, "y": 0.0}
+        assert result["cluster_centers"]["1"] == {"x": 5.0, "y": 5.0}
+        assert result["cluster_labels"] == {"0": "First", "1": "Second"}
+        assert result["cluster_descriptions"] == {"0": "First cluster", "1": "Second cluster"}
+        assert result["statistics"]["n_clusters"] == 2
+        assert result["statistics"]["total_papers"] == 2
 
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
     def test_get_cluster_visualization_no_conference(self, mock_config):
