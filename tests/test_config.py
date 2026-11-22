@@ -60,6 +60,9 @@ def clean_config_env_vars():
         "LLM_REQUEST_TIMEOUT",
         "GITHUB_TOKEN",
         "REGISTRY_REPOSITORY",
+        "OPENREVIEW_EMAIL",
+        "OPENREVIEW_PASSWORD",
+        "OPENREVIEW_TOKEN",
         "GUARD_ENABLED",
         "GUARD_BACKEND_URL",
         "GUARD_API_KEY",
@@ -471,11 +474,40 @@ CHAT_MAX_TOKENS=500
         assert config.guard_max_chars == 900
         assert config.guard_refusal_message == "Nope."
 
+    def test_openreview_settings_from_env(self, tmp_path, monkeypatch):
+        """Test OpenReview credentials load from the environment."""
+        for key in ("OPENREVIEW_EMAIL", "OPENREVIEW_PASSWORD", "OPENREVIEW_TOKEN"):
+            monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("OPENREVIEW_EMAIL", "user@example.org")
+        monkeypatch.setenv("OPENREVIEW_PASSWORD", "secret")
+        monkeypatch.setenv("OPENREVIEW_TOKEN", "token-123")
+
+        config = Config(env_path=tmp_path / "missing.env")
+
+        assert config.openreview_email == "user@example.org"
+        assert config.openreview_password == "secret"
+        assert config.openreview_token == "token-123"
+
+    def test_config_to_dict_hides_openreview_credentials(self, tmp_path):
+        """Test that to_dict masks OpenReview password and token."""
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "OPENREVIEW_EMAIL=user@example.org\n" "OPENREVIEW_PASSWORD=secret\n" "OPENREVIEW_TOKEN=token-123\n"
+        )
+
+        config = Config(env_path=env_file)
+        config_dict = config.to_dict()
+
+        assert config_dict["openreview_email"] == "user@example.org"
+        assert config_dict["openreview_password"] == "***"
+        assert config_dict["openreview_token"] == "***"
+        assert config.openreview_password == "secret"
+        assert config.openreview_token == "token-123"
+
     def test_config_to_dict(self):
         """Test converting configuration to dictionary."""
         config = Config()
         config_dict = config.to_dict()
-
         assert isinstance(config_dict, dict)
         assert "data_dir" in config_dict
         assert "chat_model" in config_dict

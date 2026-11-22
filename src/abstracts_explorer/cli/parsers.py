@@ -139,7 +139,7 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         "--request-delay",
         type=float,
         default=None,
-        help="Delay before each HTTP request for plugins that support it (AGU).",
+        help="Delay before each HTTP request for plugins that support it (AGU, NeurIPS, ICML, ICLR).",
     )
     download_parser.add_argument(
         "--no-resume",
@@ -154,6 +154,30 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         help=(
             "Path to a pre-downloaded conference JSON file. "
             "Required for the 'chi' plugin (download the file from programs.sigchi.org)."
+        ),
+    )
+    download_parser.add_argument(
+        "--openreview-email",
+        type=str,
+        default=None,
+        dest="openreview_email",
+        help="OpenReview account email for the ICLR downloader (env: OPENREVIEW_EMAIL).",
+    )
+    download_parser.add_argument(
+        "--openreview-password",
+        type=str,
+        default=None,
+        dest="openreview_password",
+        help="OpenReview account password for the ICLR downloader (env: OPENREVIEW_PASSWORD).",
+    )
+    download_parser.add_argument(
+        "--openreview-token",
+        type=str,
+        default=None,
+        dest="openreview_token",
+        help=(
+            "Existing OpenReview bearer token for the ICLR downloader "
+            "(env: OPENREVIEW_TOKEN). Takes precedence over email/password."
         ),
     )
 

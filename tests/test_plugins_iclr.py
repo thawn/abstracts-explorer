@@ -59,6 +59,222 @@ class TestICLRPlugin:
         with pytest.raises(ValueError, match="Year 1800 not supported"):
             plugin.validate_year(1800)
 
+    def test_get_url_uses_eventhosts_for_modern_years(self):
+        """Modern years use the EventHosts JSON endpoint."""
+        plugin = ICLRDownloaderPlugin()
+
+        assert plugin.get_url(2025) == "https://iclr.cc/static/virtual/data/iclr-2025-orals-posters.json"
+
+    def test_get_url_uses_openreview_for_legacy_years(self):
+        """Pre-2020 years use the OpenReview API endpoint."""
+        plugin = ICLRDownloaderPlugin()
+
+        assert plugin.get_url(2019) == "https://api.openreview.net/notes?content.venueid=ICLR.cc/2019/Conference"
+
+    def test_validate_year_rejects_pre_start_year(self):
+        """Years before 2017 are unsupported."""
+        plugin = ICLRDownloaderPlugin()
+
+        with pytest.raises(ValueError, match="Year 2016 not supported"):
+            plugin.validate_year(2016)
+
+    @patch("abstracts_explorer.config.get_config")
+    @patch("requests.Session.post")
+    @patch("requests.Session.get")
+    def test_download_legacy_uses_config_token(self, mock_get, mock_post, mock_get_config):
+        """Use an OpenReview token from configuration when supplied there."""
+        mock_get_config.return_value = Mock(
+            openreview_token="config-token",
+            openreview_email="",
+            openreview_password="",
+        )
+        notes_response = Mock()
+        notes_response.json.return_value = {
+            "notes": [
+                {
+                    "id": "forum1",
+                    "forum": "forum1",
+                    "content": {
+                        "title": "OpenReview Paper",
+                        "abstract": "OpenReview abstract.",
+                        "authors": ["Alice Smith"],
+                    },
+                }
+            ]
+        }
+        mock_get.return_value = notes_response
+
+        papers = ICLRDownloaderPlugin().download(year=2019)
+
+        assert len(papers) == 1
+        mock_post.assert_not_called()
+        assert mock_get.call_args.kwargs["headers"] == {"Authorization": "Bearer config-token"}
+
+    @patch("requests.Session.post")
+    @patch("requests.Session.get")
+    def test_download_legacy_logs_in_with_credentials(self, mock_get, mock_post):
+        """Log in with an OpenReview account before querying notes."""
+        login_response = Mock()
+        login_response.json.return_value = {"token": "openreview-token"}
+        mock_post.return_value = login_response
+
+        notes_response = Mock()
+        notes_response.json.return_value = {
+            "notes": [
+                {
+                    "id": "forum1",
+                    "forum": "forum1",
+                    "content": {
+                        "title": "OpenReview Paper",
+                        "abstract": "OpenReview abstract.",
+                        "authors": ["Alice Smith"],
+                    },
+                }
+            ]
+        }
+        mock_get.return_value = notes_response
+
+        papers = ICLRDownloaderPlugin().download(
+            year=2019,
+            openreview_email="user@example.org",
+            openreview_password="secret",
+        )
+
+        assert len(papers) == 1
+        mock_post.assert_called_once()
+        post_args, post_kwargs = mock_post.call_args
+        assert post_args[0].endswith("/login")
+        assert post_kwargs["json"] == {"id": "user@example.org", "password": "secret"}
+        assert mock_get.call_args.kwargs["headers"] == {"Authorization": "Bearer openreview-token"}
+
+    @patch("requests.Session.post")
+    @patch("requests.Session.get")
+    def test_download_legacy_uses_existing_token(self, mock_get, mock_post):
+        """Use a supplied bearer token without logging in."""
+        notes_response = Mock()
+        notes_response.json.return_value = {
+            "notes": [
+                {
+                    "id": "forum1",
+                    "forum": "forum1",
+                    "content": {
+                        "title": "OpenReview Paper",
+                        "abstract": "OpenReview abstract.",
+                        "authors": ["Alice Smith"],
+                    },
+                }
+            ]
+        }
+        mock_get.return_value = notes_response
+
+        papers = ICLRDownloaderPlugin().download(year=2019, openreview_token="given-token")
+
+        assert len(papers) == 1
+        mock_post.assert_not_called()
+        assert mock_get.call_args.kwargs["headers"] == {"Authorization": "Bearer given-token"}
+
+    @patch("requests.Session.post")
+    @patch("requests.Session.get")
+    def test_download_legacy_falls_back_when_login_fails(self, mock_get, mock_post):
+        """Fall back to Semantic Scholar when OpenReview login fails."""
+        mock_post.side_effect = requests.exceptions.RequestException("bad credentials")
+        s2_response = Mock()
+        s2_response.json.return_value = {
+            "data": [
+                {
+                    "paperId": "s2-1",
+                    "title": "S2 Paper",
+                    "abstract": "S2 abstract.",
+                    "authors": [{"name": "Carol White"}],
+                }
+            ],
+            "token": None,
+        }
+        mock_get.return_value = s2_response
+
+        papers = ICLRDownloaderPlugin().download(
+            year=2019,
+            openreview_email="user@example.org",
+            openreview_password="wrong",
+        )
+
+        assert len(papers) == 1
+        assert papers[0].title == "S2 Paper"
+        assert "api.semanticscholar.org" in mock_get.call_args.args[0]
+
+    @patch("requests.Session.get")
+    def test_download_legacy_uses_openreview(self, mock_get):
+        """Prefer OpenReview when it returns records."""
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "notes": [
+                {
+                    "id": "forum1",
+                    "forum": "forum1",
+                    "content": {
+                        "title": "OpenReview Paper",
+                        "abstract": "OpenReview abstract.",
+                        "authors": ["Alice Smith", "Bob Jones"],
+                    },
+                }
+            ]
+        }
+        mock_get.return_value = mock_response
+
+        papers = ICLRDownloaderPlugin().download(year=2019)
+
+        assert len(papers) == 1
+        paper = papers[0]
+        assert paper.title == "OpenReview Paper"
+        assert paper.abstract == "OpenReview abstract."
+        assert paper.authors == ["Alice Smith", "Bob Jones"]
+        assert paper.original_id == "forum1"
+        assert paper.url == "https://openreview.net/forum?id=forum1"
+        assert paper.session == "ICLR 2019"
+        assert "api.openreview.net" in mock_get.call_args.args[0]
+
+    @patch("requests.Session.get")
+    def test_download_legacy_falls_back_to_semantic_scholar(self, mock_get):
+        """Fall back to Semantic Scholar when OpenReview fails."""
+        s2_response = Mock()
+        s2_response.json.return_value = {
+            "data": [
+                {
+                    "paperId": "s2-1",
+                    "title": "S2 Paper",
+                    "abstract": "S2 abstract.",
+                    "authors": [{"name": "Carol White"}],
+                    "url": "https://www.semanticscholar.org/paper/s2-1",
+                }
+            ],
+            "token": None,
+        }
+        mock_get.side_effect = [
+            requests.exceptions.RequestException("403"),
+            s2_response,
+        ]
+
+        papers = ICLRDownloaderPlugin().download(year=2019)
+
+        assert len(papers) == 1
+        paper = papers[0]
+        assert paper.title == "S2 Paper"
+        assert paper.abstract == "S2 abstract."
+        assert paper.authors == ["Carol White"]
+        assert paper.original_id == "s2-1"
+        assert paper.url == "https://www.semanticscholar.org/paper/s2-1"
+        assert "api.semanticscholar.org" in mock_get.call_args.args[0]
+
+    @patch("requests.Session.get")
+    def test_download_legacy_raises_when_all_sources_empty(self, mock_get):
+        """Raise when both OpenReview and Semantic Scholar return nothing."""
+        empty_response = Mock()
+        empty_response.json.return_value = {"notes": [], "data": [], "token": None}
+        mock_get.return_value = empty_response
+
+        with pytest.raises(RuntimeError, match="No valid ICLR papers"):
+            ICLRDownloaderPlugin().download(year=2019)
+
     @patch("requests.Session.get")
     def test_download_success(self, mock_get):
         """Test successful download of ICLR data."""

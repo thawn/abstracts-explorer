@@ -32,8 +32,8 @@ Official AISTATS conference data downloader.
 
 Official NeurIPS conference data downloader.
 - **File**: `neurips_downloader.py`
-- **Years**: 2013-2025
-- **Source**: <https://neurips.cc/>
+- **Years**: 1987 onward (2020+ from EventHosts JSON, earlier from the NeurIPS proceedings)
+- **Source**: <https://neurips.cc/>, <https://papers.nips.cc/>
 - **API**: Full schema
 
 ### ml4ps
@@ -48,15 +48,15 @@ ML4PS (Machine Learning for Physical Sciences) workshop downloader.
 
 Official ICLR conference data downloader.
 - **File**: `iclr_downloader.py`
-- **Years**: 2020 onward
-- **Source**: <https://openreview.net/>
+- **Years**: 2017 onward (2020+ from EventHosts JSON, earlier from OpenReview with a Semantic Scholar fallback)
+- **Source**: <https://openreview.net/>, <https://www.semanticscholar.org/>
 - **API**: Full schema
 
 ### icml
 
 Official ICML conference data downloader.
 - **File**: `icml_downloader.py`
-- **Years**: 2020 onward
+- **Years**: 2013 onward (2020+ from EventHosts JSON, earlier from PMLR proceedings)
 - **Source**: <https://proceedings.mlr.press/>
 - **API**: Full schema
 

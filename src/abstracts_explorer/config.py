@@ -200,6 +200,13 @@ class Config:
         Number of Waitress worker threads for the web UI (default: 6).
         Values below 1 are clamped to 1. Ignored when the Flask development
         server is used.
+    openreview_email : str
+        Email address for OpenReview login, used by the ICLR downloader.
+    openreview_password : str
+        Password for OpenReview login, used by the ICLR downloader.
+    openreview_token : str
+        Pre-existing OpenReview bearer token. When set, it is used instead of
+        logging in with an email and password.
 
     Examples
     --------
@@ -383,6 +390,11 @@ class Config:
         # OCI repository for data artifacts (e.g., 'ghcr.io/thawn/abstracts-data')
         self.registry_repository = self._get_env("REGISTRY_REPOSITORY", default="")
 
+        # OpenReview authentication (ICLR downloader)
+        self.openreview_email = self._get_env("OPENREVIEW_EMAIL", default="")
+        self.openreview_password = self._get_env("OPENREVIEW_PASSWORD", default="")
+        self.openreview_token = self._get_env("OPENREVIEW_TOKEN", default="")
+
     def _get_env(self, key: str, default: str = "") -> str:
         """
         Get string environment variable.
@@ -550,6 +562,9 @@ class Config:
             "guard_jailbreak_threshold": self.guard_jailbreak_threshold,
             "guard_max_chars": self.guard_max_chars,
             "guard_refusal_message": self.guard_refusal_message,
+            "openreview_email": self.openreview_email,
+            "openreview_password": "***" if self.openreview_password else "",
+            "openreview_token": "***" if self.openreview_token else "",
         }
 
     def _mask_database_url(self, url: str) -> str:

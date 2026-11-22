@@ -204,7 +204,7 @@ class AAAIDownloaderPlugin(HTTPDownloaderPlugin):
         verify_ssl: bool,
         request_delay: float,
         papers: list[LightweightPaper],
-        seen: set[int],
+        seen: set[int | str],
         failures: list[dict[str, Any]],
     ) -> None:
         """Collect one issue's papers, recording page-level fetch failures."""
@@ -387,7 +387,7 @@ class AAAIDownloaderPlugin(HTTPDownloaderPlugin):
 
         issue_urls = self._discover_issues(year, options.timeout, options.verify_ssl, options.request_delay)
         papers: list[LightweightPaper] = []
-        seen: set[int] = set()
+        seen: set[int | str] = set()
         failures: list[dict[str, Any]] = []
         for issue_url in issue_urls:
             self._process_issue(
