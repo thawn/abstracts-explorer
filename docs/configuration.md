@@ -29,7 +29,7 @@ nano .env
 
 - **CHAT_MODEL**: The LLM model to use for RAG chat (default: `diffbot-small-xl-2508`)
 - **CHAT_TEMPERATURE**: Temperature for LLM responses, 0.0-2.0 (default: `0.7`)
-- **CHAT_MAX_TOKENS**: Maximum tokens in LLM responses (default: `2000`)
+- **CHAT_MAX_TOKENS**: Maximum tokens in LLM responses (default: `4000`)
 - **CLUSTER_LABEL_MODEL**: Chat model used to auto-generate cluster labels during clustering (default: `alias-fast`)
 - **LLM_MAX_ATTEMPTS**: Maximum attempts for one cluster-label LLM request (default: `6`). Set to `1` to disable retries.
 - **LLM_RETRY_BASE_DELAY**: Base delay in seconds for exponential backoff between retries (default: `1.0`)
