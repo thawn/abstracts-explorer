@@ -478,6 +478,77 @@ class TestLLMHelpers:
         assert chat.call_count == 2
         sleep.assert_called_once()
 
+    def test_generate_label_uses_base_budget_on_first_attempt(self, mocker):
+        config = mocker.Mock(
+            llm_max_attempts=1,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_request_timeout=5,
+            cluster_label_model="model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        chat = mocker.patch("abstracts_explorer.clustering.llm.chat_completion_text", return_value="Label")
+        em = mocker.Mock(openai_client=object())
+
+        generate_llm_label(em, "system", "user")
+
+        assert chat.call_args.kwargs["max_tokens"] == 600
+
+    def test_generate_label_doubles_budget_after_empty_response(self, mocker):
+        config = mocker.Mock(
+            llm_max_attempts=2,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_request_timeout=5,
+            cluster_label_model="model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
+        chat = mocker.patch("abstracts_explorer.clustering.llm.chat_completion_text", side_effect=["", "Label"])
+        em = mocker.Mock(openai_client=object())
+
+        assert generate_llm_label(em, "system", "user") == "Label"
+        budgets = [call.kwargs["max_tokens"] for call in chat.call_args_list]
+        assert budgets == [600, 1200]
+
+    def test_generate_label_caps_budget_at_max(self, mocker):
+        config = mocker.Mock(
+            llm_max_attempts=6,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_request_timeout=5,
+            cluster_label_model="model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
+        chat = mocker.patch("abstracts_explorer.clustering.llm.chat_completion_text", return_value="")
+        em = mocker.Mock(openai_client=object())
+
+        with pytest.raises(ValueError):
+            generate_llm_label(em, "system", "user")
+        budgets = [call.kwargs["max_tokens"] for call in chat.call_args_list]
+        assert budgets == [600, 1200, 2400, 2400, 2400, 2400]
+
+    def test_generate_label_does_not_escalate_after_non_empty_error(self, mocker):
+        config = mocker.Mock(
+            llm_max_attempts=3,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_request_timeout=5,
+            cluster_label_model="model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
+        chat = mocker.patch(
+            "abstracts_explorer.clustering.llm.chat_completion_text",
+            side_effect=["", MockError(status_code=503), "Label"],
+        )
+        em = mocker.Mock(openai_client=object())
+
+        assert generate_llm_label(em, "system", "user") == "Label"
+        budgets = [call.kwargs["max_tokens"] for call in chat.call_args_list]
+        assert budgets == [600, 1200, 1200]
+
     def test_generate_label_retries_retryable_error(self, mocker):
         config = mocker.Mock(
             llm_max_attempts=2,
