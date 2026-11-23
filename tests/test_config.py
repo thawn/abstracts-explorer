@@ -237,6 +237,7 @@ class TestConfig:
         assert config.chat_temperature == 0.7
         assert config.chat_max_tokens == 4000
         assert config.cluster_label_model == "alias-fast"
+        assert config.cluster_label_max_workers == 4
         assert config.embedding_max_input_tokens == 8192
         assert config.rag_max_parallel_tools == 8
         assert config.rag_request_limit == 50
@@ -309,6 +310,26 @@ class TestConfig:
         assert config.rag_max_parallel_tools == 3
         assert config.rag_request_limit == 20
         assert config.rag_query_timeout == 45
+
+    def test_cluster_label_max_workers_from_env(self, tmp_path):
+        """CLUSTER_LABEL_MAX_WORKERS controls cluster-label concurrency."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("CLUSTER_LABEL_MAX_WORKERS=8\n")
+
+        config = Config(env_path=env_file)
+        assert config.cluster_label_max_workers == 8
+
+    def test_cluster_label_max_workers_are_clamped(self, tmp_path):
+        """Non-positive worker counts fall back to sequential labeling."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("CLUSTER_LABEL_MAX_WORKERS=0\n")
+
+        config = Config(env_path=env_file)
+        assert config.cluster_label_max_workers == 1
+
+        env_file.write_text("CLUSTER_LABEL_MAX_WORKERS=-3\n")
+        config = Config(env_path=env_file)
+        assert config.cluster_label_max_workers == 1
 
     def test_llm_timeouts_from_env(self, tmp_path):
         """LLM connect and request timeouts are configurable."""

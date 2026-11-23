@@ -31,6 +31,7 @@ nano .env
 - **CHAT_TEMPERATURE**: Temperature for LLM responses, 0.0-2.0 (default: `0.7`)
 - **CHAT_MAX_TOKENS**: Maximum tokens in LLM responses (default: `4000`)
 - **CLUSTER_LABEL_MODEL**: Chat model used to auto-generate cluster labels during clustering (default: `alias-fast`)
+- **CLUSTER_LABEL_MAX_WORKERS**: Maximum number of cluster-label LLM requests submitted in parallel per labeling batch (default: `4`). Set to `1` to label sequentially. Throughput remains bounded by `REQUESTS_PER_MINUTE`, so parallelism only hides per-request latency.
 - **LLM_MAX_ATTEMPTS**: Maximum attempts for one cluster-label LLM request (default: `6`). Set to `1` to disable retries.
 - **LLM_RETRY_BASE_DELAY**: Base delay in seconds for exponential backoff between retries (default: `1.0`)
 - **LLM_RETRY_MAX_DELAY**: Maximum delay in seconds between retries (default: `10.0`)

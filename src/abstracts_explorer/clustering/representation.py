@@ -3,13 +3,15 @@ Project LLM representation model for BERTopic.
 """
 
 import logging
-from typing import Any, Dict, List, Mapping, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from bertopic.representation import BaseRepresentation
 from tqdm import tqdm
 
 from abstracts_explorer.clustering.labels import combine_label_description, parse_llm_label_response
 from abstracts_explorer.clustering.llm import DEFAULT_LABEL_MAX_TOKENS, generate_llm_label
+from abstracts_explorer.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,7 @@ class ProjectLLMRepresentation(BaseRepresentation):
         diversity: float | None = 0.1,
         doc_length: int = 500,
         show_progress: bool = False,
+        max_workers: Optional[int] = None,
     ) -> None:
         """
         Initialize the representation model.
@@ -65,6 +68,11 @@ class ProjectLLMRepresentation(BaseRepresentation):
             Maximum characters per representative document (default 500).
         show_progress : bool, optional
             Show a tqdm progress bar for multi-topic LLM batches (default False).
+        max_workers : int or None, optional
+            Maximum number of LLM requests to run in parallel (default
+            ``None``, which uses the configured
+            :attr:`~abstracts_explorer.config.Config.cluster_label_max_workers`).
+            A value of ``1`` labels topics sequentially.
         """
         self.embeddings_manager = embeddings_manager
         self.prompt = prompt
@@ -73,6 +81,7 @@ class ProjectLLMRepresentation(BaseRepresentation):
         self.diversity = diversity
         self.doc_length = doc_length
         self.show_progress = show_progress
+        self.max_workers = max_workers
 
     def _resolve_cached_label(self, topic: Any, documents: Any) -> str | None:
         """
@@ -136,6 +145,7 @@ class ProjectLLMRepresentation(BaseRepresentation):
         )
 
         updated_topics: Dict[Any, List[Tuple[str, float]]] = {}
+        pending: List[Tuple[Any, List[str], str]] = []
         use_progress = self.show_progress and len(repr_docs_mappings) > 1
         progress = (
             tqdm(
@@ -156,33 +166,67 @@ class ProjectLLMRepresentation(BaseRepresentation):
                     continue
 
                 keywords = [word for word, _ in topics[topic][:10]]
-                docs_text = "\n".join(f"- {doc[: self.doc_length]}" for doc in docs)
-                prompt = self.prompt.replace("[KEYWORDS]", ", ".join(keywords))
-                prompt = prompt.replace("[DOCUMENTS]", docs_text)
-                try:
-                    response = generate_llm_label(
-                        self.embeddings_manager,
-                        self.system_prompt,
-                        prompt,
-                        max_tokens=DEFAULT_LABEL_MAX_TOKENS,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "LLM label failed for topic %s: %s; using keyword fallback. Prompt:\n%s",
-                        topic,
-                        exc,
-                        prompt,
-                    )
-                    response = ""
+                pending.append((topic, keywords, self._build_prompt(keywords, docs)))
 
-                label, description = parse_llm_label_response(response)
-                if not label:
-                    label = " & ".join(keywords[:3])
-                updated_topics[topic] = [(combine_label_description(label, description), 1)]
-                if progress is not None:
-                    progress.update(1)
+            if pending:
+                max_workers = self._effective_max_workers(len(pending))
+                if max_workers <= 1:
+                    for topic, keywords, prompt in pending:
+                        updated_topics[topic] = [(self._label_topic(topic, keywords, prompt), 1)]
+                        if progress is not None:
+                            progress.update(1)
+                else:
+                    with ThreadPoolExecutor(
+                        max_workers=max_workers,
+                        thread_name_prefix="cluster-label",
+                    ) as executor:
+                        futures = {
+                            executor.submit(self._label_topic, topic, keywords, prompt): topic
+                            for topic, keywords, prompt in pending
+                        }
+                        for future in as_completed(futures):
+                            topic = futures[future]
+                            updated_topics[topic] = [(future.result(), 1)]
+                            if progress is not None:
+                                progress.update(1)
         finally:
             if progress is not None:
                 progress.close()
 
         return updated_topics
+
+    def _effective_max_workers(self, task_count: int) -> int:
+        """Return the number of labeling threads to use for *task_count* topics."""
+        configured = self.max_workers
+        if configured is None:
+            configured = get_config().cluster_label_max_workers
+        return max(1, min(int(configured), task_count))
+
+    def _build_prompt(self, keywords: Sequence[str], docs: Sequence[str]) -> str:
+        """Build the label prompt from keywords and representative documents."""
+        docs_text = "\n".join(f"- {doc[: self.doc_length]}" for doc in docs)
+        prompt = self.prompt.replace("[KEYWORDS]", ", ".join(keywords))
+        return prompt.replace("[DOCUMENTS]", docs_text)
+
+    def _label_topic(self, topic: Any, keywords: Sequence[str], prompt: str) -> str:
+        """Generate one encoded label/description, falling back to keywords."""
+        try:
+            response = generate_llm_label(
+                self.embeddings_manager,
+                self.system_prompt,
+                prompt,
+                max_tokens=DEFAULT_LABEL_MAX_TOKENS,
+            )
+        except Exception as exc:
+            logger.warning(
+                "LLM label failed for topic %s: %s; using keyword fallback. Prompt:\n%s",
+                topic,
+                exc,
+                prompt,
+            )
+            response = ""
+
+        label, description = parse_llm_label_response(response)
+        if not label:
+            label = " & ".join(keywords[:3])
+        return combine_label_description(label, description)

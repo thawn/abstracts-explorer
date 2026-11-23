@@ -4,6 +4,8 @@ Tests for the BERTopic clustering pipeline.
 
 import json
 import logging
+import threading
+import time
 from unittest.mock import Mock
 
 import numpy as np
@@ -731,6 +733,90 @@ class TestRepresentation:
 
         assert progress.update.call_count == 2
         progress.close.assert_called_once()
+
+    def test_extract_topics_runs_labels_in_parallel(self, mocker):
+        """A batch smaller than the worker budget submits requests concurrently."""
+        model = Mock()
+        model._extract_representative_docs.return_value = (
+            {0: ["doc one"], 1: ["doc two"], 2: ["doc three"]},
+            None,
+            None,
+            None,
+        )
+        representation = ProjectLLMRepresentation(mocker.Mock(), max_workers=3)
+        barrier = threading.Barrier(3, timeout=5)
+
+        def fake_label(*args, **kwargs):
+            barrier.wait()
+            return "Label"
+
+        mocker.patch(
+            "abstracts_explorer.clustering.representation.generate_llm_label",
+            side_effect=fake_label,
+        )
+
+        topics = {
+            0: [("alpha", 1.0)],
+            1: [("beta", 1.0)],
+            2: [("gamma", 1.0)],
+        }
+        updated = representation.extract_topics(model, ["d"], None, topics)
+
+        assert [updated[topic] for topic in (0, 1, 2)] == [[("Label", 1)]] * 3
+
+    def test_extract_topics_runs_sequentially_with_one_worker(self, mocker):
+        """max_workers=1 keeps the original sequential behavior."""
+        model = self._topic_model()
+        representation = ProjectLLMRepresentation(mocker.Mock(), max_workers=1)
+        active = 0
+        max_active = 0
+        lock = threading.Lock()
+
+        def fake_label(*args, **kwargs):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.02)
+            with lock:
+                active -= 1
+            return "Label"
+
+        mocker.patch(
+            "abstracts_explorer.clustering.representation.generate_llm_label",
+            side_effect=fake_label,
+        )
+
+        topics = {0: [("alpha", 1.0)], 1: [("beta", 1.0)]}
+        updated = representation.extract_topics(model, ["d"], None, topics)
+
+        assert updated[0] == [("Label", 1)]
+        assert updated[1] == [("Label", 1)]
+        assert max_active == 1
+
+    def test_extract_topics_parallel_keyword_fallback_per_topic(self, mocker):
+        """Failures in parallel workers still fall back per topic."""
+        model = self._topic_model()
+        representation = ProjectLLMRepresentation(mocker.Mock(), max_workers=2)
+
+        def fake_label(embeddings_manager, system_prompt, user_prompt, **kwargs):
+            if "gamma" in user_prompt:
+                raise RuntimeError("boom")
+            return "Label"
+
+        mocker.patch(
+            "abstracts_explorer.clustering.representation.generate_llm_label",
+            side_effect=fake_label,
+        )
+
+        topics = {
+            0: [("alpha", 1.0), ("beta", 0.9)],
+            1: [("gamma", 1.0), ("delta", 0.9), ("epsilon", 0.8)],
+        }
+        updated = representation.extract_topics(model, ["d"], None, topics)
+
+        assert updated[0] == [("Label", 1)]
+        assert updated[1] == [("gamma & delta & epsilon", 1)]
 
 
 class TestClusteringManager:
