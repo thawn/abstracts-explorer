@@ -41,6 +41,7 @@ dependencies = [
     "tiktoken>=0.7.0",
     "bertopic[umap] @ git+https://github.com/thawn/BERTopic.git@94af51559bd816bd04ea5f27d58d598d295b5238",
     "pyyaml>=6.0",
+    "filelock>=4.2.9",
 ]
 
 [project.optional-dependencies]
