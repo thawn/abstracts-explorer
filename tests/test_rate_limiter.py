@@ -713,3 +713,17 @@ class TestCooldownAwareTransport:
                 await transport.handle_async_request(httpx2.Request("GET", "http://test"))
 
         asyncio.run(run())
+
+
+def test_reuses_global_limiter_and_warns(caplog):
+    """A second transport with a different RPM reuses the global limiter and warns."""
+    set_global_rate_limiter(None)
+    RateLimitedTransport(httpx2.HTTPTransport(), requests_per_minute=60)
+
+    with caplog.at_level("WARNING", logger="abstracts_explorer.rate_limiter"):
+        RateLimitedTransport(httpx2.HTTPTransport(), requests_per_minute=120)
+
+    limiter = get_global_rate_limiter()
+    assert limiter is not None
+    assert limiter.requests_per_minute == 60
+    assert "Reusing existing global rate limiter" in caplog.text
