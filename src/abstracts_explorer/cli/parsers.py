@@ -1128,6 +1128,46 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         help="Skip the confirmation prompt",
     )
 
+    # Check-consistency command
+    consistency_parser = subparsers.add_parser(
+        "check-consistency",
+        help="Check that papers, embeddings, and clustering data are consistent",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+    Compare the paper database, ChromaDB embeddings, and clustering cache.
+
+    The check reports missing, orphaned, or stale embeddings, embedding-model
+    mismatches, missing or duplicated clustering cache entries, cache payloads
+    that do not match the paper database, and unused ChromaDB collections.
+
+    Use --fix to delete duplicate clustering cache entries and cache entries
+    for scopes that no longer have papers.  Other findings are reported with a
+    suggested command; embeddings and missing caches are never modified
+    automatically.
+
+    Examples:
+      # Check all data
+      abstracts-explorer check-consistency
+
+      # Check one conference/year and print JSON
+      abstracts-explorer check-consistency --conference NeurIPS --year 2025 --json
+
+      # Remove duplicate/stale clustering cache rows
+      abstracts-explorer check-consistency --fix
+        """,
+    )
+    add_conference_year_args(consistency_parser)
+    consistency_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the report as JSON instead of human-readable text.",
+    )
+    consistency_parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="Delete duplicate clustering cache rows and cache rows for scopes without papers.",
+    )
+
     # Delete-data command
     delete_data_parser = subparsers.add_parser(
         "delete-data",

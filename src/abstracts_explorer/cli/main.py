@@ -23,6 +23,7 @@ from abstracts_explorer.cli.clustering import (
     pre_generate_clustering_command,
 )
 from abstracts_explorer.cli.data_mgmt import delete_data_command
+from abstracts_explorer.cli.consistency import consistency_check_command
 from abstracts_explorer.cli.download import download_command
 from abstracts_explorer.cli.embeddings import create_embeddings_command
 from abstracts_explorer.cli.evaluation import (
@@ -123,6 +124,8 @@ def main() -> int:
         else:
             groups["eval"].print_help()
             return 1
+    elif args.command == "check-consistency":
+        return consistency_check_command(args)
     elif args.command == "delete-data":
         return delete_data_command(args)
     elif args.command == "feedback":

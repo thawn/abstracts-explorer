@@ -21,6 +21,7 @@ the actual `--help` output of the tool.
 | `eval` | Automatic evaluation of the RAG system (`generate`, `verify`, `run`, `results`, `clear`) |
 | `registry` | Upload/download data to/from OCI container registries (`upload`, `download`, `list`, `delete`) |
 | `feedback` | Explore user feedback (`stats`, `list`, `browse`, `clear`) |
+| `check-consistency` | Check papers, embeddings, and clustering cache for inconsistencies |
 | `delete-data` | Delete all data for a conference/year from all databases |
 | `pre-process` | Run the full pipeline (download → embeddings → clustering) |
 
@@ -363,6 +364,49 @@ abstracts-explorer mcp-server --transport stdio
 ```
 
 See the [MCP server guide](mcp_server.md) for tool descriptions.
+
+## check-consistency
+
+Compare the paper database, ChromaDB embeddings, and clustering cache.
+
+The command reports:
+
+- papers without embeddings, orphaned embeddings, and embeddings whose content
+  hash no longer matches the paper text
+- embedding-model mismatches between the configured model, the database
+  metadata, and the clustering cache
+- paper scopes without a clustering cache entry
+- duplicate clustering cache rows, cache payloads whose points or totals do not
+  match the paper database, points from other scopes, and cache rows built from
+  a different collection
+- ChromaDB collections other than the active `COLLECTION_NAME`
+
+Use `--fix` to delete duplicate clustering cache rows (keeping the newest row
+per scope) and cache rows for scopes without papers. Embeddings and missing
+caches are never modified automatically; each finding includes a suggested
+command.
+
+```text
+usage: abstracts-explorer check-consistency [-h] [--conference CONFERENCE]
+                                            [--year YEAR] [--json] [--fix]
+```
+
+| Option | Description |
+| ------ | ----------- |
+| `--conference CONFERENCE` | Only check one conference. Case-insensitive. |
+| `--year YEAR` | Only check one year. |
+| `--json` | Print the report as JSON instead of human-readable text. |
+| `--fix` | Delete duplicate/stale clustering cache rows. |
+
+Exit code is `0` when no errors remain and `1` when errors were found.
+
+**Examples:**
+
+```bash
+abstracts-explorer check-consistency
+abstracts-explorer check-consistency --conference NeurIPS --year 2025 --json
+abstracts-explorer check-consistency --fix
+```
 
 ## delete-data
 

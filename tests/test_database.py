@@ -1551,6 +1551,52 @@ class TestClusteringCache:
         assert entries[0]["year"] == 2026
         assert entries[0]["results"] == results
 
+    def test_delete_clustering_cache_by_id(self, connected_db):
+        """Deleting a cache row by id removes only that row."""
+        for year in (2024, 2025):
+            connected_db.save_clustering_cache(
+                embedding_model="model1",
+                reduction_method="umap",
+                n_components=2,
+                clustering_method="agglomerative",
+                results={"points": [], "statistics": {"n_clusters": 1}},
+                n_clusters=1,
+                conference="AAAI",
+                year=year,
+            )
+        entries = connected_db.list_clustering_cache_entries(conference="AAAI")
+        keep_id = entries[0]["id"]
+        delete_id = entries[1]["id"]
+
+        assert connected_db.delete_clustering_cache_by_id(delete_id) is True
+        remaining = connected_db.list_clustering_cache_entries(conference="AAAI")
+        assert [entry["id"] for entry in remaining] == [keep_id]
+        assert connected_db.delete_clustering_cache_by_id(delete_id) is False
+
+    def test_delete_clustering_cache_ids(self, connected_db):
+        """Deleting several cache ids ignores unknown ids and returns the count."""
+        for year in (2023, 2024, 2025):
+            connected_db.save_clustering_cache(
+                embedding_model="model1",
+                reduction_method="umap",
+                n_components=2,
+                clustering_method="agglomerative",
+                results={"points": [], "statistics": {"n_clusters": 1}},
+                n_clusters=1,
+                conference="AAAI",
+                year=year,
+            )
+        entries = connected_db.list_clustering_cache_entries(conference="AAAI")
+        keep_id = entries[0]["id"]
+        delete_ids = [entry["id"] for entry in entries[1:]]
+
+        deleted = connected_db.delete_clustering_cache_ids(delete_ids + [999999])
+
+        assert deleted == len(delete_ids)
+        remaining = connected_db.list_clustering_cache_entries(conference="AAAI")
+        assert [entry["id"] for entry in remaining] == [keep_id]
+        assert connected_db.delete_clustering_cache_ids([]) == 0
+
     def test_save_fills_n_clusters_from_statistics(self, connected_db):
         """Test that n_clusters is auto-filled from results statistics when None."""
         results = {
