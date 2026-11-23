@@ -783,6 +783,68 @@ class TestRepresentation:
         assert updated[0] == [("Label", 1)]
         assert updated[1] == [("gamma & delta & epsilon", 1)]
 
+    def _merge_documents(self):
+        return pd.DataFrame(
+            {
+                "Document": ["doc one", "doc two", "doc three"],
+                "ID": [0, 1, 2],
+                "Topic": [0, 0, 0],
+            }
+        )
+
+    def test_deferred_extract_topics_skips_llm_until_flush(self, mocker):
+        """Deferred hierarchy labeling records clusters without calling the LLM."""
+        model = Mock()
+        model._extract_representative_docs.return_value = ({0: ["doc one", "doc two"]}, None, None, None)
+        representation = ProjectLLMRepresentation(mocker.Mock())
+        representation.set_flat_topics([0, 1, 2])
+        llm = mocker.patch("abstracts_explorer.clustering.representation.generate_llm_label")
+
+        representation.begin_deferred()
+        updated = representation.extract_topics(
+            model,
+            self._merge_documents(),
+            None,
+            {0: [("alpha", 1.0), ("beta", 0.9)]},
+        )
+
+        llm.assert_not_called()
+        assert updated[0] == [("alpha & beta", 1)]
+
+        llm.return_value = "Label: Merged\nDescription: A merged cluster."
+        resolved = representation.flush_deferred()
+
+        llm.assert_called_once()
+        assert resolved == {
+            frozenset({0, 1, 2}): combine_label_description("Merged", "A merged cluster."),
+        }
+
+    def test_flush_deferred_labels_all_recorded_clusters_in_one_batch(self, mocker):
+        """Multiple recorded merges are labeled together when flushed."""
+        representation = ProjectLLMRepresentation(mocker.Mock(), max_workers=2)
+        representation.set_flat_topics([0, 0, 1, 1])
+        llm = mocker.patch(
+            "abstracts_explorer.clustering.representation.generate_llm_label",
+            return_value="Label: Node\nDescription: Node description.",
+        )
+
+        representation.begin_deferred()
+        assert representation._deferred is not None
+        representation._deferred.append((frozenset({0}), ["alpha"], "prompt a"))
+        representation._deferred.append((frozenset({0, 1}), ["beta"], "prompt b"))
+
+        resolved = representation.flush_deferred()
+
+        assert llm.call_count == 2
+        assert set(resolved) == {frozenset({0}), frozenset({0, 1})}
+        assert resolved[frozenset({0, 1})] == combine_label_description("Node", "Node description.")
+
+    def test_flush_deferred_without_pending_returns_empty(self, mocker):
+        representation = ProjectLLMRepresentation(mocker.Mock())
+        representation.begin_deferred()
+
+        assert representation.flush_deferred() == {}
+
 
 class TestClusteringManager:
     """Tests for the BERTopic manager facade."""
@@ -902,6 +964,31 @@ class TestClusteringManager:
         manager.fit(use_llm_labels=True, show_progress=True)
 
         representation_class.assert_called_once_with(manager.embeddings_manager, show_progress=True)
+
+    def test_fit_defers_hierarchy_labeling_to_single_batch(self, mocker):
+        manager = self._manager()
+        fake_model = self._fake_topic_model()
+        mocker.patch("bertopic.BERTopic", return_value=fake_model)
+        mocker.patch.object(
+            manager, "_make_umap", return_value=Mock(fit_transform=Mock(return_value=np.zeros((4, 2))))
+        )
+        representation = Mock()
+        representation.flush_deferred.return_value = {
+            frozenset({0, 1}): combine_label_description("Merged", "Both topics."),
+        }
+        mocker.patch(
+            "abstracts_explorer.clustering.manager.ProjectLLMRepresentation",
+            return_value=representation,
+        )
+
+        results = manager.fit(use_llm_labels=True)
+
+        representation.set_flat_topics.assert_called_once_with([0, 0, 1, 1])
+        representation.begin_deferred.assert_called_once()
+        representation.flush_deferred.assert_called_once_with()
+        merged = results["hierarchy"]["tree"][0]
+        assert merged["label"] == "Merged"
+        assert merged["description"] == "Both topics."
 
     def test_fit_without_llm_labels(self, mocker):
         manager = self._manager()

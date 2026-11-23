@@ -3,7 +3,7 @@ BERTopic clustering manager.
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Mapping, Optional, Union
 from pathlib import Path
 
 import numpy as np
@@ -153,6 +153,46 @@ class ClusteringManager(LoadingMixin):
                 descriptions[topic_id] = description
         return labels, descriptions
 
+    def _hierarchy_labels_from_members(
+        self,
+        hierarchical_topics: Any,
+        labels_by_members: Mapping[frozenset[int], str] | Any,
+    ) -> tuple[Dict[int, str], Dict[int, str]]:
+        """
+        Map batched hierarchy labels back to BERTopic parent IDs.
+
+        Parameters
+        ----------
+        hierarchical_topics : pandas.DataFrame
+            Output of ``topic_model.hierarchical_topics()``.
+        labels_by_members : mapping
+            Mapping from member flat-topic sets to encoded label/description
+            strings. Falls back to the row's ``Parent_Name`` when a member set
+            is absent or the mapping is not a mapping.
+
+        Returns
+        -------
+        tuple of dict
+            Parent ID to label and parent ID to description mappings.
+        """
+        labels: Dict[int, str] = {}
+        descriptions: Dict[int, str] = {}
+        if hierarchical_topics is None or len(hierarchical_topics) == 0:
+            return labels, descriptions
+
+        by_members = labels_by_members if isinstance(labels_by_members, Mapping) else {}
+        for row in hierarchical_topics.itertuples(index=False):
+            parent_id = int(row.Parent_ID)
+            members = frozenset(int(topic) for topic in (getattr(row, "Topics", None) or []) if int(topic) >= 0)
+            encoded = by_members.get(members)
+            if encoded is None:
+                encoded = str(getattr(row, "Parent_Name", "") or "")
+            label, description = split_label_description(encoded)
+            labels[parent_id] = label
+            if description:
+                descriptions[parent_id] = description
+        return labels, descriptions
+
     def fit(
         self,
         use_llm_labels: bool = True,
@@ -209,7 +249,7 @@ class ClusteringManager(LoadingMixin):
         flat_labels, flat_descriptions = self._extract_flat_labels(self.topics, flat_keywords, use_llm_labels)
 
         if use_llm_labels:
-            logger.info("Labeling hierarchy topics with LLM (BERTopic merge progress bar)...")
+            logger.info("Building hierarchical topics (deferring LLM labels)...")
         else:
             logger.info("Building hierarchical topics...")
         from sklearn.metrics.pairwise import cosine_similarity
@@ -217,10 +257,20 @@ class ClusteringManager(LoadingMixin):
         def distance_function(matrix):
             return np.clip(1 - cosine_similarity(matrix), 0, None)
 
+        if representation_model is not None:
+            representation_model.set_flat_topics([int(topic) for topic in self.topics])
+            representation_model.begin_deferred()
         hierarchical_topics = topic_model.hierarchical_topics(docs, distance_function=distance_function)
-        parent_labels = level_parent_labels(hierarchical_topics)
-        parent_descriptions = level_parent_descriptions(hierarchical_topics)
 
+        if representation_model is not None:
+            logger.info("Labeling hierarchy topics with LLM...")
+            hierarchy_labels = representation_model.flush_deferred()
+            parent_labels, parent_descriptions = self._hierarchy_labels_from_members(
+                hierarchical_topics, hierarchy_labels
+            )
+        else:
+            parent_labels = dict(level_parent_labels(hierarchical_topics))
+            parent_descriptions = dict(level_parent_descriptions(hierarchical_topics))
         logger.info("Reducing embeddings to 2D with UMAP...")
         reduced_embeddings = self._make_umap(2).fit_transform(self.embeddings)
         self.reduced_embeddings = reduced_embeddings
