@@ -161,7 +161,7 @@ For distance-threshold workflows, `query_ids_within_distance` returns matching
 ### Incremental Embedding
 
 `embed_from_database` skips papers whose content hash is unchanged and embeds
-the remainder in batches of 32 papers per API request:
+the remainder in batches of 128 papers per API request:
 
 ```python
 count = em.embed_from_database()
