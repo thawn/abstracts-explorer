@@ -379,3 +379,26 @@ class TestSuggestSearchTerms:
         assert result["suggested_terms"] == []
         assert result["source"] == "none"
         mock_chat.assert_not_called()
+
+
+def test_provider_client_uses_central_retry_and_cooldown_transport():
+    """The ORCID LLM client uses the same retry budget and transports as other clients."""
+    from abstracts_explorer.config import get_config
+    from abstracts_explorer.rate_limiter import (
+        CooldownAwareTransport,
+        RateLimitedTransport,
+        get_global_cooldown,
+    )
+
+    config = get_config()
+    provider = orcid._OrcidLlmProvider()
+    client = provider.openai_client
+    try:
+        assert client.max_retries == config.llm_max_attempts - 1
+        transport = client._client._transport
+        assert isinstance(transport, CooldownAwareTransport)
+        assert transport._cooldown is get_global_cooldown()
+        if config.requests_per_minute > 0:
+            assert isinstance(transport._transport, RateLimitedTransport)
+    finally:
+        client.close()

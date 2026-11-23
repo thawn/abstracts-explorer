@@ -144,17 +144,19 @@ class Config:
         Total request throughput is still bounded by
         ``requests_per_minute``.
     llm_max_attempts : int
-        Maximum number of attempts for one cluster-label LLM request
-        (default: 6). Set to 1 to disable retries.
+        Total HTTP attempts for any LLM request (default: 6). Maps to the
+        OpenAI SDK's ``max_retries = llm_max_attempts - 1``; the SDK owns
+        retryable status classification, ``Retry-After`` handling, and
+        backoff. Set to 1 to disable retries.
     llm_retry_base_delay : float
-        Base delay in seconds for exponential backoff between cluster-label
-        retries (default: 1.0).
+        Base delay in seconds for retrying cluster-label responses without
+        usable content (default: 1.0). HTTP backoff is handled by the SDK.
     llm_retry_max_delay : float
-        Maximum delay in seconds between cluster-label retries
+        Maximum delay in seconds for empty-content cluster-label retries
         (default: 10.0).
     llm_rate_limit_delay : float
-        Delay in seconds applied after HTTP 429 responses when the backend
-        does not provide a ``Retry-After`` header (default: 60.0).
+        Shared cooldown applied after HTTP 429 responses when the backend does
+        not provide a usable ``Retry-After`` header (default: 60.0).
     enable_query_rewriting : bool
         Whether to enable query rewriting for better semantic search.
     query_similarity_threshold : float
@@ -345,7 +347,7 @@ class Config:
             self.rag_query_timeout,
         )
 
-        # Cluster-label concurrency and retry settings
+        # LLM concurrency and retry settings
         self.cluster_label_max_workers = max(1, self._get_env_int("CLUSTER_LABEL_MAX_WORKERS", default=4))
         self.llm_max_attempts = max(1, self._get_env_int("LLM_MAX_ATTEMPTS", default=6))
         self.llm_retry_base_delay = max(0.0, self._get_env_float("LLM_RETRY_BASE_DELAY", default=1.0))

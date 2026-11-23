@@ -1,21 +1,19 @@
 """
-Retry-aware LLM helpers for cluster labeling.
+LLM helpers for cluster labeling.
+
+HTTP retries (including ``429``/``Retry-After``) are owned by the OpenAI SDK
+through the rate-limit-aware transport. This module only retries responses that
+contain no usable content, doubling the token budget each time.
 """
 
 import logging
 import time
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
 from typing import Any, Optional
 
 from abstracts_explorer.config import get_config
 from abstracts_explorer.llm_utils import chat_completion_text
-from abstracts_explorer.rate_limiter import RateLimitCooldown
 
 logger = logging.getLogger(__name__)
-
-_RETRYABLE_LLM_STATUS_CODES = frozenset({408, 409, 429, 500, 502, 503, 504})
-_rate_limit_cooldown = RateLimitCooldown()
 
 DEFAULT_LABEL_MAX_TOKENS = 600
 MAX_LABEL_MAX_TOKENS = 2400
@@ -35,59 +33,6 @@ def _status_code(error: Exception) -> Optional[int]:
         return None
 
 
-def _retry_after_seconds(error: Exception) -> Optional[float]:
-    """Parse a ``Retry-After`` header from an LLM client error."""
-    response = getattr(error, "response", None)
-    headers = getattr(response, "headers", None)
-    if headers is None:
-        headers = getattr(error, "headers", None)
-    if not headers:
-        return None
-
-    value = headers.get("retry-after") or headers.get("Retry-After")
-    if not value:
-        return None
-
-    try:
-        return max(0.0, float(value))
-    except (TypeError, ValueError):
-        pass
-
-    try:
-        retry_at = parsedate_to_datetime(str(value))
-        if retry_at.tzinfo is None:
-            retry_at = retry_at.replace(tzinfo=timezone.utc)
-        return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
-    except (TypeError, ValueError, OverflowError):
-        return None
-
-
-def is_retryable_llm_error(error: Exception) -> bool:
-    """
-    Return whether a cluster-label LLM error should be retried.
-
-    Parameters
-    ----------
-    error : Exception
-        Exception raised by the LLM client.
-
-    Returns
-    -------
-    bool
-        ``True`` for empty responses, transient network errors, and retryable
-        HTTP statuses.
-    """
-    if isinstance(error, AttributeError):
-        return False
-    if isinstance(error, ValueError):
-        return True
-
-    status_code = _status_code(error)
-    if status_code is None:
-        return True
-    return status_code in _RETRYABLE_LLM_STATUS_CODES
-
-
 def generate_llm_label(
     embeddings_manager: Any,
     system_prompt: str,
@@ -95,12 +40,12 @@ def generate_llm_label(
     max_tokens: int = DEFAULT_LABEL_MAX_TOKENS,
 ) -> str:
     """
-    Generate one cluster label with retries.
+    Generate one cluster label, retrying empty or unusable responses.
 
-    Empty responses, transient network errors, and retryable HTTP statuses are
-    retried with exponential backoff. Non-retryable failures and exhausted
-    retries are raised to the caller. After each empty response the token
-    budget doubles, up to :data:`MAX_LABEL_MAX_TOKENS`.
+    The OpenAI SDK retries HTTP failures (status codes, ``Retry-After``,
+    backoff, attempt budget) before this function sees them. Here, a response
+    without usable content is retried with a doubled token budget, up to
+    :data:`MAX_LABEL_MAX_TOKENS`.
 
     Parameters
     ----------
@@ -125,7 +70,8 @@ def generate_llm_label(
     AttributeError
         If the OpenAI client is not available.
     Exception
-        If all retry attempts fail.
+        If the HTTP client raised a non-empty-response error, or all attempts
+        returned no usable content.
     """
     if not hasattr(embeddings_manager, "openai_client"):
         raise AttributeError("OpenAI client not available in embeddings manager")
@@ -135,11 +81,9 @@ def generate_llm_label(
     retry_base_delay = config.llm_retry_base_delay
     retry_max_delay = config.llm_retry_max_delay
 
-    last_error: Optional[Exception] = None
     empty_failures = 0
     for attempt in range(1, max_attempts + 1):
         current_max_tokens = min(max_tokens * (2**empty_failures), MAX_LABEL_MAX_TOKENS)
-        _rate_limit_cooldown.wait()
         try:
             content = chat_completion_text(
                 client=embeddings_manager.openai_client,
@@ -151,39 +95,50 @@ def generate_llm_label(
                 timeout=config.llm_request_timeout,
                 reasoning_effort="low",
             )
-            if not content:
-                empty_failures += 1
-                raise ValueError("LLM returned empty content")
+            error: Optional[Exception] = None
+        except ValueError as exc:
+            content = ""
+            error = exc
+        except Exception as exc:
+            status_code = _status_code(exc)
+            logger.error(
+                "Cluster-label LLM call failed permanently (model=%s, attempt %d/%d, status=%s): %s",
+                config.cluster_label_model,
+                attempt,
+                max_attempts,
+                status_code if status_code is not None else "n/a",
+                exc,
+            )
+            raise
+
+        if content.strip():
             return content.strip().strip("\"'")
-        except Exception as error:
-            last_error = error
-            if attempt >= max_attempts or not is_retryable_llm_error(error):
-                raise
 
-            if _status_code(error) == 429:
-                retry_after = _retry_after_seconds(error)
-                delay = retry_after if retry_after is not None else config.llm_rate_limit_delay
-                _rate_limit_cooldown.defer(delay)
-                logger.warning(
-                    "Cluster-label LLM call rate-limited (attempt %d/%d, max_tokens=%d): %s; "
-                    "pausing all LLM label calls for %.1fs",
-                    attempt,
-                    max_attempts,
-                    current_max_tokens,
-                    error,
-                    delay,
-                )
-            else:
-                delay = min(retry_base_delay * (2 ** (attempt - 1)), retry_max_delay)
-                logger.warning(
-                    "Cluster-label LLM call failed (attempt %d/%d, max_tokens=%d): %s; " "retrying in %.1fs",
-                    attempt,
-                    max_attempts,
-                    current_max_tokens,
-                    error,
-                    delay,
-                )
-            time.sleep(delay)
+        error = error or ValueError("LLM returned empty content")
+        empty_failures += 1
+        if attempt >= max_attempts:
+            logger.error(
+                "Cluster-label LLM returned no usable content permanently "
+                "(model=%s, attempt %d/%d, max_tokens=%d): %s",
+                config.cluster_label_model,
+                attempt,
+                max_attempts,
+                current_max_tokens,
+                error,
+            )
+            raise error
 
-    assert last_error is not None
-    raise last_error
+        delay = min(retry_base_delay * (2 ** (attempt - 1)), retry_max_delay)
+        logger.warning(
+            "Cluster-label LLM returned no usable content (model=%s, attempt %d/%d, "
+            "max_tokens=%d): %s; retrying in %.1fs",
+            config.cluster_label_model,
+            attempt,
+            max_attempts,
+            current_max_tokens,
+            error,
+            delay,
+        )
+        time.sleep(delay)
+
+    raise ValueError("LLM returned empty content")

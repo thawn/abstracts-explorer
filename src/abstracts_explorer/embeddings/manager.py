@@ -132,6 +132,8 @@ class EmbeddingsManager(GenerationMixin, QueryMixin, IngestMixin, ArtifactsMixin
         )
         self.request_timeout = config.llm_request_timeout
         self.connect_timeout = config.llm_connect_timeout
+        self.llm_max_attempts = config.llm_max_attempts
+        self.llm_rate_limit_delay = config.llm_rate_limit_delay
 
     def __enter__(self) -> "EmbeddingsManager":
         """Context manager entry; connects to ChromaDB."""

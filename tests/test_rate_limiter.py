@@ -540,3 +540,190 @@ class TestMultithreadedAsyncRateLimiting:
         assert acquired.count("sync") == 2
         assert acquired.count("async") == 3
         assert fake_time.sleeps == []
+
+
+class _SyncInner(httpx2.BaseTransport):
+    """Minimal sync transport for cooldown tests."""
+
+    def __init__(self, response):
+        self.response = response
+        self.calls = 0
+        self.closed = False
+
+    def handle_request(self, request):
+        self.calls += 1
+        return self.response
+
+    def close(self):
+        self.closed = True
+
+
+class _AsyncInner(httpx2.AsyncBaseTransport):
+    """Minimal async transport for cooldown tests."""
+
+    def __init__(self, response):
+        self.response = response
+        self.calls = 0
+        self.closed = False
+
+    async def handle_async_request(self, request):
+        self.calls += 1
+        return self.response
+
+    async def aclose(self):
+        self.closed = True
+
+
+def _response(status, headers=None):
+    return httpx2.Response(status, headers=headers or {})
+
+
+class TestParseRetryAfterSeconds:
+    """Tests for the shared Retry-After parser."""
+
+    def test_retry_after_ms_takes_precedence(self):
+        from abstracts_explorer.rate_limiter import parse_retry_after_seconds
+
+        headers = httpx2.Headers({"retry-after": "30", "retry-after-ms": "1500"})
+        assert parse_retry_after_seconds(headers) == pytest.approx(1.5)
+
+    def test_retry_after_seconds(self):
+        from abstracts_explorer.rate_limiter import parse_retry_after_seconds
+
+        assert parse_retry_after_seconds(httpx2.Headers({"retry-after": "12"})) == pytest.approx(12.0)
+
+    def test_retry_after_http_date(self):
+        from datetime import datetime, timedelta, timezone
+        from email.utils import format_datetime
+
+        from abstracts_explorer.rate_limiter import parse_retry_after_seconds
+
+        retry_at = datetime.now(timezone.utc) + timedelta(seconds=30)
+        headers = httpx2.Headers({"retry-after": format_datetime(retry_at, usegmt=True)})
+        delay = parse_retry_after_seconds(headers)
+        assert delay is not None
+        assert 25 <= delay <= 35
+
+    def test_invalid_value_returns_none(self):
+        from abstracts_explorer.rate_limiter import parse_retry_after_seconds
+
+        assert parse_retry_after_seconds(httpx2.Headers({"retry-after": "not-a-date"})) is None
+
+    def test_missing_headers_returns_none(self):
+        from abstracts_explorer.rate_limiter import parse_retry_after_seconds
+
+        assert parse_retry_after_seconds(None) is None
+
+    def test_caps_at_max_wait(self):
+        from abstracts_explorer.rate_limiter import parse_retry_after_seconds
+
+        headers = httpx2.Headers({"retry-after": "9999"})
+        assert parse_retry_after_seconds(headers, max_wait=120) == 120.0
+
+
+class TestCooldownAwareTransport:
+    """Tests for the shared-cooldown LLM transport."""
+
+    def test_sync_429_defers_cooldown(self):
+        from unittest.mock import Mock
+
+        from abstracts_explorer.rate_limiter import CooldownAwareTransport
+
+        inner = _SyncInner(_response(429, {"retry-after": "12"}))
+        cooldown = Mock()
+        transport = CooldownAwareTransport(inner, cooldown=cooldown)
+
+        transport.handle_request(httpx2.Request("POST", "http://test"))
+
+        cooldown.wait.assert_called_once_with()
+        cooldown.defer.assert_called_once_with(12.0)
+        assert inner.calls == 1
+
+    def test_sync_429_uses_fallback_delay(self):
+        from unittest.mock import Mock
+
+        from abstracts_explorer.rate_limiter import CooldownAwareTransport
+
+        inner = _SyncInner(_response(429))
+        cooldown = Mock()
+        transport = CooldownAwareTransport(inner, rate_limit_delay=45.0, cooldown=cooldown)
+
+        transport.handle_request(httpx2.Request("POST", "http://test"))
+
+        cooldown.defer.assert_called_once_with(45.0)
+
+    def test_sync_non_429_does_not_defer(self):
+        from unittest.mock import Mock
+
+        from abstracts_explorer.rate_limiter import CooldownAwareTransport
+
+        inner = _SyncInner(_response(200))
+        cooldown = Mock()
+        transport = CooldownAwareTransport(inner, cooldown=cooldown)
+
+        response = transport.handle_request(httpx2.Request("POST", "http://test"))
+
+        assert response.status_code == 200
+        cooldown.wait.assert_called_once_with()
+        cooldown.defer.assert_not_called()
+
+    def test_sync_close_delegates(self):
+        from abstracts_explorer.rate_limiter import CooldownAwareTransport
+
+        inner = _SyncInner(_response(200))
+        transport = CooldownAwareTransport(inner)
+        transport.close()
+        assert inner.closed is True
+
+    def test_async_429_defers_cooldown(self):
+        from unittest.mock import AsyncMock, Mock
+
+        from abstracts_explorer.rate_limiter import CooldownAwareTransport
+
+        async def run():
+            inner = _AsyncInner(_response(429, {"retry-after-ms": "2500"}))
+            cooldown = Mock()
+            cooldown.async_wait = AsyncMock()
+            transport = CooldownAwareTransport(inner, cooldown=cooldown)
+
+            await transport.handle_async_request(httpx2.Request("POST", "http://test"))
+            await transport.aclose()
+
+            return inner, cooldown
+
+        inner, cooldown = asyncio.run(run())
+        cooldown.async_wait.assert_awaited_once_with()
+        cooldown.defer.assert_called_once_with(2.5)
+        assert inner.calls == 1
+        assert inner.closed is True
+
+    def test_sync_transport_rejects_async_inner(self):
+        from abstracts_explorer.rate_limiter import CooldownAwareTransport
+
+        transport = CooldownAwareTransport(_AsyncInner(_response(200)))
+        with pytest.raises(TypeError):
+            transport.handle_request(httpx2.Request("GET", "http://test"))
+
+    def test_async_transport_rejects_sync_inner(self):
+        from abstracts_explorer.rate_limiter import CooldownAwareTransport
+
+        async def run():
+            transport = CooldownAwareTransport(_SyncInner(_response(200)))
+            with pytest.raises(TypeError):
+                await transport.handle_async_request(httpx2.Request("GET", "http://test"))
+
+        asyncio.run(run())
+
+
+def test_reuses_global_limiter_and_warns(caplog):
+    """A second transport with a different RPM reuses the global limiter and warns."""
+    set_global_rate_limiter(None)
+    RateLimitedTransport(httpx2.HTTPTransport(), requests_per_minute=60)
+
+    with caplog.at_level("WARNING", logger="abstracts_explorer.rate_limiter"):
+        RateLimitedTransport(httpx2.HTTPTransport(), requests_per_minute=120)
+
+    limiter = get_global_rate_limiter()
+    assert limiter is not None
+    assert limiter.requests_per_minute == 60
+    assert "Reusing existing global rate limiter" in caplog.text

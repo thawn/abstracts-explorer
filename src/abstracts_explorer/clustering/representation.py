@@ -10,7 +10,7 @@ from bertopic.representation import BaseRepresentation
 from tqdm import tqdm
 
 from abstracts_explorer.clustering.labels import combine_label_description, parse_llm_label_response
-from abstracts_explorer.clustering.llm import DEFAULT_LABEL_MAX_TOKENS, generate_llm_label
+from abstracts_explorer.clustering.llm import DEFAULT_LABEL_MAX_TOKENS, _status_code, generate_llm_label
 from abstracts_explorer.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -218,12 +218,15 @@ class ProjectLLMRepresentation(BaseRepresentation):
                 max_tokens=DEFAULT_LABEL_MAX_TOKENS,
             )
         except Exception as exc:
+            status_code = _status_code(exc)
             logger.warning(
-                "LLM label failed for topic %s: %s; using keyword fallback. Prompt:\n%s",
+                "LLM label failed for topic %s (model=%s, status=%s): %s; using keyword fallback",
                 topic,
+                get_config().cluster_label_model,
+                status_code if status_code is not None else "n/a",
                 exc,
-                prompt,
             )
+            logger.debug("Prompt for failed topic %s:\n%s", topic, prompt)
             response = ""
 
         label, description = parse_llm_label_response(response)
