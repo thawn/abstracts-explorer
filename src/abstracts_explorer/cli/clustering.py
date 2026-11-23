@@ -237,6 +237,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
             EmbeddingsManager(
                 collection_name=args.collection,
                 requests_per_minute=args.requests_per_minute,
+                openai_max_retries=0,
             )
         ) as em:
             success_count = 0

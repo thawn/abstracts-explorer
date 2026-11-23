@@ -72,6 +72,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="ChromaDB collection name (defaults to COLLECTION_NAME from config).",
     )
     parser.add_argument(
+        "--requests-per-minute",
+        type=int,
+        default=None,
+        help="Maximum API requests per minute (defaults to REQUESTS_PER_MINUTE from config).",
+    )
+    parser.add_argument(
         "--no-llm-labels",
         action="store_true",
         help="Use keyword labels instead of calling the LLM for cluster labels.",
@@ -169,7 +175,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     failures: List[Tuple[str, int, str]] = []
     succeeded = 0
 
-    with DatabaseManager() as database, EmbeddingsManager(collection_name=collection_name) as embeddings_manager:
+    with (
+        DatabaseManager() as database,
+        EmbeddingsManager(
+            collection_name=collection_name,
+            requests_per_minute=args.requests_per_minute,
+            openai_max_retries=0,
+        ) as embeddings_manager,
+    ):
         for conference, year in scopes:
             print(f"\n🔄 Re-clustering {conference} {year}...")
             try:
@@ -187,8 +200,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(f"   ✅ {conference} {year}: {n_papers} papers → {n_clusters} clusters")
                 succeeded += 1
             except Exception as exc:
-                print(f"   ❌ {conference} {year}: {exc}", file=sys.stderr)
-                failures.append((conference, year, str(exc)))
+                message = f"{type(exc).__name__}: {exc}"
+                print(f"   ❌ {conference} {year}: {message}", file=sys.stderr)
+                failures.append((conference, year, message))
 
     print(f"\n{'=' * 70}")
     print(f"✅ Re-clustering complete: {succeeded} succeeded, {len(failures)} failed")

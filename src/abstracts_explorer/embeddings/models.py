@@ -28,6 +28,7 @@ class ModelMixin:
     requests_per_minute: int
     request_timeout: float
     connect_timeout: float
+    openai_max_retries: Optional[int]
 
     @property
     def openai_client(self) -> OpenAI:
@@ -59,11 +60,14 @@ class ModelMixin:
             transport=transport,
             timeout=build_llm_timeout(self.request_timeout, self.connect_timeout),
         )
-        return OpenAI(
-            base_url=f"{self.backend_url}/v1",
-            api_key=self.llm_backend_auth_token or "lm-studio-local",
-            http_client=http_client,
-        )
+        client_kwargs: dict[str, Any] = {
+            "base_url": f"{self.backend_url}/v1",
+            "api_key": self.llm_backend_auth_token or "lm-studio-local",
+            "http_client": http_client,
+        }
+        if self.openai_max_retries is not None:
+            client_kwargs["max_retries"] = max(0, int(self.openai_max_retries))
+        return OpenAI(**client_kwargs)
 
     def test_api_connection(
         self,

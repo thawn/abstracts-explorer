@@ -157,16 +157,26 @@ def generate_llm_label(
             return content.strip().strip("\"'")
         except Exception as error:
             last_error = error
+            status_code = _status_code(error)
             if attempt >= max_attempts or not is_retryable_llm_error(error):
+                logger.error(
+                    "Cluster-label LLM call failed permanently (model=%s, attempt %d/%d, status=%s): %s",
+                    config.cluster_label_model,
+                    attempt,
+                    max_attempts,
+                    status_code if status_code is not None else "n/a",
+                    error,
+                )
                 raise
 
-            if _status_code(error) == 429:
+            if status_code == 429:
                 retry_after = _retry_after_seconds(error)
                 delay = retry_after if retry_after is not None else config.llm_rate_limit_delay
                 _rate_limit_cooldown.defer(delay)
                 logger.warning(
-                    "Cluster-label LLM call rate-limited (attempt %d/%d, max_tokens=%d): %s; "
-                    "pausing all LLM label calls for %.1fs",
+                    "Cluster-label LLM call rate-limited (model=%s, attempt %d/%d, "
+                    "status=429, max_tokens=%d): %s; pausing all LLM label calls for %.1fs",
+                    config.cluster_label_model,
                     attempt,
                     max_attempts,
                     current_max_tokens,
@@ -176,9 +186,12 @@ def generate_llm_label(
             else:
                 delay = min(retry_base_delay * (2 ** (attempt - 1)), retry_max_delay)
                 logger.warning(
-                    "Cluster-label LLM call failed (attempt %d/%d, max_tokens=%d): %s; " "retrying in %.1fs",
+                    "Cluster-label LLM call failed (model=%s, attempt %d/%d, status=%s, "
+                    "max_tokens=%d): %s; retrying in %.1fs",
+                    config.cluster_label_model,
                     attempt,
                     max_attempts,
+                    status_code if status_code is not None else "n/a",
                     current_max_tokens,
                     error,
                     delay,

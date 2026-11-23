@@ -577,6 +577,54 @@ class TestLLMHelpers:
             generate_llm_label(em, "system", "user")
         assert chat.call_count == 2
 
+    def test_generate_label_logs_permanent_failure(self, mocker, caplog):
+        config = mocker.Mock(
+            llm_max_attempts=2,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_rate_limit_delay=0,
+            llm_request_timeout=5,
+            cluster_label_model="test-model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
+        mocker.patch(
+            "abstracts_explorer.clustering.llm.chat_completion_text",
+            side_effect=MockError(status_code=429),
+        )
+        em = mocker.Mock(openai_client=object())
+
+        with caplog.at_level(logging.ERROR, logger="abstracts_explorer.clustering.llm"):
+            with pytest.raises(MockError):
+                generate_llm_label(em, "system", "user")
+
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("failed permanently" in message for message in messages)
+        assert any("model=test-model" in message and "status=429" in message for message in messages)
+
+    def test_generate_label_warns_with_model_and_status(self, mocker, caplog):
+        config = mocker.Mock(
+            llm_max_attempts=2,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_rate_limit_delay=0,
+            llm_request_timeout=5,
+            cluster_label_model="test-model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
+        mocker.patch(
+            "abstracts_explorer.clustering.llm.chat_completion_text",
+            side_effect=[MockError(status_code=503), "Label"],
+        )
+        em = mocker.Mock(openai_client=object())
+
+        with caplog.at_level(logging.WARNING, logger="abstracts_explorer.clustering.llm"):
+            assert generate_llm_label(em, "system", "user") == "Label"
+
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("model=test-model" in message and "status=503" in message for message in messages)
+
     def test_generate_label_missing_client(self):
         with pytest.raises(AttributeError):
             generate_llm_label(object(), "system", "user")
@@ -641,12 +689,13 @@ class TestRepresentation:
         )
 
         topics = {0: [("alpha", 1.0), ("beta", 0.9), ("gamma", 0.8)], 1: [("delta", 1.0)]}
-        with caplog.at_level(logging.WARNING, logger="abstracts_explorer.clustering.representation"):
+        with caplog.at_level(logging.DEBUG, logger="abstracts_explorer.clustering.representation"):
             updated = representation.extract_topics(model, ["d"], None, topics)
 
         assert updated[0] == [("alpha & beta & gamma", 1)]
         assert "LLM label failed for topic 0" in caplog.text
-        assert "using keyword fallback. Prompt:" in caplog.text
+        assert "using keyword fallback" in caplog.text
+        assert "Prompt for failed topic 0" in caplog.text
         assert "alpha, beta, gamma" in caplog.text
         assert "doc one" in caplog.text
 
@@ -1180,7 +1229,11 @@ class TestPipeline:
 
         perform_clustering(requests_per_minute=30)
 
-        embedding_class.assert_called_once_with(collection_name="papers", requests_per_minute=30)
+        embedding_class.assert_called_once_with(
+            collection_name="papers",
+            requests_per_minute=30,
+            openai_max_retries=0,
+        )
 
     def test_perform_clustering_uses_config_rate_limit_by_default(self, mocker):
         manager = mocker.Mock()
@@ -1191,7 +1244,11 @@ class TestPipeline:
 
         perform_clustering()
 
-        embedding_class.assert_called_once_with(collection_name="papers", requests_per_minute=None)
+        embedding_class.assert_called_once_with(
+            collection_name="papers",
+            requests_per_minute=None,
+            openai_max_retries=0,
+        )
 
     def test_perform_clustering_wraps_errors(self, mocker):
         manager = mocker.Mock()

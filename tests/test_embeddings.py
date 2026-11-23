@@ -1894,3 +1894,41 @@ class TestEmbeddingInputTruncation:
             em.generate_embedding("Some text")
 
         assert em.openai_client.embeddings.create.call_count == 1
+
+
+class TestOpenAIClientRetries:
+    """Tests for the ``openai_max_retries`` client override."""
+
+    def test_override_is_forwarded(self, embeddings_manager, monkeypatch):
+        """An explicit override is passed to the OpenAI client."""
+        created = {}
+
+        def fake_openai(**kwargs):
+            created.update(kwargs)
+            return Mock()
+
+        monkeypatch.setattr("abstracts_explorer.embeddings.models.OpenAI", fake_openai)
+        monkeypatch.setattr("abstracts_explorer.embeddings.models.httpx2.Client", Mock())
+        embeddings_manager.requests_per_minute = 0
+        embeddings_manager.openai_max_retries = 0
+
+        embeddings_manager._create_openai_client()
+
+        assert created["max_retries"] == 0
+
+    def test_default_keeps_sdk_setting(self, embeddings_manager, monkeypatch):
+        """Without an override the SDK default is used."""
+        created = {}
+
+        def fake_openai(**kwargs):
+            created.update(kwargs)
+            return Mock()
+
+        monkeypatch.setattr("abstracts_explorer.embeddings.models.OpenAI", fake_openai)
+        monkeypatch.setattr("abstracts_explorer.embeddings.models.httpx2.Client", Mock())
+        embeddings_manager.requests_per_minute = 0
+        embeddings_manager.openai_max_retries = None
+
+        embeddings_manager._create_openai_client()
+
+        assert "max_retries" not in created

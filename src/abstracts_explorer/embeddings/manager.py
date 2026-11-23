@@ -83,6 +83,7 @@ class EmbeddingsManager(GenerationMixin, QueryMixin, IngestMixin, ArtifactsMixin
         collection_name: Optional[str] = None,
         requests_per_minute: Optional[int] = None,
         max_input_tokens: Optional[int] = None,
+        openai_max_retries: Optional[int] = None,
     ):
         """
         Initialize the EmbeddingsManager.
@@ -107,6 +108,11 @@ class EmbeddingsManager(GenerationMixin, QueryMixin, IngestMixin, ArtifactsMixin
             Maximum number of tokens sent to the embedding model per request.
             If None, uses the value from config (default: 8192).
             Set to 0 to disable proactive truncation.
+        openai_max_retries : int, optional
+            Override the OpenAI client's internal retry count. ``None`` keeps
+            the SDK default (2). Set to ``0`` when the caller implements its own
+            retry/backoff logic (for example cluster labeling) so retries are
+            not duplicated and shared rate-limit cooldowns apply immediately.
         """
         config = get_config()
         self.backend_url = (backend_url or config.llm_backend_url).rstrip("/")
@@ -126,6 +132,7 @@ class EmbeddingsManager(GenerationMixin, QueryMixin, IngestMixin, ArtifactsMixin
         self.min_free_disk_mb = config.min_free_disk_mb
 
         self._openai_client = None
+        self.openai_max_retries = openai_max_retries
 
         self.requests_per_minute = (
             requests_per_minute if requests_per_minute is not None else config.requests_per_minute

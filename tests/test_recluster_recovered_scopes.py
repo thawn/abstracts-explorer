@@ -36,12 +36,14 @@ def runtime(script, monkeypatch):
     database = Mock()
     database_cm = MagicMock()
     database_cm.__enter__.return_value = database
-    monkeypatch.setattr(script, "DatabaseManager", Mock(return_value=database_cm))
+    database_factory = Mock(return_value=database_cm)
+    monkeypatch.setattr(script, "DatabaseManager", database_factory)
 
     embeddings_manager = Mock()
     embeddings_cm = MagicMock()
     embeddings_cm.__enter__.return_value = embeddings_manager
-    monkeypatch.setattr(script, "EmbeddingsManager", Mock(return_value=embeddings_cm))
+    embeddings_factory = Mock(return_value=embeddings_cm)
+    monkeypatch.setattr(script, "EmbeddingsManager", embeddings_factory)
 
     compute = Mock(return_value={"statistics": {"total_papers": 10, "n_clusters": 2}})
     monkeypatch.setattr(script, "compute_clusters_with_cache", compute)
@@ -49,6 +51,7 @@ def runtime(script, monkeypatch):
     return types.SimpleNamespace(
         database=database,
         embeddings_manager=embeddings_manager,
+        embeddings_factory=embeddings_factory,
         compute=compute,
         config=config,
     )
@@ -129,7 +132,16 @@ class TestRecluster:
             assert call.kwargs["use_llm_labels"] is False
             assert call.kwargs["force"] is True
 
-    def test_continues_after_failure_and_returns_error(self, script, runtime):
+    def test_disables_sdk_retries_and_forwards_rate_limit(self, script, runtime):
+        """Labeling owns retries and the request rate is configurable."""
+        assert script.main(["--requests-per-minute", "42"]) == 0
+
+        kwargs = runtime.embeddings_factory.call_args.kwargs
+        assert kwargs["openai_max_retries"] == 0
+        assert kwargs["requests_per_minute"] == 42
+        assert kwargs["collection_name"] == "papers"
+
+    def test_continues_after_failure_and_returns_error(self, script, runtime, capsys):
         """A failing scope does not stop the remaining scopes."""
 
         def compute_with_failure(*args, **kwargs):
@@ -142,6 +154,9 @@ class TestRecluster:
         assert script.main([]) == 1
         assert runtime.compute.call_count == 31
         assert runtime.database.delete_clustering_cache_by_conference_year.call_count == 31
+
+        errors = capsys.readouterr().err
+        assert "AGU 2016: RuntimeError: boom" in errors
 
     def test_recluster_scope_returns_results(self, script, monkeypatch):
         """The helper deletes the stale row before returning new results."""
