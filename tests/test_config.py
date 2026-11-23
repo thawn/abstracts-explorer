@@ -239,7 +239,7 @@ class TestConfig:
         assert config.chat_temperature == 0.7
         assert config.chat_max_tokens == 4000
         assert config.cluster_label_model == "alias-fast"
-        assert config.cluster_label_max_workers == 4
+        assert config.cluster_label_max_workers == 8
         assert config.embedding_max_input_tokens == 8192
         assert config.rag_max_parallel_tools == 8
         assert config.rag_request_limit == 50

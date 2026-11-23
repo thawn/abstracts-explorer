@@ -31,7 +31,7 @@ nano .env
 - **CHAT_TEMPERATURE**: Temperature for LLM responses, 0.0-2.0 (default: `0.7`)
 - **CHAT_MAX_TOKENS**: Maximum tokens in LLM responses (default: `4000`)
 - **CLUSTER_LABEL_MODEL**: Chat model used to auto-generate cluster labels during clustering (default: `alias-fast`)
-- **CLUSTER_LABEL_MAX_WORKERS**: Maximum number of cluster-label LLM requests submitted in parallel per labeling batch (default: `4`). Set to `1` to label sequentially. Throughput remains bounded by `REQUESTS_PER_MINUTE`, so parallelism only hides per-request latency.
+- **CLUSTER_LABEL_MAX_WORKERS**: Maximum number of cluster-label LLM requests submitted in parallel per labeling batch (default: `8`). Set to `1` to label sequentially. Throughput remains bounded by `REQUESTS_PER_MINUTE`, so parallelism only hides per-request latency.
 - **LLM_MAX_ATTEMPTS**: Total HTTP attempts for any LLM request, including cluster labels, embeddings, evaluation, ORCID, and RAG chat (default: `6`). Set to `1` to disable retries. This maps to the OpenAI SDK's `max_retries = LLM_MAX_ATTEMPTS - 1`; the SDK owns retryable status classification, `Retry-After` handling, and exponential backoff.
 - **LLM_RETRY_BASE_DELAY**: Base delay in seconds for retrying cluster-label responses that contain no usable content (default: `1.0`). HTTP-level backoff is handled by the OpenAI SDK.
 - **LLM_RETRY_MAX_DELAY**: Maximum delay in seconds for empty-content cluster-label retries (default: `10.0`)
