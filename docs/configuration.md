@@ -129,6 +129,25 @@ The configuration automatically detects the type based on the format:
 - URLs starting with `http://` or `https://` are treated as remote ChromaDB services
 - Other values are treated as local file paths (relative to DATA_DIR unless absolute)
 
+- **MIN_FREE_DISK_MB**: Minimum free disk space in MiB required before writing
+  embeddings to a local ChromaDB store (default: `4096`). If the filesystem has
+  less space available, `create-embeddings` fails fast instead of risking a
+  corrupted vector index. Set to `0` to disable the check. Ignored for HTTP
+  `EMBEDDING_DB` values.
+
+!!! warning "Local ChromaDB is single-process"
+    A local ChromaDB (`EMBEDDING_DB` file path) is locked for the lifetime of
+    the process using it. Do **not** run multiple `create-embeddings`,
+    clustering, web UI, or MCP processes against the same local store
+    simultaneously: each process persists its own copy of the HNSW index, and
+    concurrent writers can corrupt the store. A second process now fails fast
+    with an "Another process is using the local ChromaDB" error. For concurrent
+    access, use an HTTP ChromaDB server (`EMBEDDING_DB=http://...`).
+
+    If a local store was corrupted by concurrent writers, stop all processes,
+    move the store aside, and rebuild it with `create-embeddings` (the paper
+    database is unaffected).
+
 ### RAG Settings
 
 - **COLLECTION_NAME**: ChromaDB collection name (default: `papers`)

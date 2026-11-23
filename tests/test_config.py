@@ -36,6 +36,7 @@ def clean_config_env_vars():
         "POSTGRES_DB",
         "ABSTRACTS_DB_PASSWORD",
         "EMBEDDING_DB",
+        "MIN_FREE_DISK_MB",
         "COLLECTION_NAME",
         "MAX_CONTEXT_PAPERS",
         "METADATA_CACHE_TTL",
@@ -229,6 +230,7 @@ class TestConfig:
         assert config.embedding_model == "alias-qwen3-8b-embeddings"
         assert config.llm_backend_url == "https://api.helmholtz-blablador.fz-juelich.de"
         assert config.embedding_db == str((Path("data") / "chroma_db").absolute())
+        assert config.min_free_disk_mb == 4096
         # Test database_url is constructed from PAPER_DB
         assert config.database_url == f"sqlite:///{(Path('data') / 'abstracts.db').absolute()}"
         assert config.collection_name == "papers"
@@ -330,6 +332,29 @@ class TestConfig:
         env_file.write_text("CLUSTER_LABEL_MAX_WORKERS=-3\n")
         config = Config(env_path=env_file)
         assert config.cluster_label_max_workers == 1
+
+    def test_min_free_disk_mb_from_env(self, tmp_path):
+        """MIN_FREE_DISK_MB controls the embedding-write disk preflight."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("MIN_FREE_DISK_MB=1024\n")
+
+        config = Config(env_path=env_file)
+        assert config.min_free_disk_mb == 1024
+
+    def test_min_free_disk_mb_zero_disables_check(self, tmp_path):
+        """Zero or negative values disable the disk-space preflight."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("MIN_FREE_DISK_MB=0\n")
+        assert Config(env_path=env_file).min_free_disk_mb == 0
+
+        env_file.write_text("MIN_FREE_DISK_MB=-10\n")
+        assert Config(env_path=env_file).min_free_disk_mb == 0
+
+    def test_min_free_disk_mb_invalid_falls_back(self, tmp_path):
+        """Invalid values fall back to the default."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("MIN_FREE_DISK_MB=not-a-number\n")
+        assert Config(env_path=env_file).min_free_disk_mb == 4096
 
     def test_llm_timeouts_from_env(self, tmp_path):
         """LLM connect and request timeouts are configurable."""

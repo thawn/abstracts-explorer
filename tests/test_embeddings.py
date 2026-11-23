@@ -5,9 +5,11 @@ Tests for the embeddings module.
 import logging
 import threading
 import time
+from pathlib import Path
 
 import httpx2
 import pytest
+from filelock import FileLock
 from unittest.mock import Mock
 
 from abstracts_explorer.embeddings import (
@@ -1618,6 +1620,91 @@ class TestConcurrentClientCreation:
         assert all(not thread.is_alive() for thread in threads)
         assert errors == []
         assert max_active == 1
+
+
+class TestLocalChromaLock:
+    """Tests for the exclusive process-lifetime lock on local ChromaDB."""
+
+    @staticmethod
+    def _foreign_lock(manager) -> FileLock:
+        lock_path = Path(manager.embedding_db) / ".chroma.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock = FileLock(str(lock_path), thread_local=False)
+        lock.acquire(timeout=0)
+        return lock
+
+    def test_foreign_holder_is_rejected(self, embeddings_manager):
+        """A local client fails fast when another process holds the lock."""
+        foreign = self._foreign_lock(embeddings_manager)
+        try:
+            with pytest.raises(EmbeddingsError, match="(?i)another process"):
+                _ = embeddings_manager.client
+        finally:
+            foreign.release()
+
+    def test_lock_is_released_on_close(self, embeddings_manager):
+        """Closing the manager releases the lock so another process can take it."""
+        _ = embeddings_manager.client
+        embeddings_manager.close()
+
+        foreign = self._foreign_lock(embeddings_manager)
+        foreign.release()
+
+    def test_same_process_managers_share_the_lock(self, tmp_path, monkeypatch):
+        """Multiple managers in one process may connect to the same local path."""
+        from abstracts_explorer.config import get_config
+
+        chroma_path = tmp_path / "shared_chroma"
+        monkeypatch.setenv("EMBEDDING_DB", str(chroma_path))
+        get_config(reload=True)
+
+        first = EmbeddingsManager()
+        second = EmbeddingsManager()
+        try:
+            assert first.client is not None
+            assert second.client is not None
+        finally:
+            first.close()
+            second.close()
+
+    def test_http_mode_does_not_take_the_local_lock(self, monkeypatch):
+        """HTTP backends rely on the server for concurrency and need no lock."""
+        import abstracts_explorer.embeddings.chroma as chroma_module
+
+        monkeypatch.setattr(chroma_module.chromadb, "HttpClient", Mock(return_value=Mock()))
+
+        manager = EmbeddingsManager.__new__(EmbeddingsManager)
+        manager.embedding_db = "http://localhost:8000"
+        manager._client = None
+        manager._collection = None
+        manager._chroma_lock_path = None
+        manager._init_lock = threading.RLock()
+
+        manager._connect()
+
+        assert manager._client is not None
+        assert manager._chroma_lock_path is None
+
+
+class TestDiskSpacePreflight:
+    """Tests for the disk-space check before embedding writes."""
+
+    def test_embed_from_database_rejects_low_disk(
+        self, embeddings_manager, test_database, mock_lm_studio, monkeypatch
+    ):
+        """Embedding writes fail with a clear error instead of risking corruption."""
+        from abstracts_explorer.utils.disk_utils import InsufficientDiskSpaceError
+
+        def _raise(*args, **kwargs):
+            raise InsufficientDiskSpaceError("disk full")
+
+        monkeypatch.setattr("abstracts_explorer.embeddings.ingest.ensure_free_space", _raise)
+
+        with pytest.raises(EmbeddingsError, match="disk full"):
+            embeddings_manager.embed_from_database()
+
+        assert embeddings_manager.get_collection_stats()["count"] == 0
+        embeddings_manager.close()
 
 
 class TestDistanceHelpers:

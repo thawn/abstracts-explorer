@@ -121,7 +121,9 @@ class EmbeddingsManager(GenerationMixin, QueryMixin, IngestMixin, ArtifactsMixin
         self.collection_name = collection_name or config.collection_name
         self._client: Optional[object] = None
         self._collection: Optional[object] = None
+        self._chroma_lock_path: Optional[str] = None
         self._init_lock = threading.RLock()
+        self.min_free_disk_mb = config.min_free_disk_mb
 
         self._openai_client = None
 

@@ -24,6 +24,7 @@ dependencies = [
     { name = "beautifulsoup4" },
     { name = "bertopic", extra = ["umap"] },
     { name = "chromadb" },
+    { name = "filelock" },
     { name = "httpx2" },
     { name = "mcp" },
     { name = "numpy" },
@@ -72,6 +73,7 @@ requires-dist = [
     { name = "bertopic", extras = ["umap"], git = "https://github.com/thawn/BERTopic.git?rev=94af51559bd816bd04ea5f27d58d598d295b5238" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=26.3.1" },
     { name = "chromadb", specifier = ">=0.4.0" },
+    { name = "filelock", specifier = ">=4.2.9" },
     { name = "flask", marker = "extra == 'web'", specifier = ">=3.0.0" },
     { name = "flask-cors", marker = "extra == 'web'", specifier = ">=4.0.0" },
     { name = "httpx2", specifier = ">=2.7" },
@@ -1396,8 +1398,8 @@ name = "httpcore2"
 version = "2.16.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11" },
-    { name = "truststore" },
+    { name = "h11", marker = "sys_platform != 'emscripten'" },
+    { name = "truststore", marker = "sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c0/61/afa9d6b7452f9eca73f73d45324eb0bb52f098fd5e6049bf6b8263be9b4e/httpcore2-2.16.0.tar.gz", hash = "sha256:c72cd0413563b17e1cd8354677dff887466f8ec2551679759e93126534428643", size = 69886, upload-time = "2026-10-21T07:09:45.31Z" }
 wheels = [
