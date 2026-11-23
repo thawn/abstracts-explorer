@@ -12,7 +12,7 @@ from abstracts_explorer import DatabaseManager
 from abstracts_explorer.embeddings import QueryEmbedding
 from abstracts_explorer.plugin import LightweightPaper, convert_to_lightweight_schema
 from tests.conftest import set_test_db, set_test_embedding_db
-from tests.helpers import raw_query, requires_lm_studio
+from tests.helpers import raw_query, requires_lm_studio, skip_on_backend_unavailable
 
 
 def _search_semantic(db, query, **kwargs):
@@ -501,6 +501,7 @@ class TestIntegration:
             assert len(papers_with_keywords) == 2  # Papers 6 and 7 have keywords
 
     @requires_lm_studio
+    @skip_on_backend_unavailable
     def test_embeddings_end_to_end_with_real_data(self, tmp_path):
         """
         End-to-end test: Load real NeurIPS data, generate embeddings, and perform semantic search.
@@ -614,6 +615,7 @@ class TestIntegration:
             assert len(results) > 0
 
     @requires_lm_studio
+    @skip_on_backend_unavailable
     def test_search_papers_semantic_e2e(self, tmp_path):
         """
         End-to-end test for search_papers_semantic with real API backend.
