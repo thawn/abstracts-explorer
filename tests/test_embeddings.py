@@ -1445,7 +1445,7 @@ class TestRateLimiting:
         """Test that a RateLimitedTransport http_client is used when requests_per_minute > 0."""
         from tests.conftest import get_env_test_path
         from abstracts_explorer.config import get_config
-        from abstracts_explorer.rate_limiter import RateLimitedTransport
+        from abstracts_explorer.rate_limiter import CooldownAwareTransport, RateLimitedTransport
         from abstracts_explorer.rate_limiter import (
             TokenBucketRateLimiter,
             set_global_rate_limiter,
@@ -1454,16 +1454,17 @@ class TestRateLimiting:
         set_global_rate_limiter(None)
 
         monkeypatch.setenv("EMBEDDING_DB", str(tmp_path / "chroma"))
-        get_config(reload=True, env_path=get_env_test_path())
+        config = get_config(reload=True, env_path=get_env_test_path())
 
         em = EmbeddingsManager(requests_per_minute=30)
         # Trigger lazy initialization of the OpenAI client
         client = em.openai_client
-        # The underlying httpx2 client should use our rate-limited transport
-        assert isinstance(client._client._transport, RateLimitedTransport)
         transport = client._client._transport
-        assert isinstance(transport._rate_limiter, TokenBucketRateLimiter)
-        assert transport._rate_limiter.requests_per_minute == 30
+        assert isinstance(transport, CooldownAwareTransport)
+        assert isinstance(transport._transport, RateLimitedTransport)
+        assert isinstance(transport._transport._rate_limiter, TokenBucketRateLimiter)
+        assert transport._transport._rate_limiter.requests_per_minute == 30
+        assert client.max_retries == config.llm_max_attempts - 1
         assert client._client.timeout.connect == 10
         assert client._client.timeout.read == 60
 
@@ -1471,16 +1472,17 @@ class TestRateLimiting:
         """Test that no RateLimitedTransport is used when requests_per_minute=0."""
         from tests.conftest import get_env_test_path
         from abstracts_explorer.config import get_config
-        from abstracts_explorer.rate_limiter import RateLimitedTransport
+        from abstracts_explorer.rate_limiter import CooldownAwareTransport, RateLimitedTransport
 
         monkeypatch.setenv("EMBEDDING_DB", str(tmp_path / "chroma"))
         get_config(reload=True, env_path=get_env_test_path())
 
         em = EmbeddingsManager(requests_per_minute=0)
         client = em.openai_client
-        # When rate limiting is disabled, the transport is not rate limited,
-        # but the client still uses the explicit structured timeout.
-        assert not isinstance(getattr(getattr(client, "_client", None), "_transport", None), RateLimitedTransport)
+        # The cooldown wrapper is always present, but rate limiting is disabled.
+        transport = getattr(getattr(client, "_client", None), "_transport", None)
+        assert isinstance(transport, CooldownAwareTransport)
+        assert not isinstance(transport._transport, RateLimitedTransport)
         assert client._client.timeout.connect == 10
         assert client._client.timeout.read == 60
 
@@ -1896,11 +1898,11 @@ class TestEmbeddingInputTruncation:
         assert em.openai_client.embeddings.create.call_count == 1
 
 
-class TestOpenAIClientRetries:
-    """Tests for the ``openai_max_retries`` client override."""
+class TestCentralLLMRetries:
+    """The SDK owns retries; attempts come from config and the cooldown wraps it."""
 
-    def test_override_is_forwarded(self, embeddings_manager, monkeypatch):
-        """An explicit override is passed to the OpenAI client."""
+    def test_sdk_retries_derived_from_max_attempts(self, embeddings_manager, monkeypatch):
+        """The OpenAI client gets ``LLM_MAX_ATTEMPTS - 1`` retries."""
         created = {}
 
         def fake_openai(**kwargs):
@@ -1910,25 +1912,28 @@ class TestOpenAIClientRetries:
         monkeypatch.setattr("abstracts_explorer.embeddings.models.OpenAI", fake_openai)
         monkeypatch.setattr("abstracts_explorer.embeddings.models.httpx2.Client", Mock())
         embeddings_manager.requests_per_minute = 0
-        embeddings_manager.openai_max_retries = 0
+        embeddings_manager.llm_max_attempts = 6
 
         embeddings_manager._create_openai_client()
 
-        assert created["max_retries"] == 0
+        assert created["max_retries"] == 5
 
-    def test_default_keeps_sdk_setting(self, embeddings_manager, monkeypatch):
-        """Without an override the SDK default is used."""
-        created = {}
+    def test_cooldown_transport_always_wraps_client(self, embeddings_manager, monkeypatch):
+        """Every client has the shared-cooldown transport, even without rate limiting."""
+        from abstracts_explorer.rate_limiter import CooldownAwareTransport, RateLimitedTransport
 
-        def fake_openai(**kwargs):
-            created.update(kwargs)
+        captured = {}
+
+        def fake_client(**kwargs):
+            captured.update(kwargs)
             return Mock()
 
-        monkeypatch.setattr("abstracts_explorer.embeddings.models.OpenAI", fake_openai)
-        monkeypatch.setattr("abstracts_explorer.embeddings.models.httpx2.Client", Mock())
+        monkeypatch.setattr("abstracts_explorer.embeddings.models.OpenAI", Mock())
+        monkeypatch.setattr("abstracts_explorer.embeddings.models.httpx2.Client", fake_client)
         embeddings_manager.requests_per_minute = 0
-        embeddings_manager.openai_max_retries = None
 
         embeddings_manager._create_openai_client()
 
-        assert "max_retries" not in created
+        transport = captured["transport"]
+        assert isinstance(transport, CooldownAwareTransport)
+        assert not isinstance(transport._transport, RateLimitedTransport)

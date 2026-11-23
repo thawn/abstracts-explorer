@@ -180,7 +180,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         EmbeddingsManager(
             collection_name=collection_name,
             requests_per_minute=args.requests_per_minute,
-            openai_max_retries=0,
         ) as embeddings_manager,
     ):
         for conference, year in scopes:

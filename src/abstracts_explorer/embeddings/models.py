@@ -11,7 +11,7 @@ from openai import OpenAI
 
 from abstracts_explorer.database import DatabaseManager, normalize_model_name
 from abstracts_explorer.embeddings.errors import translate_errors
-from abstracts_explorer.rate_limiter import RateLimitedTransport
+from abstracts_explorer.rate_limiter import CooldownAwareTransport, RateLimitedTransport
 from abstracts_explorer.utils.http_utils import build_llm_timeout, is_llm_timeout
 
 logger = logging.getLogger(__name__)
@@ -28,17 +28,19 @@ class ModelMixin:
     requests_per_minute: int
     request_timeout: float
     connect_timeout: float
-    openai_max_retries: Optional[int]
+    llm_max_attempts: int
+    llm_rate_limit_delay: float
 
     @property
     def openai_client(self) -> OpenAI:
         """
         Get the OpenAI client, creating it lazily on first access.
 
-        The client always uses an explicit structured timeout. When
-        ``requests_per_minute`` is greater than 0 a
-        :class:`RateLimitedTransport` is wrapped around the default httpx2
-        transport so that every HTTP request is automatically throttled.
+        The client always uses an explicit structured timeout and delegates
+        HTTP retries to the OpenAI SDK (``max_retries`` derived from
+        ``llm_max_attempts``). Requests pass through a cooldown-aware transport
+        that adds global token-bucket pacing and pauses all requests after a
+        ``429``.
 
         Returns
         -------
@@ -52,22 +54,32 @@ class ModelMixin:
         return self._openai_client
 
     def _create_openai_client(self) -> OpenAI:
-        """Create the OpenAI client with an explicit structured timeout."""
-        transport: Optional[Any] = None
+        """
+        Create the OpenAI client with centralized retry and rate-limit handling.
+
+        The OpenAI SDK owns retry status classification, ``Retry-After``
+        handling, and backoff. ``max_retries`` is derived from
+        ``llm_max_attempts`` so the configured budget is the true number of
+        HTTP attempts. The transport adds global token-bucket pacing and a
+        shared cooldown so parallel requests pause after a rate-limit response.
+        """
+        inner_transport: httpx2.BaseTransport = httpx2.HTTPTransport()
         if self.requests_per_minute > 0:
-            transport = RateLimitedTransport(httpx2.HTTPTransport(), self.requests_per_minute)
+            inner_transport = RateLimitedTransport(inner_transport, self.requests_per_minute)
+        transport = CooldownAwareTransport(
+            inner_transport,
+            rate_limit_delay=self.llm_rate_limit_delay,
+        )
         http_client = httpx2.Client(
             transport=transport,
             timeout=build_llm_timeout(self.request_timeout, self.connect_timeout),
         )
-        client_kwargs: dict[str, Any] = {
-            "base_url": f"{self.backend_url}/v1",
-            "api_key": self.llm_backend_auth_token or "lm-studio-local",
-            "http_client": http_client,
-        }
-        if self.openai_max_retries is not None:
-            client_kwargs["max_retries"] = max(0, int(self.openai_max_retries))
-        return OpenAI(**client_kwargs)
+        return OpenAI(
+            base_url=f"{self.backend_url}/v1",
+            api_key=self.llm_backend_auth_token or "lm-studio-local",
+            http_client=http_client,
+            max_retries=max(0, int(self.llm_max_attempts) - 1),
+        )
 
     def test_api_connection(
         self,

@@ -17,6 +17,7 @@ from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from abstracts_explorer.config import get_config
+from abstracts_explorer.rate_limiter import CooldownAwareTransport, RateLimitedTransport
 from abstracts_explorer.rag.citations import PaperCitationRegistry
 from abstracts_explorer.rag.guard import GuardDecision, InputGuard
 from abstracts_explorer.rag.tool_context import RAGToolContext
@@ -232,14 +233,16 @@ class AgentMixin:
         config = get_config()
         requests_per_minute = config.requests_per_minute
 
-        transport = None
+        inner_transport: httpx2.AsyncBaseTransport = httpx2.AsyncHTTPTransport()
         if requests_per_minute > 0:
-            from abstracts_explorer.rate_limiter import RateLimitedTransport
-
-            transport = RateLimitedTransport(
-                httpx2.AsyncHTTPTransport(),
+            inner_transport = RateLimitedTransport(
+                inner_transport,
                 requests_per_minute=requests_per_minute,
             )
+        transport = CooldownAwareTransport(
+            inner_transport,
+            rate_limit_delay=config.llm_rate_limit_delay,
+        )
         http_client = create_async_httpx2_client(
             timeout=build_llm_timeout(self.request_timeout, self.connect_timeout),
             transport=transport,
@@ -415,13 +418,16 @@ class AgentMixin:
                 citations=self._citations,
             )
 
-            # Model settings
+            # Model settings. The provider SDK owns HTTP retries; the shared
+            # cooldown-aware transport pauses all requests after a 429.
+            config = get_config()
             settings = OpenAIChatModelSettings(
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 timeout=self.request_timeout,
                 request_timeout=self.query_timeout,
                 openai_reasoning_effort="low",
+                max_retries=max(0, int(config.llm_max_attempts) - 1),
             )
 
             # Build instructions first so we can update message history

@@ -117,7 +117,6 @@ def perform_clustering(
             EmbeddingsManager(
                 collection_name=collection_name,
                 requests_per_minute=requests_per_minute,
-                openai_max_retries=0,
             ) as em,
         ):
             cm = ClusteringManager(em, db)

@@ -137,7 +137,6 @@ class TestRecluster:
         assert script.main(["--requests-per-minute", "42"]) == 0
 
         kwargs = runtime.embeddings_factory.call_args.kwargs
-        assert kwargs["openai_max_retries"] == 0
         assert kwargs["requests_per_minute"] == 42
         assert kwargs["collection_name"] == "papers"
 

@@ -60,6 +60,8 @@ class _OrcidLlmProvider(ModelMixin):
         self.requests_per_minute = config.requests_per_minute
         self.request_timeout = config.llm_request_timeout
         self.connect_timeout = config.llm_connect_timeout
+        self.llm_max_attempts = config.llm_max_attempts
+        self.llm_rate_limit_delay = config.llm_rate_limit_delay
 
 
 def normalize_orcid_id(value: str) -> str:

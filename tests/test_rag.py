@@ -406,6 +406,7 @@ class TestRAGToolQueue:
         assert kwargs["timeout"] == 120
         assert kwargs["model_settings"]["timeout"] == 60
         assert kwargs["model_settings"]["request_timeout"] == 120
+        assert kwargs["model_settings"]["max_retries"] == get_config().llm_max_attempts - 1
         assert chat.query_timeout == 120
 
     def test_duplicate_tool_call_is_reused(self):
@@ -763,7 +764,7 @@ class TestRAGChatHTTPClient:
 
         import httpx2
 
-        from abstracts_explorer.rate_limiter import RateLimitedTransport
+        from abstracts_explorer.rate_limiter import CooldownAwareTransport, RateLimitedTransport
 
         config = get_config()
         monkeypatch.setattr(config, "requests_per_minute", 60)
@@ -777,7 +778,8 @@ class TestRAGChatHTTPClient:
         provider = getattr(chat.agent.model, "provider")
         async_client = provider._client._client
         assert isinstance(async_client, httpx2.AsyncClient)
-        assert isinstance(async_client._transport, RateLimitedTransport)
+        assert isinstance(async_client._transport, CooldownAwareTransport)
+        assert isinstance(async_client._transport._transport, RateLimitedTransport)
         assert async_client.timeout.connect == 10
         assert async_client.timeout.read == 60
         asyncio.run(async_client.aclose())
@@ -790,7 +792,7 @@ class TestRAGChatHTTPClient:
 
         import httpx2
 
-        from abstracts_explorer.rate_limiter import RateLimitedTransport
+        from abstracts_explorer.rate_limiter import CooldownAwareTransport, RateLimitedTransport
 
         config = get_config()
         monkeypatch.setattr(config, "requests_per_minute", 0)
@@ -799,7 +801,8 @@ class TestRAGChatHTTPClient:
         provider = getattr(chat.agent.model, "provider")
         async_client = provider._client._client
         assert isinstance(async_client, httpx2.AsyncClient)
-        assert not isinstance(async_client._transport, RateLimitedTransport)
+        assert isinstance(async_client._transport, CooldownAwareTransport)
+        assert not isinstance(async_client._transport._transport, RateLimitedTransport)
         assert async_client.timeout.connect == 10
         assert async_client.timeout.read == 60
         asyncio.run(async_client.aclose())

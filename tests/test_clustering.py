@@ -33,11 +33,7 @@ from abstracts_explorer.clustering.labels import (
     parse_llm_label_response,
     split_label_description,
 )
-from abstracts_explorer.clustering.llm import (
-    _retry_after_seconds,
-    generate_llm_label,
-    is_retryable_llm_error,
-)
+from abstracts_explorer.clustering.llm import generate_llm_label
 from abstracts_explorer.clustering.manager import ClusteringManager
 from abstracts_explorer.clustering.pipeline import compute_clusters_with_cache, perform_clustering
 from abstracts_explorer.clustering.representation import ProjectLLMRepresentation
@@ -52,7 +48,6 @@ from abstracts_explorer.clustering.results import (
     export_results_to_json,
     results_have_flat_labels,
 )
-from abstracts_explorer.rate_limiter import RateLimitCooldown
 
 
 def sample_hierarchy() -> pd.DataFrame:
@@ -334,25 +329,7 @@ class TestResults:
 
 
 class TestLLMHelpers:
-    """Tests for retry-aware label generation."""
-
-    @pytest.fixture(autouse=True)
-    def _reset_llm_cooldown(self, monkeypatch):
-        import abstracts_explorer.clustering.llm as llm_module
-
-        monkeypatch.setattr(llm_module, "_rate_limit_cooldown", RateLimitCooldown())
-
-    def test_is_retryable(self):
-        assert is_retryable_llm_error(ValueError("empty"))
-        assert is_retryable_llm_error(TimeoutError("timeout"))
-        assert not is_retryable_llm_error(AttributeError("missing client"))
-
-        error = MockError(status_code=429)
-        assert is_retryable_llm_error(error)
-        error = MockError(status_code=401)
-        assert not is_retryable_llm_error(error)
-        error = MockError(response=MockError(status_code=503))
-        assert is_retryable_llm_error(error)
+    """Tests for label generation (HTTP retries live in the OpenAI SDK)."""
 
     def test_generate_label_success(self, mocker):
         config = mocker.Mock(
@@ -453,7 +430,7 @@ class TestLLMHelpers:
         budgets = [call.kwargs["max_tokens"] for call in chat.call_args_list]
         assert budgets == [600, 1200, 2400, 2400, 2400, 2400]
 
-    def test_generate_label_does_not_escalate_after_non_empty_error(self, mocker):
+    def test_generate_label_stops_on_http_error(self, mocker):
         config = mocker.Mock(
             llm_max_attempts=3,
             llm_retry_base_delay=0,
@@ -469,96 +446,32 @@ class TestLLMHelpers:
         )
         em = mocker.Mock(openai_client=object())
 
-        assert generate_llm_label(em, "system", "user") == "Label"
-        budgets = [call.kwargs["max_tokens"] for call in chat.call_args_list]
-        assert budgets == [600, 1200, 1200]
+        with pytest.raises(MockError):
+            generate_llm_label(em, "system", "user")
 
-    def test_generate_label_retries_retryable_error(self, mocker):
+        budgets = [call.kwargs["max_tokens"] for call in chat.call_args_list]
+        assert budgets == [600, 1200]
+
+    def test_generate_label_does_not_retry_http_errors(self, mocker):
         config = mocker.Mock(
-            llm_max_attempts=2,
+            llm_max_attempts=3,
             llm_retry_base_delay=0,
             llm_retry_max_delay=0,
-            llm_rate_limit_delay=60,
             llm_request_timeout=5,
             cluster_label_model="model",
         )
         mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
         mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
-        cooldown = mocker.Mock()
-        mocker.patch("abstracts_explorer.clustering.llm._rate_limit_cooldown", cooldown)
         chat = mocker.patch(
             "abstracts_explorer.clustering.llm.chat_completion_text",
-            side_effect=[MockError(status_code=429), "Label"],
+            side_effect=MockError(status_code=429),
         )
         em = mocker.Mock(openai_client=object())
 
-        assert generate_llm_label(em, "system", "user") == "Label"
-        assert chat.call_count == 2
-        assert cooldown.wait.call_count == 2
-        cooldown.defer.assert_called_once_with(60)
+        with pytest.raises(MockError):
+            generate_llm_label(em, "system", "user")
 
-    def test_generate_label_honors_retry_after_header(self, mocker):
-        config = mocker.Mock(
-            llm_max_attempts=2,
-            llm_retry_base_delay=0,
-            llm_retry_max_delay=0,
-            llm_rate_limit_delay=60,
-            llm_request_timeout=5,
-            cluster_label_model="model",
-        )
-        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
-        mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
-        cooldown = mocker.Mock()
-        mocker.patch("abstracts_explorer.clustering.llm._rate_limit_cooldown", cooldown)
-        error = MockError(status_code=429, response=Mock(headers={"retry-after": "12"}))
-        mocker.patch(
-            "abstracts_explorer.clustering.llm.chat_completion_text",
-            side_effect=[error, "Label"],
-        )
-        em = mocker.Mock(openai_client=object())
-
-        assert generate_llm_label(em, "system", "user") == "Label"
-        cooldown.defer.assert_called_once_with(12)
-
-    def test_retry_after_http_date(self):
-        from datetime import datetime, timedelta, timezone
-        from email.utils import format_datetime
-
-        retry_at = datetime.now(timezone.utc) + timedelta(seconds=30)
-        error = MockError(
-            status_code=429,
-            response=Mock(headers={"retry-after": format_datetime(retry_at, usegmt=True)}),
-        )
-
-        delay = _retry_after_seconds(error)
-        assert delay is not None
-        assert 25 <= delay <= 35
-
-    def test_retry_after_invalid_value(self):
-        error = MockError(status_code=429, response=Mock(headers={"retry-after": "not-a-date"}))
-        assert _retry_after_seconds(error) is None
-
-    def test_generate_label_uses_configured_rate_limit_delay(self, mocker):
-        config = mocker.Mock(
-            llm_max_attempts=2,
-            llm_retry_base_delay=0,
-            llm_retry_max_delay=0,
-            llm_rate_limit_delay=45,
-            llm_request_timeout=5,
-            cluster_label_model="model",
-        )
-        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
-        mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
-        cooldown = mocker.Mock()
-        mocker.patch("abstracts_explorer.clustering.llm._rate_limit_cooldown", cooldown)
-        mocker.patch(
-            "abstracts_explorer.clustering.llm.chat_completion_text",
-            side_effect=[MockError(status_code=429), "Label"],
-        )
-        em = mocker.Mock(openai_client=object())
-
-        assert generate_llm_label(em, "system", "user") == "Label"
-        cooldown.defer.assert_called_once_with(45)
+        assert chat.call_count == 1
 
     def test_generate_label_exhausts_retries(self, mocker):
         config = mocker.Mock(
@@ -602,12 +515,11 @@ class TestLLMHelpers:
         assert any("failed permanently" in message for message in messages)
         assert any("model=test-model" in message and "status=429" in message for message in messages)
 
-    def test_generate_label_warns_with_model_and_status(self, mocker, caplog):
+    def test_generate_label_logs_http_status_on_failure(self, mocker, caplog):
         config = mocker.Mock(
             llm_max_attempts=2,
             llm_retry_base_delay=0,
             llm_retry_max_delay=0,
-            llm_rate_limit_delay=0,
             llm_request_timeout=5,
             cluster_label_model="test-model",
         )
@@ -615,15 +527,19 @@ class TestLLMHelpers:
         mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
         mocker.patch(
             "abstracts_explorer.clustering.llm.chat_completion_text",
-            side_effect=[MockError(status_code=503), "Label"],
+            side_effect=MockError(status_code=503),
         )
         em = mocker.Mock(openai_client=object())
 
-        with caplog.at_level(logging.WARNING, logger="abstracts_explorer.clustering.llm"):
-            assert generate_llm_label(em, "system", "user") == "Label"
+        with caplog.at_level(logging.ERROR, logger="abstracts_explorer.clustering.llm"):
+            with pytest.raises(MockError):
+                generate_llm_label(em, "system", "user")
 
         messages = [record.getMessage() for record in caplog.records]
-        assert any("model=test-model" in message and "status=503" in message for message in messages)
+        assert any(
+            "failed permanently" in message and "model=test-model" in message and "status=503" in message
+            for message in messages
+        )
 
     def test_generate_label_missing_client(self):
         with pytest.raises(AttributeError):
@@ -1232,7 +1148,6 @@ class TestPipeline:
         embedding_class.assert_called_once_with(
             collection_name="papers",
             requests_per_minute=30,
-            openai_max_retries=0,
         )
 
     def test_perform_clustering_uses_config_rate_limit_by_default(self, mocker):
@@ -1247,7 +1162,6 @@ class TestPipeline:
         embedding_class.assert_called_once_with(
             collection_name="papers",
             requests_per_minute=None,
-            openai_max_retries=0,
         )
 
     def test_perform_clustering_wraps_errors(self, mocker):

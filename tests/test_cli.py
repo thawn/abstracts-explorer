@@ -2816,7 +2816,6 @@ class TestCLI:
 
         assert exit_code == 0
         mock_em_class.assert_called_once()
-        assert mock_em_class.call_args.kwargs["openai_max_retries"] == 0
         mock_compute.assert_called_once()
 
     def test_pre_generate_clustering_success(self, tmp_path, capsys, monkeypatch):
