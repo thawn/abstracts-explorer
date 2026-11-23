@@ -10,4 +10,5 @@ Small, dependency-light modules used across the package:
 - :mod:`abstracts_explorer.utils.text_utils` — HTML-to-text and text normalization
 - :mod:`abstracts_explorer.utils.conference_utils` — conference/year parsing
 - :mod:`abstracts_explorer.utils.paper_presentation` — paper text formatting
+- :mod:`abstracts_explorer.utils.disk_utils` — free-space checks before writes
 """

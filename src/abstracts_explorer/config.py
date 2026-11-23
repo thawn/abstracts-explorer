@@ -99,6 +99,10 @@ class Config:
     embedding_db : str
         ChromaDB configuration - can be either a URL (e.g., "http://chromadb:8000")
         or a file path (e.g., "chroma_db" or "/path/to/chroma_db").
+    min_free_disk_mb : int
+        Minimum free disk space in MiB required before writing embeddings
+        (default: 4096). Local ChromaDB writes are refused when the
+        filesystem has less space available. Set to 0 to disable the check.
     paper_db_path : str
         Path to SQLite paper database.
     collection_name : str
@@ -313,6 +317,10 @@ class Config:
         else:
             # File path - resolve relative to data_dir
             self.embedding_db = self._resolve_path(embedding_db)
+
+        # Minimum free disk space required before writing embeddings (MiB).
+        # Writing a native vector index while the disk is full can corrupt it.
+        self.min_free_disk_mb = max(0, self._get_env_int("MIN_FREE_DISK_MB", default=4096))
 
         # Collection Settings
         self.collection_name = self._get_env("COLLECTION_NAME", default="papers")
@@ -543,6 +551,7 @@ class Config:
             "llm_backend_url": self.llm_backend_url,
             "llm_backend_auth_token": "***" if self.llm_backend_auth_token else "",
             "embedding_db": self.embedding_db,
+            "min_free_disk_mb": self.min_free_disk_mb,
             "database_url": self._mask_database_url(self.database_url),
             "collection_name": self.collection_name,
             "max_context_papers": self.max_context_papers,
