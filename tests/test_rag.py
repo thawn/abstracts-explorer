@@ -25,7 +25,7 @@ from abstracts_explorer.rag.guard import GuardDecision, InputGuard
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.config import get_config
 from tests.conftest import set_test_embedding_db
-from tests.helpers import raw_query, requires_lm_studio, create_test_db_with_paper
+from tests.helpers import raw_query, requires_lm_studio, create_test_db_with_paper, skip_on_backend_unavailable
 
 # Fixtures imported from conftest.py:
 # - mock_embeddings_manager: Mock embeddings manager with predefined search results
@@ -1478,6 +1478,7 @@ class TestRAGChatIntegration:
     """
 
     @requires_lm_studio
+    @skip_on_backend_unavailable
     def test_real_query(self, tmp_path):
         """
         Test real query with actual LM Studio backend using configured model.
@@ -1546,6 +1547,7 @@ class TestRAGChatIntegration:
         db.close()
 
     @requires_lm_studio
+    @skip_on_backend_unavailable
     def test_real_conversation(self, tmp_path):
         """
         Test real conversation with actual LM Studio backend.
@@ -1610,6 +1612,7 @@ class TestRAGChatIntegration:
         db.close()
 
     @requires_lm_studio
+    @skip_on_backend_unavailable
     def test_real_export(self, tmp_path):
         """
         Test exporting real conversation with configured model.
@@ -2094,6 +2097,7 @@ class TestParallelRAGRateLimiting:
     """
 
     @requires_lm_studio
+    @skip_on_backend_unavailable
     def test_parallel_rag_queries_enforce_rate_limit(self, tmp_path):
         """
         Multiple concurrent RAG queries from different threads should be rate-limited.

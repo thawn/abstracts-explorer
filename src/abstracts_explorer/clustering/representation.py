@@ -82,6 +82,72 @@ class ProjectLLMRepresentation(BaseRepresentation):
         self.doc_length = doc_length
         self.show_progress = show_progress
         self.max_workers = max_workers
+        self.flat_topics: Optional[Sequence[int]] = None
+        self._deferred: Optional[List[Tuple[frozenset[int], List[str], str]]] = None
+
+    def set_flat_topics(self, topics: Sequence[int]) -> None:
+        """
+        Provide the flat topic assignment per document.
+
+        The mapping is needed to recover the member flat topics of a merged
+        hierarchy node from a document selection.
+
+        Parameters
+        ----------
+        topics : sequence of int
+            Flat topic ID for each document, indexed by document position.
+        """
+        self.flat_topics = list(topics)
+
+    def begin_deferred(self) -> None:
+        """Defer LLM labeling until :meth:`flush_deferred` is called.
+
+        While deferred, :meth:`extract_topics` records the clusters that need
+        labels and returns cheap keyword placeholders immediately. This lets
+        BERTopic build the hierarchy quickly and allows the recorded clusters to
+        be labeled in a single parallel batch afterwards.
+        """
+        self._deferred = []
+
+    def flush_deferred(self, show_progress: Optional[bool] = None) -> Dict[frozenset[int], str]:
+        """
+        Label all clusters recorded since :meth:`begin_deferred` in one batch.
+
+        Parameters
+        ----------
+        show_progress : bool or None, optional
+            Override progress-bar visibility for the batch. ``None`` (default)
+            uses the instance ``show_progress`` setting.
+
+        Returns
+        -------
+        dict
+            Mapping of member flat-topic sets to encoded label/description
+            strings.
+        """
+        recorded = self._deferred or []
+        self._deferred = None
+        if not recorded:
+            return {}
+
+        show = self.show_progress if show_progress is None else show_progress
+        pending = [(index, keywords, prompt) for index, (_, keywords, prompt) in enumerate(recorded)]
+        progress = (
+            tqdm(total=len(pending), desc="Labeling hierarchy clusters (LLM)", unit="cluster")
+            if show and len(pending) > 1
+            else None
+        )
+        try:
+            labeled = self._label_pending(pending, progress)
+        finally:
+            if progress is not None:
+                progress.close()
+
+        resolved: Dict[frozenset[int], str] = {}
+        for index, (members, _, _) in enumerate(recorded):
+            if members:
+                resolved[members] = labeled[index]
+        return resolved
 
     def _resolve_cached_label(self, topic: Any, documents: Any) -> str | None:
         """
@@ -146,7 +212,8 @@ class ProjectLLMRepresentation(BaseRepresentation):
 
         updated_topics: Dict[Any, List[Tuple[str, float]]] = {}
         pending: List[Tuple[Any, List[str], str]] = []
-        use_progress = self.show_progress and len(repr_docs_mappings) > 1
+        deferring = self._deferred is not None
+        use_progress = not deferring and self.show_progress and len(repr_docs_mappings) > 1
         progress = (
             tqdm(
                 total=len(repr_docs_mappings),
@@ -166,29 +233,20 @@ class ProjectLLMRepresentation(BaseRepresentation):
                     continue
 
                 keywords = [word for word, _ in topics[topic][:10]]
-                pending.append((topic, keywords, self._build_prompt(keywords, docs)))
+                prompt = self._build_prompt(keywords, docs)
+
+                if self._deferred is not None:
+                    self._deferred.append((self._members_for_topic(documents, topic), keywords, prompt))
+                    placeholder = " & ".join(keywords[:3]) or "Merged cluster"
+                    updated_topics[topic] = [(placeholder, 1)]
+                    continue
+
+                pending.append((topic, keywords, prompt))
 
             if pending:
-                max_workers = self._effective_max_workers(len(pending))
-                if max_workers <= 1:
-                    for topic, keywords, prompt in pending:
-                        updated_topics[topic] = [(self._label_topic(topic, keywords, prompt), 1)]
-                        if progress is not None:
-                            progress.update(1)
-                else:
-                    with ThreadPoolExecutor(
-                        max_workers=max_workers,
-                        thread_name_prefix="cluster-label",
-                    ) as executor:
-                        futures = {
-                            executor.submit(self._label_topic, topic, keywords, prompt): topic
-                            for topic, keywords, prompt in pending
-                        }
-                        for future in as_completed(futures):
-                            topic = futures[future]
-                            updated_topics[topic] = [(future.result(), 1)]
-                            if progress is not None:
-                                progress.update(1)
+                labeled = self._label_pending(pending, progress)
+                for topic, encoded in labeled.items():
+                    updated_topics[topic] = [(encoded, 1)]
         finally:
             if progress is not None:
                 progress.close()
@@ -201,6 +259,90 @@ class ProjectLLMRepresentation(BaseRepresentation):
         if configured is None:
             configured = get_config().cluster_label_max_workers
         return max(1, min(int(configured), task_count))
+
+    def _label_pending(
+        self,
+        pending: Sequence[Tuple[Any, Sequence[str], str]],
+        progress: Any = None,
+    ) -> Dict[Any, str]:
+        """
+        Label a batch of pending clusters, in parallel when configured.
+
+        Parameters
+        ----------
+        pending : sequence of tuple
+            ``(key, keywords, prompt)`` items to label. The key is only used to
+            map results back and may be an arbitrary hashable value.
+        progress : tqdm or None, optional
+            Progress bar to update once per completed item.
+
+        Returns
+        -------
+        dict
+            Mapping of each key to its encoded label/description string.
+        """
+        labeled: Dict[Any, str] = {}
+        if not pending:
+            return labeled
+
+        max_workers = self._effective_max_workers(len(pending))
+        if max_workers <= 1:
+            for key, keywords, prompt in pending:
+                labeled[key] = self._label_topic(key, keywords, prompt)
+                if progress is not None:
+                    progress.update(1)
+            return labeled
+
+        with ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="cluster-label",
+        ) as executor:
+            futures = {
+                executor.submit(self._label_topic, key, keywords, prompt): key for key, keywords, prompt in pending
+            }
+            for future in as_completed(futures):
+                key = futures[future]
+                labeled[key] = future.result()
+                if progress is not None:
+                    progress.update(1)
+        return labeled
+
+    def _members_for_topic(self, documents: Any, topic: Any) -> frozenset[int]:
+        """
+        Return the flat topics covered by a hierarchy merge selection.
+
+        BERTopic relabels every document in a merged selection as topic ``0``
+        but keeps the original ``ID`` column, so the flat topic can be recovered
+        through :attr:`flat_topics`.
+
+        Parameters
+        ----------
+        documents : pandas.DataFrame
+            Selection of documents for the merged cluster.
+        topic : Any
+            Topic ID within *documents* (``0`` for hierarchy merges).
+
+        Returns
+        -------
+        frozenset of int
+            Member flat topic IDs, excluding outliers. Empty when the selection
+            or flat-topic mapping is unavailable.
+        """
+        if not self.flat_topics:
+            return frozenset()
+        try:
+            selection = documents.loc[documents["Topic"] == topic, :]
+            if "ID" in selection.columns:
+                document_ids = [int(index) for index in selection["ID"].tolist()]
+            else:
+                document_ids = [int(index) for index in selection.index.tolist()]
+        except Exception:
+            return frozenset()
+        return frozenset(
+            int(self.flat_topics[document_id])
+            for document_id in document_ids
+            if 0 <= document_id < len(self.flat_topics) and int(self.flat_topics[document_id]) >= 0
+        )
 
     def _build_prompt(self, keywords: Sequence[str], docs: Sequence[str]) -> str:
         """Build the label prompt from keywords and representative documents."""

@@ -15,7 +15,7 @@ import pytest
 
 from abstracts_explorer.mcp_server import suggest_search_terms_from_orcid as mcp_suggest_search_terms
 from abstracts_explorer.orcid import OrcidError, fetch_orcid_record
-from tests.helpers import requires_lm_studio
+from tests.helpers import is_transient_backend_message, requires_lm_studio
 
 ORCID_ID = "0000-0002-2315-9247"
 
@@ -55,7 +55,13 @@ def test_live_orcid_search_terms_with_llm():
     result = json.loads(mcp_suggest_search_terms(ORCID_ID, max_terms=8))
 
     assert result["orcid"] == ORCID_ID
-    assert result["source"] == "llm"
+
+    warning = result.get("warning") or ""
+    if result["source"] != "llm":
+        if is_transient_backend_message(warning):
+            pytest.skip(f"LLM backend unavailable during test: {warning}")
+        pytest.fail(f"LLM term generation unexpectedly fell back: {warning}")
+
     assert result["warning"] is None
 
     terms = [item["term"] for item in result["suggested_terms"]]

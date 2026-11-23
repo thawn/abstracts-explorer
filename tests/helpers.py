@@ -5,8 +5,10 @@ This module contains common utility functions used across multiple test files
 to reduce code duplication and ensure consistency.
 """
 
+import functools
 import socket
 import threading
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -18,6 +20,7 @@ from sqlalchemy import text
 from abstracts_explorer.config import get_config
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.database import DatabaseManager
+from abstracts_explorer.utils.http_utils import is_llm_connection_error, is_llm_timeout
 
 from tests.conftest import get_env_test_path
 
@@ -308,3 +311,111 @@ def requires_lm_studio(func):
     func = pytest.mark.slow(func)
     func = pytest.mark.requires_lm_studio(func)
     return func
+
+
+_TRANSIENT_MESSAGE_MARKERS = (
+    "502",
+    "503",
+    "504",
+    "bad gateway",
+    "service unavailable",
+    "gateway timeout",
+    "timed out",
+    "connection error",
+    "connection reset",
+    "temporary failure",
+)
+
+
+def _exception_chain(exc: BaseException) -> Iterator[BaseException]:
+    """Yield *exc* and its chained causes without repeating exceptions."""
+    seen: set[int] = set()
+    current: Any = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def is_transient_backend_message(text: str) -> bool:
+    """
+    Return whether a backend error message indicates a transient outage.
+
+    Parameters
+    ----------
+    text : str
+        Warning or error text produced by the OpenAI-compatible backend.
+
+    Returns
+    -------
+    bool
+        True when the text looks like a transient server/network failure.
+    """
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(marker in lowered for marker in _TRANSIENT_MESSAGE_MARKERS)
+
+
+def is_transient_backend_error(exc: BaseException) -> bool:
+    """
+    Return whether *exc* represents a transient backend outage.
+
+    Traverses the exception chain so wrapped errors such as ``EmbeddingsError``
+    caused by an ``openai.InternalServerError`` are recognised. Assertions are
+    never treated as transient backend failures.
+
+    Parameters
+    ----------
+    exc : BaseException
+        Exception raised while talking to an OpenAI-compatible backend.
+
+    Returns
+    -------
+    bool
+        True for 5xx responses, connection failures, and timeouts.
+    """
+    if isinstance(exc, AssertionError):
+        return False
+
+    for item in _exception_chain(exc):
+        status = getattr(item, "status_code", None)
+        if isinstance(status, int) and status >= 500:
+            return True
+        if isinstance(item, (openai.APITimeoutError, openai.APIConnectionError)):
+            return True
+        if isinstance(item, httpx2.HTTPStatusError) and item.response.status_code >= 500:
+            return True
+        if is_llm_timeout(item) or is_llm_connection_error(item):
+            return True
+        if is_transient_backend_message(str(item)):
+            return True
+    return False
+
+
+def skip_on_backend_unavailable(func):
+    """
+    Skip a test when the OpenAI-compatible backend becomes unavailable.
+
+    The pre-test availability check can succeed while the backend fails later
+    with a 5xx, timeout, or connection error. Those are infrastructure outages,
+    not test failures, so the test is skipped instead.
+
+    Usage
+    -----
+    @requires_lm_studio
+    @skip_on_backend_unavailable
+    def test_something_with_api():
+        ...
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as exc:
+            if not is_transient_backend_error(exc):
+                raise
+            pytest.skip(f"LLM backend unavailable during test: {exc}")
+
+    return wrapper

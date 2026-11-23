@@ -140,7 +140,7 @@ class Config:
         may be a thinking-capable agent model).
     cluster_label_max_workers : int
         Maximum number of cluster-label LLM requests submitted in parallel
-        per labeling batch (default: 4). Set to 1 to label sequentially.
+        per labeling batch (default: 8). Set to 1 to label sequentially.
         Total request throughput is still bounded by
         ``requests_per_minute``.
     llm_max_attempts : int
@@ -348,7 +348,7 @@ class Config:
         )
 
         # LLM concurrency and retry settings
-        self.cluster_label_max_workers = max(1, self._get_env_int("CLUSTER_LABEL_MAX_WORKERS", default=4))
+        self.cluster_label_max_workers = max(1, self._get_env_int("CLUSTER_LABEL_MAX_WORKERS", default=8))
         self.llm_max_attempts = max(1, self._get_env_int("LLM_MAX_ATTEMPTS", default=6))
         self.llm_retry_base_delay = max(0.0, self._get_env_float("LLM_RETRY_BASE_DELAY", default=1.0))
         self.llm_retry_max_delay = max(0.0, self._get_env_float("LLM_RETRY_MAX_DELAY", default=10.0))
