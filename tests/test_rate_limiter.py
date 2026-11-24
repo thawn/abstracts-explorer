@@ -727,3 +727,133 @@ def test_reuses_global_limiter_and_warns(caplog):
     assert limiter is not None
     assert limiter.requests_per_minute == 60
     assert "Reusing existing global rate limiter" in caplog.text
+
+
+class TestAdaptiveThrottle:
+    """Adaptive global throttle behaviour."""
+
+    def test_disabled_by_default(self):
+        limiter = TokenBucketRateLimiter(requests_per_minute=60, burst=1)
+        assert limiter.adaptive is False
+        limiter.note_rate_limited()
+        assert limiter.effective_requests_per_minute == pytest.approx(60.0)
+
+    def test_rate_limited_halves_effective_rate(self):
+        limiter = TokenBucketRateLimiter(requests_per_minute=60, burst=1, adaptive=True, min_requests_per_minute=6)
+        limiter.note_rate_limited()
+        assert limiter.effective_requests_per_minute == pytest.approx(30.0)
+        limiter.note_rate_limited()
+        assert limiter.effective_requests_per_minute == pytest.approx(15.0)
+
+    def test_rate_limited_clamped_to_floor(self):
+        limiter = TokenBucketRateLimiter(requests_per_minute=60, burst=1, adaptive=True, min_requests_per_minute=6)
+        for _ in range(10):
+            limiter.note_rate_limited()
+        assert limiter.effective_requests_per_minute == pytest.approx(6.0)
+
+    def test_throttled_rate_is_used_for_refill(self, fake_time):
+        limiter = TokenBucketRateLimiter(requests_per_minute=60, burst=1, adaptive=True, min_requests_per_minute=6)
+        limiter.note_rate_limited()
+        limiter._tokens = 0.0
+        limiter._last_update = fake_time.monotonic()
+        fake_time.sleep(2.0)
+        limiter._refill()
+        # 30 rpm => 0.5 tokens/s; 2s => 1 token (capped at burst)
+        assert limiter._tokens == pytest.approx(1.0)
+
+    def test_success_recovers_after_threshold(self):
+        limiter = TokenBucketRateLimiter(requests_per_minute=60, burst=1, adaptive=True, min_requests_per_minute=6)
+        limiter.note_rate_limited()
+        before = limiter.effective_requests_per_minute
+        for _ in range(int(round(before))):
+            limiter.note_success()
+        assert limiter.effective_requests_per_minute > before
+
+    def test_success_noop_at_base_rate(self):
+        limiter = TokenBucketRateLimiter(requests_per_minute=60, burst=1, adaptive=True, min_requests_per_minute=6)
+        for _ in range(100):
+            limiter.note_success()
+        assert limiter.effective_requests_per_minute == pytest.approx(60.0)
+
+    def test_refund_returns_token(self):
+        limiter = TokenBucketRateLimiter(requests_per_minute=60, burst=1)
+        limiter._tokens = 0.0
+        limiter.refund(1.0)
+        assert limiter._tokens == pytest.approx(1.0)
+
+    def test_refund_is_capped_at_burst(self):
+        limiter = TokenBucketRateLimiter(requests_per_minute=60, burst=1)
+        limiter.refund(5.0)
+        assert limiter._tokens == pytest.approx(1.0)
+
+
+class TestCooldownGate:
+    """Queued requests must observe a cooldown that appears while waiting."""
+
+    def test_wait_helpers(self, fake_time):
+        from abstracts_explorer.rate_limiter import RateLimitCooldown
+
+        cooldown = RateLimitCooldown()
+        assert cooldown.is_active() is False
+        assert cooldown.remaining() == 0.0
+        cooldown.defer(5.0)
+        assert cooldown.is_active() is True
+        assert cooldown.remaining() == pytest.approx(5.0)
+        fake_time.sleep(5.0)
+        assert cooldown.is_active() is False
+
+    def test_request_waits_for_active_cooldown(self, fake_time):
+        from abstracts_explorer.rate_limiter import RateLimitCooldown
+
+        set_global_rate_limiter(None)
+        cooldown = RateLimitCooldown()
+        cooldown.defer(3.0)
+        inner = _SyncInner(_response(200))
+        transport = RateLimitedTransport(inner, requests_per_minute=60, cooldown=cooldown)
+
+        start = fake_time.monotonic()
+        transport.handle_request(httpx2.Request("GET", "http://test"))
+        elapsed = fake_time.monotonic() - start
+
+        assert elapsed == pytest.approx(3.0, abs=0.01)
+        assert inner.calls == 1
+
+    def test_concurrent_transports_share_one_limiter(self):
+        set_global_rate_limiter(None)
+        transports = []
+        barrier = threading.Barrier(8)
+
+        def build():
+            barrier.wait()
+            transports.append(RateLimitedTransport(httpx2.HTTPTransport(), requests_per_minute=60))
+
+        threads = [threading.Thread(target=build) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        limiter = get_global_rate_limiter()
+        assert limiter is not None
+        assert all(t.rate_limiter is limiter for t in transports)
+
+
+class TestAdaptiveTransportWiring:
+    """The cooldown transport notifies the limiter about 429/200 responses."""
+
+    def test_429_throttles_and_success_recovers(self):
+        from abstracts_explorer.rate_limiter import CooldownAwareTransport, RateLimitCooldown
+
+        set_global_rate_limiter(None)
+        limiter = TokenBucketRateLimiter(requests_per_minute=60, burst=1, adaptive=True, min_requests_per_minute=6)
+        cooldown = RateLimitCooldown()
+        inner = _SyncInner(_response(429, {"retry-after": "0"}))
+        transport = CooldownAwareTransport(inner, cooldown=cooldown, rate_limiter=limiter)
+
+        transport.handle_request(httpx2.Request("GET", "http://test"))
+        assert limiter.effective_requests_per_minute == pytest.approx(30.0)
+
+        success = CooldownAwareTransport(_SyncInner(_response(200)), cooldown=cooldown, rate_limiter=limiter)
+        for _ in range(30):
+            success.handle_request(httpx2.Request("GET", "http://test"))
+        assert limiter.effective_requests_per_minute > 30.0

@@ -22,6 +22,32 @@ logger = logging.getLogger(__name__)
 
 _global_rate_limiter: Optional["TokenBucketRateLimiter"] = None
 _global_cooldown: Optional["RateLimitCooldown"] = None
+_global_lock = threading.Lock()
+
+
+def _get_or_create_global_rate_limiter(
+    requests_per_minute: int,
+    burst: int,
+    adaptive: bool,
+    min_requests_per_minute: int,
+) -> "TokenBucketRateLimiter":
+    """Return the shared limiter, creating it once under a module lock."""
+    global _global_rate_limiter
+    with _global_lock:
+        if _global_rate_limiter is None:
+            _global_rate_limiter = TokenBucketRateLimiter(
+                requests_per_minute=requests_per_minute,
+                burst=burst,
+                adaptive=adaptive,
+                min_requests_per_minute=min_requests_per_minute,
+            )
+        else:
+            _global_rate_limiter.settings_requested(
+                requests_per_minute,
+                adaptive=adaptive,
+                min_requests_per_minute=min_requests_per_minute,
+            )
+        return _global_rate_limiter
 
 
 class TokenBucketRateLimiter:
@@ -35,7 +61,13 @@ class TokenBucketRateLimiter:
     providing accurate global rate limiting rather than per-thread limits.
     """
 
-    def __init__(self, requests_per_minute: int = 60, burst: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        requests_per_minute: int = 60,
+        burst: Optional[int] = None,
+        adaptive: bool = False,
+        min_requests_per_minute: int = 6,
+    ) -> None:
         """
         Initialize rate limiter.
 
@@ -44,6 +76,10 @@ class TokenBucketRateLimiter:
             burst: Maximum number of tokens that can accumulate. Defaults to
                 ``requests_per_minute``. Set to ``1`` for smooth pacing
                 without an initial burst.
+            adaptive: Whether to reduce the effective rate after ``429``
+                responses and recover it after successful requests.
+            min_requests_per_minute: Lower bound for the adaptive effective
+                rate (when ``requests_per_minute`` is positive).
         """
         if requests_per_minute < 0:
             raise ValueError("requests_per_minute must be non-negative")
@@ -56,7 +92,12 @@ class TokenBucketRateLimiter:
             burst = 1
 
         self._rpm = requests_per_minute
-        self._rate = requests_per_minute / 60.0  # tokens per second
+        self._base_rate = requests_per_minute / 60.0  # configured tokens per second
+        self._rate = self._base_rate  # current (possibly throttled) tokens per second
+        self._adaptive = adaptive and requests_per_minute > 0
+        self._min_rpm = max(1, min_requests_per_minute) if requests_per_minute > 0 else 0
+        self._rate_factor = 1.0
+        self._successes_since_decrease = 0
         self._burst = burst
         self._max_tokens = float(burst)
         self._tokens = self._max_tokens
@@ -181,6 +222,110 @@ class TokenBucketRateLimiter:
             self._tokens = self._max_tokens
             self._last_update = time.monotonic()
 
+    @property
+    def adaptive(self) -> bool:
+        """Return whether adaptive throttling is enabled."""
+        return self._adaptive
+
+    @property
+    def effective_requests_per_minute(self) -> float:
+        """Return the current (possibly throttled) requests per minute."""
+        with self._lock:
+            return self._rpm * self._rate_factor
+
+    def refund(self, tokens: float = 1.0) -> None:
+        """
+        Return previously acquired tokens to the bucket.
+
+        Used when a token was acquired but the request was not sent because a
+        cooldown became active.
+
+        Parameters
+        ----------
+        tokens : float, optional
+            Number of tokens to return (default: 1).
+        """
+        with self._lock:
+            self._refill()
+            self._tokens = min(self._max_tokens, self._tokens + max(0.0, tokens))
+
+    def note_rate_limited(self) -> None:
+        """
+        Reduce the effective rate after a ``429`` response.
+
+        Applies a multiplicative decrease (halving) clamped to
+        ``min_requests_per_minute``. No-op when adaptive throttling is disabled.
+        """
+        if not self._adaptive:
+            return
+        with self._lock:
+            floor = self._min_rpm / self._rpm if self._rpm > 0 else 0.0
+            if self._rate_factor <= floor:
+                return
+            self._rate_factor = max(floor, self._rate_factor * 0.5)
+            self._rate = self._base_rate * self._rate_factor
+            self._successes_since_decrease = 0
+
+    def note_success(self) -> None:
+        """
+        Nudge the effective rate back up after a successful request.
+
+        Recovery is additive (``+0.1`` factor) once a number of consecutive
+        successes equal to the current effective RPM has occurred. No-op when
+        adaptive throttling is disabled or the limiter is already at its base
+        rate.
+        """
+        if not self._adaptive:
+            return
+        with self._lock:
+            if self._rate_factor >= 1.0:
+                return
+            self._successes_since_decrease += 1
+            threshold = max(1, int(round(self._rpm * self._rate_factor)))
+            if self._successes_since_decrease < threshold:
+                return
+            self._successes_since_decrease = 0
+            self._rate_factor = min(1.0, self._rate_factor + 0.1)
+            self._rate = self._base_rate * self._rate_factor
+
+    def settings_requested(
+        self,
+        requests_per_minute: int,
+        *,
+        adaptive: bool,
+        min_requests_per_minute: int,
+    ) -> None:
+        """
+        Reconcile settings when the shared limiter is reused by another client.
+
+        The configured rate is immutable, but a caller that requested adaptive
+        throttling can enable it on the shared instance.
+
+        Parameters
+        ----------
+        requests_per_minute : int
+            Rate requested by the new caller.
+        adaptive : bool
+            Whether the new caller wants adaptive throttling.
+        min_requests_per_minute : int
+            Floor requested by the new caller.
+        """
+        if requests_per_minute != self._rpm:
+            logger.warning(
+                "Reusing existing global rate limiter with %d requests/minute; "
+                "requested rate of %d requests/minute is ignored",
+                self._rpm,
+                requests_per_minute,
+            )
+        if adaptive and self._rpm > 0:
+            self._adaptive = True
+            self._min_rpm = max(1, min_requests_per_minute)
+            with self._lock:
+                floor = self._min_rpm / self._rpm if self._rpm > 0 else 0.0
+                if self._rate_factor < floor:
+                    self._rate_factor = floor
+                    self._rate = self._base_rate * self._rate_factor
+
 
 class RateLimitedTransport(httpx2.BaseTransport, httpx2.AsyncBaseTransport):
     """
@@ -209,39 +354,45 @@ class RateLimitedTransport(httpx2.BaseTransport, httpx2.AsyncBaseTransport):
         transport: httpx2.BaseTransport | httpx2.AsyncBaseTransport,
         requests_per_minute: int,
         burst: int = 1,
+        adaptive: bool = False,
+        min_requests_per_minute: int = 6,
+        cooldown: Optional["RateLimitCooldown"] = None,
     ) -> None:
         self._transport = transport
+        self._rate_limiter = _get_or_create_global_rate_limiter(
+            requests_per_minute,
+            burst,
+            adaptive,
+            min_requests_per_minute,
+        )
+        self._cooldown = cooldown or get_global_cooldown()
 
-        global_rate_limiter = get_global_rate_limiter()
-        if global_rate_limiter is None:
-            global_rate_limiter = TokenBucketRateLimiter(
-                requests_per_minute=requests_per_minute,
-                burst=burst,
-            )
-            set_global_rate_limiter(global_rate_limiter)
-        elif global_rate_limiter.requests_per_minute != requests_per_minute:
-            logger.warning(
-                "Reusing existing global rate limiter with %d requests/minute; "
-                "requested rate of %d requests/minute is ignored",
-                global_rate_limiter.requests_per_minute,
-                requests_per_minute,
-            )
-
-        self._rate_limiter = global_rate_limiter
+    @property
+    def rate_limiter(self) -> "TokenBucketRateLimiter":
+        """Return the shared token-bucket limiter used by this transport."""
+        return self._rate_limiter
 
     def handle_request(self, request: httpx2.Request) -> httpx2.Response:
         """Send *request* after acquiring a rate-limit token."""
         if not isinstance(self._transport, httpx2.BaseTransport):
             raise TypeError("Cannot use a synchronous client with an async transport.")
-        self._rate_limiter.acquire(tokens=1.0)
-        return self._transport.handle_request(request)
+        while True:
+            self._cooldown.wait()
+            self._rate_limiter.acquire(tokens=1.0)
+            if not self._cooldown.is_active():
+                return self._transport.handle_request(request)
+            self._rate_limiter.refund(tokens=1.0)
 
     async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
         """Send *request* after acquiring a rate-limit token asynchronously."""
         if not isinstance(self._transport, httpx2.AsyncBaseTransport):
             raise TypeError("Cannot use an async client with a synchronous transport.")
-        await self._rate_limiter.async_acquire(tokens=1.0)
-        return await self._transport.handle_async_request(request)
+        while True:
+            await self._cooldown.async_wait()
+            await self._rate_limiter.async_acquire(tokens=1.0)
+            if not self._cooldown.is_active():
+                return await self._transport.handle_async_request(request)
+            self._rate_limiter.refund(tokens=1.0)
 
     def close(self) -> None:
         """Close the underlying sync transport."""
@@ -274,6 +425,15 @@ class RateLimitCooldown:
     def __init__(self) -> None:
         self._until = 0.0
         self._lock = threading.Lock()
+
+    def remaining(self) -> float:
+        """Return the seconds left in the current cooldown (0 when inactive)."""
+        with self._lock:
+            return max(0.0, self._until - time.monotonic())
+
+    def is_active(self) -> bool:
+        """Return whether a cooldown window is currently active."""
+        return self.remaining() > 0.0
 
     def wait(self) -> None:
         """Sleep until the current cooldown expires."""
@@ -375,6 +535,9 @@ class CooldownAwareTransport(httpx2.BaseTransport, httpx2.AsyncBaseTransport):
         seconds).
     cooldown : RateLimitCooldown, optional
         Shared cooldown instance. Defaults to the process-global cooldown.
+    rate_limiter : TokenBucketRateLimiter, optional
+        Shared limiter to notify about ``429`` responses (adaptive throttle) and
+        successful requests (recovery). Defaults to ``None`` (no adaptation).
     """
 
     def __init__(
@@ -384,21 +547,31 @@ class CooldownAwareTransport(httpx2.BaseTransport, httpx2.AsyncBaseTransport):
         rate_limit_delay: float = 60.0,
         max_retry_after: float = 120.0,
         cooldown: Optional[RateLimitCooldown] = None,
+        rate_limiter: Optional[TokenBucketRateLimiter] = None,
     ) -> None:
         self._transport = transport
         self._rate_limit_delay = max(0.0, rate_limit_delay)
         self._max_retry_after = max(0.0, max_retry_after)
         self._cooldown = cooldown or get_global_cooldown()
+        self._rate_limiter = rate_limiter
 
     def _handle_response(self, response: httpx2.Response) -> None:
         """Extend the shared cooldown when *response* is a rate-limit response."""
-        if response.status_code != 429:
+        if response.status_code == 429:
+            delay = parse_retry_after_seconds(response.headers, max_wait=self._max_retry_after)
+            if delay is None:
+                delay = self._rate_limit_delay
+            self._cooldown.defer(delay)
+            if self._rate_limiter is not None:
+                self._rate_limiter.note_rate_limited()
+            logger.warning(
+                "LLM request rate-limited; pausing all LLM requests for %.1fs " "(effective rate now %.1f req/min)",
+                delay,
+                self._rate_limiter.effective_requests_per_minute if self._rate_limiter is not None else 0.0,
+            )
             return
-        delay = parse_retry_after_seconds(response.headers, max_wait=self._max_retry_after)
-        if delay is None:
-            delay = self._rate_limit_delay
-        self._cooldown.defer(delay)
-        logger.warning("LLM request rate-limited; pausing all LLM requests for %.1fs", delay)
+        if 200 <= response.status_code < 300 and self._rate_limiter is not None:
+            self._rate_limiter.note_success()
 
     def handle_request(self, request: httpx2.Request) -> httpx2.Response:
         """Send *request* after waiting for any active cooldown."""
@@ -432,9 +605,10 @@ class CooldownAwareTransport(httpx2.BaseTransport, httpx2.AsyncBaseTransport):
 def get_global_cooldown() -> RateLimitCooldown:
     """Return the process-global cooldown shared by all LLM transports."""
     global _global_cooldown
-    if _global_cooldown is None:
-        _global_cooldown = RateLimitCooldown()
-    return _global_cooldown
+    with _global_lock:
+        if _global_cooldown is None:
+            _global_cooldown = RateLimitCooldown()
+        return _global_cooldown
 
 
 def set_global_cooldown(cooldown: Optional[RateLimitCooldown]) -> None:

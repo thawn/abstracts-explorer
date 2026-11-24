@@ -12,11 +12,13 @@ from typing import Any, Optional
 
 from abstracts_explorer.config import get_config
 from abstracts_explorer.llm_utils import chat_completion_text
+from abstracts_explorer.rate_limiter import get_global_cooldown
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_LABEL_MAX_TOKENS = 600
 MAX_LABEL_MAX_TOKENS = 2400
+MAX_RATE_LIMIT_RETRIES = 2
 
 
 def _status_code(error: Exception) -> Optional[int]:
@@ -82,6 +84,7 @@ def generate_llm_label(
     retry_max_delay = config.llm_retry_max_delay
 
     empty_failures = 0
+    rate_limit_retries = 0
     for attempt in range(1, max_attempts + 1):
         current_max_tokens = min(max_tokens * (2**empty_failures), MAX_LABEL_MAX_TOKENS)
         try:
@@ -101,6 +104,19 @@ def generate_llm_label(
             error = exc
         except Exception as exc:
             status_code = _status_code(exc)
+            if status_code == 429 and rate_limit_retries < MAX_RATE_LIMIT_RETRIES and attempt < max_attempts:
+                rate_limit_retries += 1
+                logger.warning(
+                    "Cluster-label LLM call rate-limited (model=%s, attempt %d/%d); "
+                    "waiting for shared cooldown before retry %d/%d",
+                    config.cluster_label_model,
+                    attempt,
+                    max_attempts,
+                    rate_limit_retries,
+                    MAX_RATE_LIMIT_RETRIES,
+                )
+                get_global_cooldown().wait()
+                continue
             logger.error(
                 "Cluster-label LLM call failed permanently (model=%s, attempt %d/%d, status=%s): %s",
                 config.cluster_label_model,

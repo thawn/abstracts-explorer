@@ -222,6 +222,19 @@ class TestEmbeddingsManager:
         assert len(vectors) == 2
         assert embeddings_manager.openai_client.embeddings.create.call_count == 3
 
+    def test_generate_embeddings_rate_limit_does_not_fan_out(self, embeddings_manager):
+        """A rate-limited batch is not retried as individual requests."""
+
+        class RateLimitError(Exception):
+            status_code = 429
+
+        embeddings_manager.openai_client.embeddings.create.side_effect = RateLimitError("rate limited")
+
+        with pytest.raises(EmbeddingsError, match="rate-limited"):
+            embeddings_manager.generate_embeddings(["one", "two"])
+
+        assert embeddings_manager.openai_client.embeddings.create.call_count == 1
+
     @staticmethod
     def _single_response():
         item = Mock()

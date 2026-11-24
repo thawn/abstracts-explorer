@@ -21,6 +21,13 @@ _TIMEOUT_CLASS_NAMES = frozenset(
     }
 )
 
+_RATE_LIMIT_CLASS_NAMES = frozenset(
+    {
+        "RateLimitError",
+        "RateLimitException",
+    }
+)
+
 _CONNECTION_CLASS_NAMES = frozenset(
     {
         "APIConnectionError",
@@ -95,6 +102,40 @@ def is_llm_connection_error(exc: BaseException) -> bool:
         if isinstance(item, httpx2.TransportError):
             return True
         if item.__class__.__name__ in _CONNECTION_CLASS_NAMES:
+            return True
+    return False
+
+
+def is_llm_rate_limit_error(exc: BaseException) -> bool:
+    """
+    Return whether *exc* represents a backend rate-limit (HTTP 429) failure.
+
+    Parameters
+    ----------
+    exc : BaseException
+        Exception raised while talking to an OpenAI-compatible backend.
+
+    Returns
+    -------
+    bool
+        True when the exception or one of its underlying causes is a
+        rate-limit error.
+
+    Examples
+    --------
+    >>> class RateLimitError(Exception):
+    ...     status_code = 429
+    >>> is_llm_rate_limit_error(RateLimitError())
+    True
+    """
+    for item in _exception_chain(exc):
+        if item.__class__.__name__ in _RATE_LIMIT_CLASS_NAMES:
+            return True
+        status_code = getattr(item, "status_code", None)
+        if status_code is None:
+            response = getattr(item, "response", None)
+            status_code = getattr(response, "status_code", None)
+        if status_code == 429:
             return True
     return False
 
