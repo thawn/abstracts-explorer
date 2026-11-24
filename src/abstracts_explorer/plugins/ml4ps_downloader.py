@@ -70,7 +70,7 @@ class ML4PSDownloaderPlugin(HTTPDownloaderPlugin):
         """
         return f"https://ml4physicalsciences.github.io/{year}/"
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the ML4PS downloader plugin."""
         super().__init__()
         self.configure_pool(20)

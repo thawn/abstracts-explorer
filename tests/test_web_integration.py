@@ -258,10 +258,14 @@ class TestWebUIIntegration:
         """Test that static files are served correctly."""
         host, port, base_url = web_server
 
-        # Test JavaScript file
-        response = requests.get(f"{base_url}/static/app.js", timeout=5)
-        assert response.status_code == 200
-        assert b"searchPapers" in response.content or b"function" in response.content
+        # Test compiled JavaScript bundle (only present when the frontend was built)
+        bundle_path = (
+            Path(__file__).parent.parent / "src" / "abstracts_explorer" / "web_ui" / "static" / "dist" / "app.js"
+        )
+        if bundle_path.exists():
+            response = requests.get(f"{base_url}/static/dist/app.js", timeout=5)
+            assert response.status_code == 200
+            assert b"searchPapers" in response.content or b"function" in response.content
 
         # Test CSS file
         response = requests.get(f"{base_url}/static/style.css", timeout=5)
@@ -672,9 +676,13 @@ class TestWebUIIntegration:
         response = requests.get(f"{base_url}/api/stats", timeout=5)
         assert "application/json" in response.headers.get("Content-Type", "")
 
-        # JavaScript
-        response = requests.get(f"{base_url}/static/app.js", timeout=5)
-        assert any(ct in response.headers.get("Content-Type", "") for ct in ["javascript", "text/plain"])
+        # JavaScript bundle (only present when the frontend was built)
+        bundle_path = (
+            Path(__file__).parent.parent / "src" / "abstracts_explorer" / "web_ui" / "static" / "dist" / "app.js"
+        )
+        if bundle_path.exists():
+            response = requests.get(f"{base_url}/static/dist/app.js", timeout=5)
+            assert any(ct in response.headers.get("Content-Type", "") for ct in ["javascript", "text/plain"])
 
     def test_cors_headers(self, web_server):
         """Test that CORS headers are present."""

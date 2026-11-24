@@ -8,6 +8,7 @@ testing user interactions and workflows as they would happen in a real browser.
 import pytest
 import time
 
+import sqlite3
 import numpy as np
 import threading
 import sys
@@ -16,10 +17,12 @@ from pathlib import Path
 from playwright.sync_api import Page, TimeoutError, expect
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.mcp import close_mcp_resources
+from abstracts_explorer.orcid import OrcidError, fetch_orcid_record
 from abstracts_explorer.rag import shutdown_tool_executor
 from tests.helpers import (
     raw_query,
     find_free_port,
+    requires_lm_studio,
     stop_test_server,
 )
 from tests.conftest import set_test_db
@@ -29,6 +32,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 # Constants for E2E tests
 MOCK_EMBEDDING_DIMENSION = 4096  # Standard dimension for test embeddings
+_ORCID_ID = "0000-0002-2315-9247"
+
+# The compiled web UI bundle is required for browser interactions.
+_WEB_UI_BUNDLE = Path(__file__).parent.parent / "src/abstracts_explorer/web_ui/static/dist/app.js"
 
 
 @pytest.fixture(scope="module")
@@ -111,6 +118,16 @@ def test_database(tmp_path_factory):
                 "keywords": ["nmt", "translation", "attention"],
                 "year": 2025,
                 "conference": "NeurIPS",
+            },
+            {
+                "title": "Contrastive Vision Pretraining at Scale",
+                "authors": ["Test Author", "Another Author"],
+                "abstract": "We study contrastive pretraining for large-scale vision models.",
+                "session": "Poster Session C",
+                "poster_position": "P3",
+                "keywords": ["vision", "contrastive learning", "pretraining"],
+                "year": 2024,
+                "conference": "ICLR",
             },
         ]
 
@@ -218,12 +235,12 @@ def test_embeddings(test_database, tmp_path_factory):
 
 def _prepopulate_clustering_cache(test_database, em, collection_name):
     """
-    Pre-populate the database with cached clustering results.
+    Pre-populate the database with cached BERTopic-style clustering results.
 
-    This mirrors the production workflow where ``abstracts-explorer cluster
-    pre-generate`` is run before the web UI is used.  With cached results
-    present, MCP tools (``get_conference_topics``, ``get_cluster_visualization``)
-    return instantly instead of running t-SNE from scratch.
+    This mirrors the production workflow where ``abstracts-explorer clustering
+    pre-generate`` is run before the web UI is used.  Results are constructed
+    directly (without running BERTopic) so the E2E suite stays fast and
+    deterministic.
 
     Parameters
     ----------
@@ -234,69 +251,58 @@ def _prepopulate_clustering_cache(test_database, em, collection_name):
     collection_name : str
         Name of the ChromaDB collection.
     """
-    from abstracts_explorer.clustering import ClusteringManager
+    import pandas as pd
+
+    from abstracts_explorer.clustering import (
+        DEFAULT_CLUSTERING_METHOD,
+        DEFAULT_CLUSTERING_PARAMS,
+        DEFAULT_REDUCTION_METHOD,
+        ClusteringManager,
+    )
+    from abstracts_explorer.clustering.results import build_clustering_results
     from abstracts_explorer.config import get_config
 
     config = get_config()
 
     set_test_db(str(test_database))
     db = DatabaseManager()
-
     db.create_tables()
 
     cm = ClusteringManager(em, db)
     cm.load_embeddings()
 
-    # Cluster on full embeddings (this is fast with only 3 test papers)
-    cm.cluster(
-        n_clusters=None,
-        distance_threshold=150.0,
-        linkage="ward",
+    paper_ids = list(cm.paper_ids or [])
+    metadatas = list(cm.metadatas or [])
+    topics = list(range(len(paper_ids)))
+    reduced = np.array([[float(i), float(i % 3)] for i in range(len(paper_ids))])
+    labels = {index: f"Topic {index}" for index in topics}
+    keywords = {index: [f"keyword{index}"] for index in topics}
+
+    results = build_clustering_results(
+        paper_ids=paper_ids,
+        reduced_embeddings=reduced,
+        metadatas=metadatas,
+        topics=topics,
+        flat_labels=labels,
+        flat_keywords=keywords,
+        hierarchical_topics=pd.DataFrame(columns=["Parent_ID", "Parent_Name", "Topics", "Distance"]),
+        parent_labels={},
     )
 
-    # Assign deterministic 2-D coordinates directly instead of running a real
-    # reduction (deterministic, thread-safe, and fast).  The results are stored
-    # under the "tsne" cache key so that compute_clusters_with_cache() finds an
-    # exact cache hit when MCP tools request t-SNE reduction.  The x/y
-    # coordinates differ from a real t-SNE but are sufficient for testing the
-    # cache-lookup and topic-analysis paths.
-    cm.reduced_embeddings = np.array([[float(i), float(i % 3)] for i in range(len(cm.paper_ids or []))])
-
-    try:
-        cm.extract_cluster_keywords(n_keywords=5)
-        cm.generate_cluster_labels(use_llm=False, max_keywords=3)
-    except Exception:
-        pass  # Labels are optional
-
-    results = cm.get_clustering_results()
-
-    # Save under the t-SNE cache key so that compute_clusters_with_cache()
-    # finds it when MCP tools ask for tsne reduction.
-    db.save_clustering_cache(
-        embedding_model=config.embedding_model,
-        reduction_method="tsne",
-        n_components=2,
-        clustering_method="agglomerative",
-        results=results,
-        n_clusters=None,
-        clustering_params={"linkage": "ward", "distance_threshold": 150.0},
-        collection_name=collection_name,
-    )
-
-    # The clustering tab requests results for the selected conference/year
-    # (NeurIPS 2025 in the test data), which are cached under separate keys.
-    db.save_clustering_cache(
-        embedding_model=config.embedding_model,
-        reduction_method="tsne",
-        n_components=2,
-        clustering_method="agglomerative",
-        results=results,
-        n_clusters=None,
-        clustering_params={"linkage": "ward", "distance_threshold": 150.0},
-        conference="NeurIPS",
-        year=2025,
-        collection_name=collection_name,
-    )
+    clustering_params = dict(DEFAULT_CLUSTERING_PARAMS)
+    for conference, year in ((None, None), ("NeurIPS", 2025)):
+        db.save_clustering_cache(
+            embedding_model=config.embedding_model,
+            reduction_method=DEFAULT_REDUCTION_METHOD,
+            n_components=2,
+            clustering_method=DEFAULT_CLUSTERING_METHOD,
+            results=results,
+            n_clusters=None,
+            clustering_params=clustering_params,
+            conference=conference,
+            year=year,
+            collection_name=collection_name,
+        )
     db.close()
 
 
@@ -323,6 +329,9 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     tuple
         Tuple of (base_url, port)
     """
+
+    if not _WEB_UI_BUNDLE.exists():
+        pytest.fail("The web UI bundle is missing. Run `npm ci && npm run build:js` " "before running the e2e tests.")
 
     # Import the module first, then access it from sys.modules
     import sys
@@ -354,8 +363,8 @@ def web_server(test_database, test_embeddings, tmp_path_factory):
     os.environ["PAPER_DB"] = str(test_database)
     os.environ["EMBEDDING_DB"] = str(embeddings_path)
     os.environ["COLLECTION_NAME"] = collection_name
-    # Test database only has "NeurIPS" papers; override so the auto-selected
-    # conference matches the test data and search/filter requests return results.
+    # Test database has NeurIPS 2025 and ICLR 2024 papers; override so the
+    # auto-selected conference matches the primary test data.
     os.environ["DEFAULT_CONFERENCE"] = "NeurIPS"
 
     def mock_get_config():
@@ -883,6 +892,56 @@ class TestWebUIE2E:
             # Input should be cleared after sending
             assert chat_input_after.input_value() == ""
 
+    @requires_lm_studio
+    def test_chat_orcid_search_terms(self, web_server, page: Page):
+        """
+        Test that chat can find interesting papers from a real public ORCID record.
+
+        The test uses the live ORCID API and the configured chat model.  It
+        skips when either service is unavailable.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        page : playwright.sync_api.Page
+            Playwright page
+        """
+        base_url, _ = web_server
+
+        try:
+            record = fetch_orcid_record(_ORCID_ID, timeout=30)
+        except OrcidError as exc:
+            pytest.skip(f"ORCID public API unavailable: {exc}")
+        assert record["works"], "Expected public works on the ORCID record"
+
+        page.goto(base_url)
+        page.locator("#tab-chat").click()
+        expect(page.locator("#chat-tab")).to_be_visible()
+
+        chat_input = page.locator("#chat-input")
+        chat_input.fill(f"Find papers that are interesting to me based on my ORCID record {_ORCID_ID}.")
+
+        with page.expect_response(
+            lambda response: response.url.endswith("/api/chat") and response.request.method == "POST",
+            timeout=120000,
+        ) as response_info:
+            chat_input.press("Enter")
+
+        response = response_info.value
+        if response.status != 200:
+            pytest.skip(f"Chat backend unavailable (HTTP {response.status})")
+
+        payload = response.json().get("response")
+        assert isinstance(payload, dict), "Chat response should contain structured RAG output"
+
+        tools_executed = payload.get("metadata", {}).get("tools_executed", [])
+        assert "suggest_search_terms_from_orcid" in tools_executed
+
+        assistant_text = payload.get("response")
+        assert isinstance(assistant_text, str)
+        assert assistant_text.strip()
+
     def test_chat_reset_conversation(self, web_server, page: Page):
         """
         Test resetting the chat conversation.
@@ -1405,6 +1464,95 @@ class TestDataDonationE2E:
 
         except Exception as e:
             pytest.skip(f"Could not test export flow: {e}")
+
+
+@pytest.mark.e2e
+@pytest.mark.slow
+class TestInterestingPapersConferenceSwitcher:
+    """End-to-end tests for switching conferences in the Interesting Papers tab."""
+
+    def test_switch_to_other_conference_with_interesting_papers(self, web_server, test_database, page: Page):
+        """
+        Test switching to another conference/year combo that has interesting papers.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        test_database : Path
+            Path to the E2E test database
+        page : playwright.sync_api.Page
+            Playwright page
+        """
+        base_url, _ = web_server
+
+        with sqlite3.connect(test_database) as conn:
+            neurips_row = conn.execute(
+                "SELECT uid, title FROM papers WHERE conference = ? AND year = ? ORDER BY uid LIMIT 1",
+                ("NeurIPS", 2025),
+            ).fetchone()
+            iclr_row = conn.execute(
+                "SELECT uid, title FROM papers WHERE conference = ? AND year = ? ORDER BY uid LIMIT 1",
+                ("ICLR", 2024),
+            ).fetchone()
+
+        assert neurips_row is not None, "Expected a NeurIPS 2025 paper in the test database"
+        assert iclr_row is not None, "Expected a ICLR 2024 paper in the test database"
+        neurips_uid, neurips_title = neurips_row
+        iclr_uid, iclr_title = iclr_row
+
+        page.goto(base_url)
+
+        priorities = {
+            neurips_uid: {"priority": 5, "searchTerm": "transformers"},
+            iclr_uid: {"priority": 4, "searchTerm": "vision"},
+        }
+        page.evaluate(
+            """(priorities) => {
+                localStorage.setItem('paperPriorities', JSON.stringify(priorities));
+                window.loadPriorities();
+            }""",
+            priorities,
+        )
+
+        page.wait_for_function(
+            "() => [...document.querySelectorAll('#conference-selector option')].some(o => o.value === 'NeurIPS')"
+        )
+        page.locator("#conference-selector").select_option(value="NeurIPS")
+        page.evaluate("handleConferenceChange()")
+        page.wait_for_function(
+            "() => [...document.querySelectorAll('#year-selector option')].some(o => o.value === '2025')"
+        )
+        page.locator("#year-selector").select_option(value="2025")
+        page.evaluate("handleYearChange()")
+
+        page.locator("#tab-interesting").click()
+        expect(page.locator("#interesting-tab")).to_be_visible()
+
+        menu = page.locator("#interesting-conference-menu")
+        expect(menu).to_be_visible(timeout=10000)
+        select = page.locator("#interesting-conference-select")
+        page.wait_for_function("""() => [...document.querySelectorAll('#interesting-conference-select option')]
+                .some(o => o.textContent.includes('ICLR 2024 (1)'))""")
+
+        papers_list = page.locator("#interesting-papers-list")
+        expect(papers_list).to_contain_text(neurips_title)
+        expect(papers_list).not_to_contain_text(iclr_title)
+
+        option = select.locator("option", has_text="ICLR 2024 (1)").first
+        option_value = option.get_attribute("value")
+        assert option_value, "Menu option should have an encoded value"
+        select.select_option(value=option_value)
+
+        expect(page.locator("#conference-selector")).to_have_value("ICLR")
+        expect(page.locator("#year-selector")).to_have_value("2024")
+        expect(menu).to_be_visible(timeout=10000)
+        page.wait_for_function("""() => [...document.querySelectorAll('#interesting-conference-select option')]
+                .some(o => o.textContent.includes('NeurIPS 2025 (1)'))""")
+        expect(select).to_have_value("")
+        expect(papers_list).to_contain_text(iclr_title)
+        expect(papers_list).not_to_contain_text(neurips_title)
+        expect(page.locator("#interesting-count")).to_have_text("1")
 
 
 @pytest.mark.e2e

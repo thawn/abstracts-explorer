@@ -16,6 +16,7 @@ class ConversationMixin:
     """Reset, inspect, and export the conversation."""
 
     _message_history: List[Any]
+    _citations: Any
 
     def _update_message_history_instructions(self, instructions: str) -> None:
         """
@@ -41,6 +42,7 @@ class ConversationMixin:
         >>> chat.reset_conversation()
         """
         self._message_history = []
+        self._citations.clear()
         logger.info("Conversation history reset")
 
     @property

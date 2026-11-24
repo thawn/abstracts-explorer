@@ -10,8 +10,9 @@ Model Context Protocol (MCP) is a protocol that allows tools and servers to prov
 
 ## Features
 
-The MCP server provides eight tools for conference analysis, including two
-personalized tools that work with the papers a user marked as interesting.
+The MCP server provides ten tools for conference analysis, including three
+personalized tools that work with the papers a user marked as interesting and
+an ORCID-based search-term suggestion tool.
 
 ### 1. `get_conference_topics`
 
@@ -22,7 +23,10 @@ Analyzes clustered embeddings to identify the most frequently mentioned topics i
 - `years` (list of int, optional): Filter by specific years
 - `collection_name` (str, optional): Name of ChromaDB collection
 
-**Returns:** JSON with cluster statistics and topics for each cluster, including:
+**Returns:** JSON with cluster statistics and topics for each cluster. Each
+topic entry uses the descriptive sentence as its primary `topic` value (falling
+back to the short legend label when no description is cached) and keeps the
+short label in `label`. Entries also include:
 - Keywords and their frequencies
 - Common sessions
 - Year distribution
@@ -184,6 +188,32 @@ how prominent a research area is.
 
 **Example use case:** "How prominent is uncertainty quantification at this year's conference?"
 
+### 10. `suggest_search_terms_from_orcid`
+
+Suggests paper search terms based on a researcher's public ORCID record. The
+tool reads the public works, author keywords, and display name, then asks the
+configured chat model for concise semantic-search terms. If the LLM is
+unavailable or returns unusable output, it falls back to ORCID keywords and
+phrases extracted from work titles.
+
+The ORCID record must be public; private works are not returned by the API.
+
+**Parameters:**
+- `orcid` (str): ORCID iD or profile URL (e.g., `"0000-0002-2315-9247"` or `"https://orcid.org/0000-0002-2315-9247"`)
+- `max_terms` (int, optional): Maximum number of search terms (default: 15, capped at 50)
+- `min_year` (int, optional): Only consider works published in or after this year
+- `max_works` (int, optional): Maximum works sent to the LLM (default: 100, capped at 500)
+
+**Returns:** JSON with:
+- Normalized ORCID iD and display name
+- Total public works and works considered after filtering
+- ORCID author keywords
+- Suggested terms with a reason and source (`llm` or `fallback`)
+- Up to ten recent work titles
+- A warning when no terms could be derived
+
+**Example use case:** "Find papers that are interesting to me based on my ORCID record 0000-0002-2315-9247."
+
 ## Starting the MCP Server
 
 ### Basic Usage
@@ -222,9 +252,10 @@ PAPER_DB=abstracts.db
 EMBEDDING_DB=chroma_db
 COLLECTION_NAME=papers
 
-# LLM Backend (for embeddings in tools)
+# LLM Backend (for embeddings and ORCID search-term suggestions)
 LLM_BACKEND_URL=http://localhost:1234
 EMBEDDING_MODEL=text-embedding-qwen3-embedding-4b
+CHAT_MODEL=diffbot-small-xl-2508
 ```
 
 ## Integration with LLM Assistants
@@ -372,8 +403,10 @@ abstracts-explorer mcp-server --port 8001
 ### Clustering Configuration
 
 The MCP tools read pre-generated clustering results from the database cache. The
-pipeline is fixed to Agglomerative clustering (ward linkage, distance threshold
-150) with t-SNE dimensionality reduction. Generate the cache with:
+pipeline is fixed to BERTopic with Agglomerative clustering (ward linkage,
+distance threshold 0.5) on 5-D UMAP embeddings and 2-D UMAP visualization.
+`get_conference_topics` uses hierarchy level 6 (clamped to the available
+levels); the web UI defaults to level 4. Generate the cache with:
 
 ```bash
 abstracts-explorer clustering pre-generate --conference NeurIPS

@@ -6,6 +6,8 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from abstracts_explorer.rag.citations import PaperCitationRegistry
+
 
 @dataclass
 class RAGToolContext:
@@ -33,6 +35,8 @@ class RAGToolContext:
         tool name and canonical arguments.  Used to coalesce duplicate calls.
     tool_cache_lock : threading.Lock
         Guards ``tool_cache`` when tool calls run in parallel.
+    citations : PaperCitationRegistry
+        Conversation-wide paper numbering used for citation links.
     """
 
     tool_results: List[Dict[str, Any]] = field(default_factory=list)
@@ -42,3 +46,4 @@ class RAGToolContext:
     paper_priorities: Dict[str, Any] = field(default_factory=dict)
     tool_cache: Dict[str, str] = field(default_factory=dict)
     tool_cache_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    citations: PaperCitationRegistry = field(default_factory=PaperCitationRegistry)

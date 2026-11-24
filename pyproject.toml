@@ -39,6 +39,9 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "tqdm>=4.66.0",
     "tiktoken>=0.7.0",
+    "bertopic[umap] @ git+https://github.com/thawn/BERTopic.git@94af51559bd816bd04ea5f27d58d598d295b5238",
+    "pyyaml>=6.0",
+    "filelock>=4.2.9",
 ]
 
 [project.optional-dependencies]
@@ -78,11 +81,21 @@ abstracts-explorer = "abstracts_explorer.cli:main"
 [tool.hatch.version]
 source = "vcs"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.hooks.vcs]
 version-file = "src/abstracts_explorer/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/abstracts_explorer"]
+artifacts = ["src/abstracts_explorer/web_ui/static/dist/**"]
+
+[tool.hatch.build.targets.sdist]
+artifacts = ["src/abstracts_explorer/web_ui/static/dist/**"]
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -14,7 +14,6 @@ the results into :class:`~abstracts_explorer.plugin.LightweightPaper` objects.
 
 import json
 import logging
-import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -27,6 +26,7 @@ from abstracts_explorer.plugin import (
     sanitize_author_names,
 )
 from abstracts_explorer.plugin.persistence import FailureSidecar
+from abstracts_explorer.utils.text_utils import html_to_text
 from abstracts_explorer.utils.url_utils import normalize_doi_url
 
 logger = logging.getLogger(__name__)
@@ -549,22 +549,22 @@ class IGARSSDownloaderPlugin(HTTPDownloaderPlugin):
 
 def _strip_highlight_tags(text: str) -> str:
     """
-    Remove IEEE Xplore highlight markup tags from text.
+    Remove markup tags from text, including IEEE Xplore highlight tags.
 
-    The IEEE Xplore API wraps matched search terms in ``<highlight>``
-    tags which need to be stripped for clean text storage.
+    The IEEE Xplore API wraps matched search terms in ``<highlight>`` tags,
+    and other record fields may contain additional HTML markup.
 
     Parameters
     ----------
     text : str
-        Text that may contain ``<highlight>...</highlight>`` tags.
+        Text that may contain markup tags.
 
     Returns
     -------
     str
-        Text with highlight tags removed.
+        Plain text with tags removed and entities decoded.
     """
-    return re.sub(r"</?highlight>", "", text)
+    return html_to_text(text)
 
 
 # ---------------------------------------------------------------------------

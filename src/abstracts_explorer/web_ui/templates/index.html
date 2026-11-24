@@ -14,20 +14,8 @@
     <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome.min.css') }}">
 
-    <!-- KaTeX for LaTeX rendering -->
+    <!-- KaTeX for LaTeX rendering (CSS only; JS is bundled) -->
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/katex.min.css') }}">
-    <script src="{{ url_for('static', filename='vendor/katex.min.js') }}"></script>
-
-    <!-- Marked.js for Markdown rendering -->
-    <script src="{{ url_for('static', filename='vendor/marked.min.js') }}"></script>
-    <!-- Marked-KaTeX extension for LaTeX in Markdown -->
-    <script src="{{ url_for('static', filename='vendor/marked-katex-extension.min.js') }}"></script>
-
-    <!-- DOMPurify for sanitizing rendered markdown (XSS protection) -->
-    <script src="{{ url_for('static', filename='vendor/purify.min.js') }}"></script>
-
-    <!-- Plotly for cluster visualization -->
-    <script src="{{ url_for('static', filename='vendor/plotly.min.js') }}"></script>
 
     <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
@@ -630,6 +618,19 @@
                 </div>
             </div>
 
+            <!-- Other Conference/Year Switcher -->
+            <div id="interesting-conference-menu" class="hidden bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 mb-6">
+                <div class="flex flex-wrap items-center gap-3">
+                    <label for="interesting-conference-select" class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        <i class="fas fa-exchange-alt text-purple-600 dark:text-purple-400 mr-2"></i>Other conferences with interesting papers:
+                    </label>
+                    <select id="interesting-conference-select" onchange="switchInterestingConferenceFromMenu(this.value)"
+                        class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-purple-600 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100">
+                        <option value="">Select conference/year…</option>
+                    </select>
+                </div>
+            </div>
+
             <!-- Session Sub-tabs -->
             <div id="interesting-session-tabs" class="bg-white dark:bg-gray-800 rounded-lg shadow-md mb-6">
                 <div class="flex border-b border-gray-200 dark:border-gray-700 overflow-x-auto" id="interesting-session-tabs-nav">
@@ -715,6 +716,16 @@
                             <i class="fas fa-download mr-2"></i>Export Data
                         </button>
                     </div>
+                </div>
+                <div id="hierarchy-controls" class="hidden mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <label for="hierarchy-level-slider"
+                        class="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                        Hierarchy level
+                    </label>
+                    <input type="range" id="hierarchy-level-slider" min="0" max="9" value="4" step="1"
+                        class="w-full sm:flex-1 accent-purple-600">
+                    <span id="hierarchy-level-label"
+                        class="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">Level 4</span>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
                     <div id="cluster-plot" class="col-span-1 lg:col-span-3" style="aspect-ratio: 1/1; width: 100%;">
@@ -998,7 +1009,7 @@
         {% endif %}
     </script>
     {% endif %}
-    <script type="module" src="{{ url_for('static', filename='app.js') }}"></script>
+    <script type="module" src="{{ url_for('static', filename='dist/app.js') }}"></script>
 </body>
 
 </html>

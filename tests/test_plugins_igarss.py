@@ -144,6 +144,10 @@ class TestStripHighlightTags:
         text = "Analysis of <highlight>SAR</highlight> data"
         assert _strip_highlight_tags(text) == "Analysis of SAR data"
 
+    def test_removes_general_markup_and_entities(self):
+        text = "<b>Remote</b> &amp; <i>Sensing</i>"
+        assert _strip_highlight_tags(text) == "Remote & Sensing"
+
 
 # ---------------------------------------------------------------------------
 # Plugin metadata tests

@@ -94,7 +94,7 @@ def reset_metadata_cache() -> None:
 class SessionMixin:
     """Connection, session, schema, and metadata-cache management."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initialize the DatabaseManager.
 

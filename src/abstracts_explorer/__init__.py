@@ -14,7 +14,7 @@ Plugin System
 -------------
 The package includes a plugin system for downloading papers from different sources:
 
-- **neurips**: Official NeurIPS conference data (2013-2025)
+- **neurips**: Official NeurIPS conference data (1987 onward)
 - **ml4ps**: ML4PS (Machine Learning for Physical Sciences) workshop
 
 Example usage with plugins::

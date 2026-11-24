@@ -25,7 +25,9 @@ from abstracts_explorer.mcp_tools import (
     GET_PAPER_DETAILS_RULES,
     INTERESTING_PAPER_ARRAY_RULES,
     INTERESTING_PAPER_SINGLE_RULES,
+    SUGGEST_SEARCH_TERMS_FROM_ORCID_RULES,
     _filter_unknown_kwargs,
+    _format_suggest_search_terms_from_orcid_result,
 )
 
 
@@ -125,7 +127,8 @@ def test_format_conference_topics_result():
         "total_papers": 150,
         "topics": [
             {
-                "topic": "Transformers",
+                "topic": "Papers study transformer architectures and attention.",
+                "label": "Transformers",
                 "paper_count": 60,
                 "keywords": ["reinforcement learning", "policy"],
             },
@@ -143,6 +146,8 @@ def test_format_conference_topics_result():
     assert "150 papers" in result
     assert "3 topics" in result
     assert "Transformers" in result
+    assert "Papers study transformer architectures and attention." in result
+    assert "Label: Transformers" in result
     assert "60 papers" in result
     assert "reinforcement learning" in result
     assert "Attention Mechanisms" in result
@@ -211,6 +216,32 @@ def test_format_search_papers_result_more_than_five_papers():
     assert "Found 8 papers:" in result
     for i in range(1, 9):
         assert f"{i}. Paper Number {i} (2024)" in result
+
+
+def test_format_search_papers_result_uses_global_citation_numbers():
+    """Global paper numbers replace local result numbering."""
+    data = {
+        "topic": "LLMs",
+        "papers": [
+            {"uid": "a", "title": "GPT-4 Architecture", "year": 2024},
+            {"uid": "b", "title": "Scaling Laws for LLMs", "year": 2024},
+        ],
+    }
+
+    result = _format_search_papers_result(data, paper_numbers={"a": 3, "b": 7})
+
+    assert "Paper-3: GPT-4 Architecture (2024)" in result
+    assert "Paper-7: Scaling Laws for LLMs (2024)" in result
+    assert "1. GPT-4 Architecture" not in result
+
+
+def test_format_tool_result_for_llm_passes_global_citation_numbers():
+    """The public formatter forwards the citation mapping to tool formatters."""
+    data = {"papers": [{"uid": "a", "title": "Paper A", "year": 2024}]}
+
+    result = format_tool_result_for_llm("search_papers", json.dumps(data), paper_numbers={"a": 5})
+
+    assert "Paper-5: Paper A (2024)" in result
 
 
 def test_format_visualization_result():
@@ -633,40 +664,16 @@ class TestExecuteMCPToolE2E:
     # ------------------------------------------------------------------
 
     def test_get_conference_topics_real_execution(self):
-        """get_conference_topics executes end-to-end with mocked clustering stack."""
-        import numpy as np
-
-        mock_cm = Mock()
-        mock_cm.load_embeddings.return_value = 10
-        mock_cm.get_cluster_statistics.return_value = {
-            "n_clusters": 2,
-            "n_noise": 0,
-            "cluster_sizes": {0: 3, 1: 2},
-            "total_papers": 5,
-        }
-        mock_cm.paper_ids = ["p1", "p2", "p3", "p4", "p5"]
-        mock_cm.cluster_labels = np.array([0, 0, 1, 1, 0])
-        mock_cm.cluster_label_names = None
-        mock_cm.cluster_keywords = None
-        mock_cm.metadatas = [
-            {"title": "A", "keywords": ["ml"], "session": "S1", "year": 2025},
-            {"title": "B", "keywords": ["dl"], "session": "S1", "year": 2025},
-            {"title": "C", "keywords": ["nlp"], "session": "S2", "year": 2025},
-            {"title": "D", "keywords": ["nlp"], "session": "S2", "year": 2025},
-            {"title": "E", "keywords": ["ml"], "session": "S1", "year": 2025},
+        """get_conference_topics derives the fixed hierarchy level from the tree."""
+        points = [
+            {"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0, "title": "Paper 1"},
+            {"id": "p2", "cluster": 0, "x": 0.1, "y": 0.1, "title": "Paper 2"},
+            {"id": "p3", "cluster": 1, "x": 1.0, "y": 1.0, "title": "Paper 3"},
+            {"id": "p4", "cluster": 1, "x": 1.1, "y": 1.1, "title": "Paper 4"},
+            {"id": "p5", "cluster": 0, "x": 0.2, "y": 0.2, "title": "Paper 5"},
         ]
-        mock_cm.embeddings_manager = Mock()
-        mock_db = Mock()
-
-        # Mock db.get_clustering_cache to return cached results with cluster names
-        mock_db.get_clustering_cache.return_value = {
-            "points": [
-                {"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0},
-                {"id": "p2", "cluster": 0, "x": 0.1, "y": 0.1},
-                {"id": "p3", "cluster": 1, "x": 1.0, "y": 1.0},
-                {"id": "p4", "cluster": 1, "x": 1.1, "y": 1.1},
-                {"id": "p5", "cluster": 0, "x": 0.2, "y": 0.2},
-            ],
+        cached = {
+            "points": points,
             "statistics": {
                 "n_clusters": 2,
                 "n_noise": 0,
@@ -675,10 +682,28 @@ class TestExecuteMCPToolE2E:
             },
             "cluster_labels": {"0": "Machine Learning", "1": "NLP"},
             "cluster_keywords": {"0": ["ml", "deep"], "1": ["nlp", "bert"]},
+            "hierarchy": {
+                "method": "bertopic",
+                "n_topics": 2,
+                "tree": [
+                    {
+                        "id": 10,
+                        "topics": [0, 1],
+                        "label": "Machine Learning",
+                        "description": "Papers apply learning methods to practical problems.",
+                        "distance": 0.42,
+                        "child_left_id": 0,
+                        "child_right_id": 1,
+                    }
+                ],
+            },
         }
 
+        mock_db = Mock()
+        mock_db.get_clustering_cache.return_value = cached
+
         with (
-            patch("abstracts_explorer.mcp.resources.load_clustering_data", return_value=(mock_cm, mock_db)),
+            patch("abstracts_explorer.mcp.resources._get_shared_database", return_value=mock_db),
             patch("abstracts_explorer.mcp.shared_dependencies.get_config") as mock_cfg,
         ):
             mock_cfg.return_value = Mock(collection_name="papers", embedding_model="test-model")
@@ -686,17 +711,47 @@ class TestExecuteMCPToolE2E:
 
         data = json.loads(result)
         assert "error" not in data
-        assert "topics" in data
-        assert data["n_topics"] == 2
-        # topic_sizes should use topic names sorted by size descending
-        assert list(data["topic_sizes"].keys()) == ["Machine Learning", "NLP"]
-        assert data["topic_sizes"]["Machine Learning"] == 3
-        assert data["topic_sizes"]["NLP"] == 2
-        # Verify topics are returned, sorted by paper_count desc
-        assert data["topics"][0]["topic"] == "Machine Learning"
-        assert data["topics"][0]["keywords"] == ["ml", "deep"]
-        assert data["topics"][1]["topic"] == "NLP"
-        assert data["topics"][1]["keywords"] == ["nlp", "bert"]
+        assert data["n_topics"] == 1
+        assert data["hierarchy_level"] == 0
+        assert data["hierarchy_max_distance"] == 0.42
+        assert data["topic_sizes"] == {"Papers apply learning methods to practical problems.": 5}
+        assert data["topics"][0]["topic"] == "Papers apply learning methods to practical problems."
+        assert data["topics"][0]["label"] == "Machine Learning"
+        assert data["topics"][0]["paper_count"] == 5
+        assert data["topics"][0]["sample_titles"] == ["Paper 1", "Paper 2", "Paper 3", "Paper 4", "Paper 5"]
+        assert data["topics"][0]["source_topic_count"] == 2
+
+    def test_get_conference_topics_rejects_missing_tree(self):
+        """get_conference_topics reports outdated caches without a tree."""
+        points = [
+            {"id": "p1", "cluster": 0, "title": "Paper 1"},
+            {"id": "p2", "cluster": 1, "title": "Paper 2"},
+        ]
+        cached = {
+            "points": points,
+            "statistics": {
+                "n_clusters": 2,
+                "n_noise": 0,
+                "cluster_sizes": {0: 1, 1: 1},
+                "total_papers": 2,
+            },
+            "cluster_labels": {"0": "A", "1": "B"},
+            "cluster_descriptions": {"0": "Papers about A.", "1": "Papers about B."},
+            "cluster_keywords": {"0": ["a"], "1": ["b"]},
+        }
+        mock_db = Mock()
+        mock_db.get_clustering_cache.return_value = cached
+
+        with (
+            patch("abstracts_explorer.mcp.resources._get_shared_database", return_value=mock_db),
+            patch("abstracts_explorer.mcp.shared_dependencies.get_config") as mock_cfg,
+        ):
+            mock_cfg.return_value = Mock(collection_name="papers", embedding_model="test-model")
+            result = execute_mcp_tool("get_conference_topics", {"conferences": ["NeurIPS"]})
+
+        data = json.loads(result)
+        assert "error" in data
+        assert "missing their hierarchy tree" in data["error"]
 
     # ------------------------------------------------------------------
     # get_topic_evolution
@@ -1433,6 +1488,47 @@ def test_format_recommend_related_papers_result():
     assert "Shares keywords" in formatted
 
 
+def test_format_recommend_related_papers_uses_global_citation_numbers():
+    """Recommendations use the conversation-wide paper labels."""
+    data = {
+        "papers": [
+            {
+                "uid": "b",
+                "title": "Paper B",
+                "conference": "ICLR",
+                "year": 2026,
+                "recommendation_score": 0.87,
+            }
+        ]
+    }
+
+    formatted = format_tool_result_for_llm("recommend_related_papers", json.dumps(data), paper_numbers={"b": 4})
+
+    assert "Paper-4: Paper B" in formatted
+
+
+def test_format_summarize_interesting_papers_uses_global_citation_numbers():
+    """The interesting-paper summary labels rated papers with global numbers."""
+    data = {
+        "total_interesting": 1,
+        "top_rated_papers": [{"uid": "c", "title": "Paper C", "priority": 5}],
+        "papers": [
+            {
+                "uid": "c",
+                "title": "Paper C",
+                "conference": "ICLR",
+                "year": 2026,
+                "priority": 5,
+                "searchTerm": "llms",
+            }
+        ],
+    }
+
+    formatted = format_tool_result_for_llm("summarize_interesting_papers", json.dumps(data), paper_numbers={"c": 9})
+
+    assert formatted.count("Paper-9: Paper C") == 2
+
+
 def test_execute_mcp_tool_suggest_authors_to_meet():
     """execute_mcp_tool dispatches suggest_authors_to_meet."""
     mock_result = json.dumps({"authors": [], "authors_count": 0})
@@ -1500,3 +1596,114 @@ def test_format_suggest_authors_to_meet_result():
     assert "2 similar, 1 starred" in formatted
     assert "Starred Paper" in formatted
     assert "poster 12" in formatted
+
+
+def test_normalize_suggest_search_terms_from_orcid_args():
+    """ORCID aliases and scalar/list shapes are normalized."""
+    args = {
+        "orcid_id": ["https://orcid.org/0000-0002-2315-9247"],
+        "n_terms": "5",
+        "min_year": ["2020"],
+        "n_works": 20,
+    }
+
+    result = _normalize_args(args, SUGGEST_SEARCH_TERMS_FROM_ORCID_RULES)
+
+    assert result == {
+        "orcid": "https://orcid.org/0000-0002-2315-9247",
+        "max_terms": 5,
+        "min_year": 2020,
+        "max_works": 20,
+    }
+
+
+def test_execute_mcp_tool_suggest_search_terms_from_orcid():
+    """Test executing the ORCID search-term tool with alias normalization."""
+    with patch("abstracts_explorer.mcp_tools.suggest_search_terms_from_orcid") as mock_tool:
+        mock_result = json.dumps({"suggested_terms": [{"term": "deep learning"}]})
+        mock_tool.return_value = mock_result
+
+        result = execute_mcp_tool(
+            "suggest_search_terms_from_orcid",
+            {"orcid_id": "0000-0002-2315-9247", "n_terms": 3},
+        )
+
+        assert result == mock_result
+        mock_tool.assert_called_once_with(orcid="0000-0002-2315-9247", max_terms=3)
+
+
+def test_format_suggest_search_terms_from_orcid_result():
+    """Test formatting ORCID search-term suggestions for the LLM."""
+    data = {
+        "orcid": "0000-0002-2315-9247",
+        "name": "Jane Doe",
+        "works_found": 4,
+        "works_used": 2,
+        "keywords": ["deep learning", "computer vision"],
+        "suggested_terms": [
+            {"term": "deep learning", "reason": "Author keyword", "source": "llm"},
+            {"term": "computer vision", "reason": "Work topic", "source": "llm"},
+        ],
+        "recent_titles": ["Deep Learning for Vision", "Graph Neural Networks"],
+        "source": "llm",
+        "warning": None,
+    }
+
+    result = _format_suggest_search_terms_from_orcid_result(data)
+
+    assert "Jane Doe" in result
+    assert "0000-0002-2315-9247" in result
+    assert "4 found, 2 used" in result
+    assert "deep learning" in result
+    assert "Author keyword" in result
+    assert "Deep Learning for Vision" in result
+
+
+def test_format_suggest_search_terms_from_orcid_result_empty():
+    """Test formatting an empty ORCID suggestion result."""
+    result = _format_suggest_search_terms_from_orcid_result(
+        {
+            "orcid": "0000-0002-2315-9247",
+            "name": None,
+            "works_found": 0,
+            "works_used": 0,
+            "keywords": [],
+            "suggested_terms": [],
+            "recent_titles": [],
+            "source": "none",
+            "warning": "No public works.",
+        }
+    )
+
+    assert "No search terms could be derived" in result
+    assert "No public works." in result
+
+
+def test_select_hierarchy_level_derives_from_tree():
+    """MCP selects its fixed level from a tree-derived hierarchy."""
+    from abstracts_explorer.mcp.tools.topics import MCP_HIERARCHY_LEVEL, _select_hierarchy_level
+
+    tree = [
+        {
+            "id": 10 + index,
+            "topics": [0, 1],
+            "label": f"Parent {index}",
+            "description": "",
+            "distance": 0.1 * (index + 1),
+            "child_left_id": 0,
+            "child_right_id": 1,
+        }
+        for index in range(7)
+    ]
+    cached = {
+        "points": [],
+        "statistics": {"n_clusters": 2, "cluster_sizes": {0: 1, 1: 1}},
+        "cluster_labels": {"0": "A", "1": "B"},
+        "cluster_keywords": {"0": ["a"], "1": ["b"]},
+        "hierarchy": {"method": "bertopic", "n_topics": 2, "tree": tree},
+    }
+
+    level = _select_hierarchy_level(cached)
+
+    assert level is not None
+    assert level["level"] == MCP_HIERARCHY_LEVEL

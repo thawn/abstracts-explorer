@@ -49,6 +49,9 @@ class DownloadOptions:
     page_delay: float = 0.0
     resume: bool = True
     progress: Optional[bool] = None
+    openreview_token: Optional[str] = None
+    openreview_email: Optional[str] = None
+    openreview_password: Optional[str] = None
 
     @classmethod
     def from_kwargs(cls, kwargs: Dict[str, Any], defaults: Optional[Dict[str, Any]] = None) -> "DownloadOptions":
@@ -678,6 +681,7 @@ class HTTPDownloaderPlugin(DownloaderPlugin):
         method: str = "GET",
         json_body: Optional[Any] = None,
         max_attempts: Optional[int] = None,
+        headers: Optional[Dict[str, str]] = None,
     ) -> Any:
         """Fetch and decode a JSON response."""
         response = self._request(
@@ -689,6 +693,7 @@ class HTTPDownloaderPlugin(DownloaderPlugin):
             method=method,
             json_body=json_body,
             max_attempts=max_attempts,
+            headers=headers,
         )
         try:
             return response.json()

@@ -128,6 +128,7 @@ def analyze_topic_relevance(
             for paper in papers[:5]:
                 sample_papers.append(
                     {
+                        "uid": paper.get("uid", ""),
                         "title": paper.get("title", ""),
                         "year": paper.get("year"),
                         "conference": paper.get("conference", ""),

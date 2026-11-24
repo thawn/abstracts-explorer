@@ -36,6 +36,7 @@ def clean_config_env_vars():
         "POSTGRES_DB",
         "ABSTRACTS_DB_PASSWORD",
         "EMBEDDING_DB",
+        "MIN_FREE_DISK_MB",
         "COLLECTION_NAME",
         "MAX_CONTEXT_PAPERS",
         "METADATA_CACHE_TTL",
@@ -60,6 +61,18 @@ def clean_config_env_vars():
         "LLM_REQUEST_TIMEOUT",
         "GITHUB_TOKEN",
         "REGISTRY_REPOSITORY",
+        "OPENREVIEW_EMAIL",
+        "OPENREVIEW_PASSWORD",
+        "OPENREVIEW_TOKEN",
+        "GUARD_ENABLED",
+        "GUARD_BACKEND_URL",
+        "GUARD_API_KEY",
+        "GUARD_MODEL",
+        "GUARD_TIMEOUT",
+        "GUARD_TOPIC_THRESHOLD",
+        "GUARD_JAILBREAK_THRESHOLD",
+        "GUARD_MAX_CHARS",
+        "GUARD_REFUSAL_MESSAGE",
     }
     for var in env_vars:
         if var in os.environ:
@@ -217,14 +230,16 @@ class TestConfig:
         assert config.embedding_model == "alias-qwen3-8b-embeddings"
         assert config.llm_backend_url == "https://api.helmholtz-blablador.fz-juelich.de"
         assert config.embedding_db == str((Path("data") / "chroma_db").absolute())
+        assert config.min_free_disk_mb == 4096
         # Test database_url is constructed from PAPER_DB
         assert config.database_url == f"sqlite:///{(Path('data') / 'abstracts.db').absolute()}"
         assert config.collection_name == "papers"
         assert config.max_context_papers == 5
         assert config.metadata_cache_ttl == 86400
         assert config.chat_temperature == 0.7
-        assert config.chat_max_tokens == 2000
+        assert config.chat_max_tokens == 4000
         assert config.cluster_label_model == "alias-fast"
+        assert config.cluster_label_max_workers == 8
         assert config.embedding_max_input_tokens == 8192
         assert config.rag_max_parallel_tools == 8
         assert config.rag_request_limit == 50
@@ -238,6 +253,15 @@ class TestConfig:
         assert config.proxy_x_prefix == 0
         assert config.web_rate_limit_per_minute == 30
         assert config.web_ui_threads == 6
+        assert config.guard_enabled is False
+        assert config.guard_backend_url == "http://127.0.0.1:11435"
+        assert config.guard_api_key == ""
+        assert config.guard_model == "laya:multilingual"
+        assert config.guard_timeout == 2.0
+        assert config.guard_topic_threshold == 0.8
+        assert config.guard_jailbreak_threshold == 0.8
+        assert config.guard_max_chars == 1500
+        assert config.guard_refusal_message == ""
 
     def test_web_ui_threads_from_env(self, tmp_path):
         """WEB_UI_THREADS overrides the default Waitress thread count."""
@@ -288,6 +312,49 @@ class TestConfig:
         assert config.rag_max_parallel_tools == 3
         assert config.rag_request_limit == 20
         assert config.rag_query_timeout == 45
+
+    def test_cluster_label_max_workers_from_env(self, tmp_path):
+        """CLUSTER_LABEL_MAX_WORKERS controls cluster-label concurrency."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("CLUSTER_LABEL_MAX_WORKERS=8\n")
+
+        config = Config(env_path=env_file)
+        assert config.cluster_label_max_workers == 8
+
+    def test_cluster_label_max_workers_are_clamped(self, tmp_path):
+        """Non-positive worker counts fall back to sequential labeling."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("CLUSTER_LABEL_MAX_WORKERS=0\n")
+
+        config = Config(env_path=env_file)
+        assert config.cluster_label_max_workers == 1
+
+        env_file.write_text("CLUSTER_LABEL_MAX_WORKERS=-3\n")
+        config = Config(env_path=env_file)
+        assert config.cluster_label_max_workers == 1
+
+    def test_min_free_disk_mb_from_env(self, tmp_path):
+        """MIN_FREE_DISK_MB controls the embedding-write disk preflight."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("MIN_FREE_DISK_MB=1024\n")
+
+        config = Config(env_path=env_file)
+        assert config.min_free_disk_mb == 1024
+
+    def test_min_free_disk_mb_zero_disables_check(self, tmp_path):
+        """Zero or negative values disable the disk-space preflight."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("MIN_FREE_DISK_MB=0\n")
+        assert Config(env_path=env_file).min_free_disk_mb == 0
+
+        env_file.write_text("MIN_FREE_DISK_MB=-10\n")
+        assert Config(env_path=env_file).min_free_disk_mb == 0
+
+    def test_min_free_disk_mb_invalid_falls_back(self, tmp_path):
+        """Invalid values fall back to the default."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("MIN_FREE_DISK_MB=not-a-number\n")
+        assert Config(env_path=env_file).min_free_disk_mb == 4096
 
     def test_llm_timeouts_from_env(self, tmp_path):
         """LLM connect and request timeouts are configurable."""
@@ -416,11 +483,77 @@ CHAT_MAX_TOKENS=500
         config = Config(env_path=env_file)
         assert config.chat_temperature == 0.7  # Default
 
+    def test_guard_settings_from_env(self, tmp_path, monkeypatch):
+        """Test custom guard settings load from the environment."""
+        for key in (
+            "GUARD_ENABLED",
+            "GUARD_BACKEND_URL",
+            "GUARD_API_KEY",
+            "GUARD_MODEL",
+            "GUARD_TIMEOUT",
+            "GUARD_TOPIC_THRESHOLD",
+            "GUARD_JAILBREAK_THRESHOLD",
+            "GUARD_MAX_CHARS",
+            "GUARD_REFUSAL_MESSAGE",
+        ):
+            monkeypatch.delenv(key, raising=False)
+
+        monkeypatch.setenv("GUARD_ENABLED", "true")
+        monkeypatch.setenv("GUARD_BACKEND_URL", "http://guard:9000")
+        monkeypatch.setenv("GUARD_API_KEY", "secret")
+        monkeypatch.setenv("GUARD_MODEL", "decima:guard-small")
+        monkeypatch.setenv("GUARD_TIMEOUT", "1.5")
+        monkeypatch.setenv("GUARD_TOPIC_THRESHOLD", "0.7")
+        monkeypatch.setenv("GUARD_JAILBREAK_THRESHOLD", "0.6")
+        monkeypatch.setenv("GUARD_MAX_CHARS", "900")
+        monkeypatch.setenv("GUARD_REFUSAL_MESSAGE", "Nope.")
+
+        config = Config(env_path=tmp_path / "missing.env")
+
+        assert config.guard_enabled is True
+        assert config.guard_backend_url == "http://guard:9000"
+        assert config.guard_api_key == "secret"
+        assert config.guard_model == "decima:guard-small"
+        assert config.guard_timeout == 1.5
+        assert config.guard_topic_threshold == 0.7
+        assert config.guard_jailbreak_threshold == 0.6
+        assert config.guard_max_chars == 900
+        assert config.guard_refusal_message == "Nope."
+
+    def test_openreview_settings_from_env(self, tmp_path, monkeypatch):
+        """Test OpenReview credentials load from the environment."""
+        for key in ("OPENREVIEW_EMAIL", "OPENREVIEW_PASSWORD", "OPENREVIEW_TOKEN"):
+            monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("OPENREVIEW_EMAIL", "user@example.org")
+        monkeypatch.setenv("OPENREVIEW_PASSWORD", "secret")
+        monkeypatch.setenv("OPENREVIEW_TOKEN", "token-123")
+
+        config = Config(env_path=tmp_path / "missing.env")
+
+        assert config.openreview_email == "user@example.org"
+        assert config.openreview_password == "secret"
+        assert config.openreview_token == "token-123"
+
+    def test_config_to_dict_hides_openreview_credentials(self, tmp_path):
+        """Test that to_dict masks OpenReview password and token."""
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "OPENREVIEW_EMAIL=user@example.org\n" "OPENREVIEW_PASSWORD=secret\n" "OPENREVIEW_TOKEN=token-123\n"
+        )
+
+        config = Config(env_path=env_file)
+        config_dict = config.to_dict()
+
+        assert config_dict["openreview_email"] == "user@example.org"
+        assert config_dict["openreview_password"] == "***"
+        assert config_dict["openreview_token"] == "***"
+        assert config.openreview_password == "secret"
+        assert config.openreview_token == "token-123"
+
     def test_config_to_dict(self):
         """Test converting configuration to dictionary."""
         config = Config()
         config_dict = config.to_dict()
-
         assert isinstance(config_dict, dict)
         assert "data_dir" in config_dict
         assert "chat_model" in config_dict
@@ -435,6 +568,10 @@ CHAT_MAX_TOKENS=500
         assert "llm_connect_timeout" in config_dict
         assert "llm_request_timeout" in config_dict
         assert "web_ui_threads" in config_dict
+        assert "guard_enabled" in config_dict
+        assert "guard_backend_url" in config_dict
+        assert "guard_model" in config_dict
+        assert "guard_api_key" in config_dict
 
     def test_config_to_dict_hides_token(self, tmp_path):
         """Test that to_dict hides auth token."""
@@ -448,6 +585,17 @@ CHAT_MAX_TOKENS=500
         assert config_dict["llm_backend_auth_token"] == "***"
         # But original value is still accessible
         assert config.llm_backend_auth_token == "secret-token-123"
+
+    def test_config_to_dict_hides_guard_api_key(self, tmp_path):
+        """Test that to_dict hides the guard API key."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("GUARD_API_KEY=guard-secret")
+
+        config = Config(env_path=env_file)
+        config_dict = config.to_dict()
+
+        assert config_dict["guard_api_key"] == "***"
+        assert config.guard_api_key == "guard-secret"
 
     def test_config_repr(self):
         """Test configuration string representation."""

@@ -8,7 +8,7 @@ import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import create_engine, select, delete, and_, func, text
 from sqlalchemy.orm import Session
@@ -21,7 +21,6 @@ from abstracts_explorer.db_models import (
     Paper,
     EmbeddingsMetadata,
     ClusteringCache,
-    HierarchicalLabelCache,
 )
 
 from abstracts_explorer.db.errors import (
@@ -110,10 +109,6 @@ class TransferMixin(SessionMixin):
                     paper_dict = _row_to_dict(Paper, paper)
                     export_session.add(Paper(**paper_dict))
                     paper_count += 1
-
-                for entry in self.session.execute(select(HierarchicalLabelCache)).scalars():
-                    entry_dict = _row_to_dict(HierarchicalLabelCache, entry)
-                    export_session.add(HierarchicalLabelCache(**entry_dict))
 
                 for meta_entry in self.session.execute(select(EmbeddingsMetadata)).scalars():
                     entry_dict = _row_to_dict(EmbeddingsMetadata, meta_entry)
@@ -214,18 +209,7 @@ class TransferMixin(SessionMixin):
                 ):
                     raise EmbeddingModelConflictError(str(existing_model), str(imported_meta.embedding_model))
 
-                imported_models_result: List[str] = cast(
-                    List[str],
-                    source_session.execute(select(HierarchicalLabelCache.embedding_model).distinct()).scalars().all(),
-                )
-
                 self.session.execute(delete(Paper).where(and_(Paper.conference == conference, Paper.year == year)))
-                if imported_models_result:
-                    self.session.execute(
-                        delete(HierarchicalLabelCache).where(
-                            HierarchicalLabelCache.embedding_model.in_(imported_models_result)
-                        )
-                    )
 
                 for paper in source_session.execute(
                     select(Paper).where(and_(Paper.conference == conference, Paper.year == year))
@@ -233,10 +217,6 @@ class TransferMixin(SessionMixin):
                     paper_dict = _row_to_dict(Paper, paper)
                     self.session.merge(Paper(**paper_dict))
                     paper_count += 1
-
-                for entry in source_session.execute(select(HierarchicalLabelCache)).scalars():
-                    entry_dict = _row_to_dict(HierarchicalLabelCache, entry)
-                    self.session.add(HierarchicalLabelCache(**entry_dict))
 
                 if imported_meta and existing_model is None:
                     meta_dict = {c.name: getattr(imported_meta, c.name) for c in EmbeddingsMetadata.__table__.columns}

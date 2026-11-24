@@ -55,6 +55,11 @@ def chat_completion_text(
     str
         The model's response text, stripped of surrounding whitespace.
         Empty when the model returned no content.
+
+    Raises
+    ------
+    ValueError
+        If the backend returned a response without any choices.
     """
     extra_kwargs: dict = {}
     if timeout is not None:
@@ -73,4 +78,10 @@ def chat_completion_text(
         **extra_kwargs,
     )
 
-    return (response.choices[0].message.content or "").strip()
+    choices = getattr(response, "choices", None)
+    if not choices:
+        raise ValueError("LLM response contained no choices")
+
+    message = getattr(choices[0], "message", None)
+    content = getattr(message, "content", None) if message is not None else None
+    return (content or "").strip()

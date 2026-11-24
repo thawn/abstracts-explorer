@@ -50,6 +50,66 @@ download() {
     curl -fsSL "$1" -o "$2" || die "Failed to download $1"
 }
 
+merge_env_file() {
+    # merge_env_file NEW OLD DEST
+    # Use NEW as the template, but keep every KEY=value pair from OLD.
+    # Keys that only exist in OLD are appended at the end.
+    local new_file="$1" old_file="$2" dest="$3"
+    local tmp
+
+    if [ ! -f "$old_file" ]; then
+        chmod 600 "$new_file"
+        mv "$new_file" "$dest"
+        return
+    fi
+
+    tmp="$(mktemp "${dest}.new.XXXXXX")"
+    awk '
+        FNR == NR {
+            key = $0
+            sub(/^[[:space:]]*/, "", key)
+            if (key ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+                name = key
+                sub(/=.*/, "", name)
+                if (!(name in old)) {
+                    order[++count] = name
+                }
+                old[name] = $0
+            }
+            next
+        }
+        {
+            key = $0
+            sub(/^[[:space:]]*/, "", key)
+            if (key ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+                name = key
+                sub(/=.*/, "", name)
+                if (name in old) {
+                    print old[name]
+                    emitted[name] = 1
+                    next
+                }
+            }
+            print
+        }
+        END {
+            for (i = 1; i <= count; i++) {
+                name = order[i]
+                if (!(name in emitted)) {
+                    print old[name]
+                }
+            }
+        }
+    ' "$old_file" "$new_file" > "$tmp" || {
+        rm -f "$tmp" "$new_file"
+        die "Failed to merge environment file"
+    }
+
+    chmod 600 "$tmp"
+    mv "$tmp" "$dest"
+    rm -f "$new_file"
+}
+
 generate_password() {
     # 32-character alphanumeric password.  Read 48 random bytes to ensure
     # enough characters survive the base64 + alphanumeric filter.
@@ -106,10 +166,12 @@ fi
 # ── 2. Download configuration files ──────────────────────────────────────────
 info "Downloading configuration files from branch '$BRANCH'"
 
-# Environment file (no secrets — restrict permissions anyway for safety)
-download "$BASE_URL/systemd/abstracts-explorer.env" \
-         "$DEPLOY_DIR/abstracts-explorer.env"
-chmod 600 "$DEPLOY_DIR/abstracts-explorer.env"
+# Environment file (no secrets — restrict permissions anyway for safety).
+# Merge with an existing file so locally customized values are preserved.
+ENV_FILE="$DEPLOY_DIR/abstracts-explorer.env"
+ENV_NEW="$(mktemp "${ENV_FILE}.new.XXXXXX")"
+download "$BASE_URL/systemd/abstracts-explorer.env" "$ENV_NEW"
+merge_env_file "$ENV_NEW" "$ENV_FILE" "$ENV_FILE"
 
 # Update script
 download "$BASE_URL/scripts/update-podman.sh" \
@@ -121,10 +183,12 @@ for f in \
     abstracts-explorer.container \
     abstracts-postgres.container \
     abstracts-chromadb.container \
+    abstracts-ollaya.container \
     abstracts.network \
     abstracts-data.volume \
     abstracts-chromadb-data.volume \
-    abstracts-postgres-data.volume; do
+    abstracts-postgres-data.volume \
+    abstracts-ollaya.volume; do
     download "$BASE_URL/systemd/user/$f" "$QUADLET_DIR/$f"
 done
 
@@ -193,6 +257,16 @@ else
     ok "Podman secret 'postgres-password' created"
 fi
 
+# ── 4b. Generate Ollaya guard API key and store as Podman secret ────────────
+if podman secret inspect ollaya-api-key >/dev/null 2>&1; then
+    ok "Podman secret 'ollaya-api-key' already exists — keeping it"
+else
+    info "Generating Ollaya API key"
+    GUARD_API_KEY=$(generate_password)
+    printf '%s' "$GUARD_API_KEY" | podman secret create ollaya-api-key -
+    ok "Podman secret 'ollaya-api-key' created"
+fi
+
 # ── 5. Enable log-retention timer (GDPR: 7 days) ────────────────────────────
 info "Enabling log-retention timer (GDPR: 7-day vacuum)"
 # The timer runs 'journalctl --user --vacuum-time=7d' daily so container logs
@@ -222,6 +296,9 @@ echo "  printf '%s' 'YOUR_TOKEN' | podman secret create llm-backend-auth-token -
 echo ""
 warn "Review and edit the environment file:"
 echo "  $DEPLOY_DIR/abstracts-explorer.env"
+echo ""
+warn "After starting the services, pull the Ollaya guard model:"
+echo "  podman exec abstracts-ollaya ollaya pull laya:multilingual"
 echo ""
 
 # ── 7. Print next steps ──────────────────────────────────────────────────────
@@ -255,7 +332,7 @@ fi
 cat <<EOF
 
   4. Start all services:
-       systemctl --user start abstracts-postgres abstracts-chromadb abstracts-explorer
+       systemctl --user start abstracts-postgres abstracts-chromadb abstracts-ollaya abstracts-explorer
 EOF
 
 if [ "$VARIANT" = "nginx" ]; then

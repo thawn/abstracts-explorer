@@ -13,7 +13,7 @@ The codebase comprises **~21,200 lines** of Python (plus the dev-only
 | `cli/` package | 4,640 | Command-line interface (`main.py` dispatch + `parsers.py` wiring + per-command modules) |
 | `db/` package | 4,061 | SQL database operations as `DatabaseManager` mixins (+ 27-line `database.py` facade) |
 | `plugins/` | 4,079 | Conference downloader plugins (11 plugins) |
-| `clustering/` package | 1,976 | Agglomerative clustering, t-SNE, labeling, hierarchy, cache |
+| `clustering/` package | — | BERTopic + UMAP, LLM labeling, hierarchy tree, cache |
 | `plugin/` package | 1,753 | Plugin framework, models, registry, HTTP, persistence |
 | `registry.py` | 1,684 | OCI registry upload/download |
 | `mcp/` package | 1,481 | MCP server, resources, cache, tool implementations (8 tools) |
@@ -43,7 +43,7 @@ graph TD
     DB[db/ package<br/>DatabaseManager mixins]
     DBM[db_models.py<br/>429 lines]
     EMB[embeddings/<br/>ChromaDB + generation]
-    CLU[clustering/<br/>Agglomerative + t-SNE]
+    CLU[clustering/<br/>BERTopic + UMAP]
     RAG[rag/<br/>agent + tools]
     MCP[mcp/<br/>server + tools]
     MCT[mcp_tools.py<br/>registry + formatting]
@@ -300,24 +300,15 @@ graph TD
 
     subgraph "ClusteringManager"
         CLOAD["load_embeddings"]
-        CREDUC["reduce_dimensions<br/>(t-SNE)"]
-        CCLUST["cluster<br/>(Agglomerative, ward linkage)"]
-        CKEYS["extract_cluster_keywords"]
-        CLBL["generate_cluster_labels"]
-        CHRCH["generate_hierarchical_labels"]
+        CUMAP["BERTopic fit<br/>(5-D UMAP + Agglomerative)"]
+        CKEYS["base c-TF-IDF keywords"]
+        CLBL["LLM labels<br/>(flat + merged)"]
+        CHRCH["hierarchical_topics<br/>(full merge tree)"]
         CRES["get_clustering_results"]
 
-        subgraph "Shared keyword extraction"
-            T1["extract_cluster_keywords"]
-            T2["_extract_keywords_for_samples"]
-            T3["compute_tfidf_keywords<br/>(shared TF-IDF implementation)"]
-        end
-
-        subgraph "Shared LLM label generation"
-            L1["_generate_llm_label"]
-            L2["_generate_parent_label_llm"]
-            L3["_generate_llm_label_from_keywords"]
-            L4["_call_llm_for_label<br/>(shared call + fallback)"]
+        subgraph "LLM retry and fallback"
+            L1["generate_llm_label<br/>(retry empty/transient errors)"]
+            L2["ProjectLLMRepresentation<br/>(keyword fallback)"]
         end
 
         subgraph "SQL filter resolution"
@@ -336,9 +327,10 @@ graph TD
     ECOL --> EQRY
     EQRY --> EFIND
     EQRY --> EQUERY
-    CLOAD --> CREDUC --> CCLUST --> CKEYS --> CLBL
-    CCLUST --> CHRCH
+    CLOAD --> CUMAP --> CKEYS --> CLBL
+    CUMAP --> CHRCH
     CLBL --> CRES
+    CHRCH --> CRES
 
     PF --> CLOAD
     CWC --> CLOAD
@@ -354,7 +346,7 @@ graph TD
         RQUERY["query()"]
         RBUILD["_build_agent()"]
 
-        subgraph "Explicit Tool Wrappers (9)"
+        subgraph "Explicit Tool Wrappers (10)"
             TW1["_tool_search_papers"]
             TW2["_tool_get_conference_topics"]
             TW3["_tool_get_topic_evolution"]
@@ -364,6 +356,7 @@ graph TD
             TW7["_tool_summarize_interesting_papers"]
             TW8["_tool_recommend_related_papers"]
             TW9["_tool_suggest_authors_to_meet"]
+            TW10["_tool_suggest_search_terms_from_orcid"]
         end
 
         RH["_run_rag_tool<br/>(logging + result capture + formatting)"]
@@ -387,13 +380,14 @@ graph TD
             S7["summarize_interesting_papers"]
             S8["recommend_related_papers"]
             S9["suggest_authors_to_meet"]
+            S10["suggest_search_terms_from_orcid"]
         end
 
         RES["_get_mcp_resources()<br/>_get_clustering_resources()"]
 
     end
 
-        TW1 & TW2 & TW3 & TW4 & TW5 & TW6 & TW7 & TW8 & TW9 --> RH
+        TW1 & TW2 & TW3 & TW4 & TW5 & TW6 & TW7 & TW8 & TW9 & TW10 --> RH
 
     TW1 --> S1
     TW2 --> S2
@@ -404,10 +398,11 @@ graph TD
     TW7 --> S7
     TW8 --> S8
     TW9 --> S9
+    TW10 --> S10
 
     EXEC --> NORM
     NORM --> RULES
-    EXEC --> S1 & S2 & S3 & S4 & S5 & S6 & S7 & S8 & S9
+    EXEC --> S1 & S2 & S3 & S4 & S5 & S6 & S7 & S8 & S9 & S10
     EXEC --> FORMAT
 
     S1 --> WB

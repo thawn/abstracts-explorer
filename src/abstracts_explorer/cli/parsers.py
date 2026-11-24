@@ -139,7 +139,7 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         "--request-delay",
         type=float,
         default=None,
-        help="Delay before each HTTP request for plugins that support it (AGU).",
+        help="Delay before each HTTP request for plugins that support it (AGU, NeurIPS, ICML, ICLR).",
     )
     download_parser.add_argument(
         "--no-resume",
@@ -154,6 +154,30 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         help=(
             "Path to a pre-downloaded conference JSON file. "
             "Required for the 'chi' plugin (download the file from programs.sigchi.org)."
+        ),
+    )
+    download_parser.add_argument(
+        "--openreview-email",
+        type=str,
+        default=None,
+        dest="openreview_email",
+        help="OpenReview account email for the ICLR downloader (env: OPENREVIEW_EMAIL).",
+    )
+    download_parser.add_argument(
+        "--openreview-password",
+        type=str,
+        default=None,
+        dest="openreview_password",
+        help="OpenReview account password for the ICLR downloader (env: OPENREVIEW_PASSWORD).",
+    )
+    download_parser.add_argument(
+        "--openreview-token",
+        type=str,
+        default=None,
+        dest="openreview_token",
+        help=(
+            "Existing OpenReview bearer token for the ICLR downloader "
+            "(env: OPENREVIEW_TOKEN). Takes precedence over email/password."
         ),
     )
 
@@ -377,8 +401,8 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         description="""
     Clustering-related commands.
 
-    Uses agglomerative clustering (ward linkage, distance threshold 150)
-    with t-SNE dimensionality reduction.
+    Uses BERTopic with Agglomerative clustering (ward linkage, distance
+    threshold 0.5) on 5-D UMAP embeddings and 2-D UMAP visualization.
 
     Sub-commands:
       run            Cluster embeddings and export results
@@ -408,7 +432,7 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         "run",
         help="Cluster embeddings for visualization",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="Perform agglomerative clustering with t-SNE dimensionality reduction on paper embeddings.",
+        description="Perform BERTopic clustering with UMAP dimensionality reduction on paper embeddings.",
     )
     cluster_parser.add_argument(
         "--collection",
@@ -427,6 +451,18 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         type=int,
         default=None,
         help="Maximum number of embeddings to process (optional)",
+    )
+    cluster_parser.add_argument(
+        "--no-llm-labels",
+        action="store_true",
+        default=False,
+        help="Use c-TF-IDF keywords instead of LLM-generated labels",
+    )
+    cluster_parser.add_argument(
+        "--requests-per-minute",
+        type=int,
+        default=config.requests_per_minute,
+        help=f"Maximum number of API requests per minute, 0 to disable rate limiting (default: {config.requests_per_minute})",
     )
 
     # clustering clear-cache
@@ -461,10 +497,10 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         help="Pre-generate clustering results for the web UI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="""
-    Pre-generate clustering results using agglomerative clustering
-    (ward linkage, distance threshold 150) with t-SNE dimensionality
-    reduction.  Results are persisted to the database cache so that
-    the web UI serves them instantly.
+    Pre-generate clustering results using BERTopic with Agglomerative
+    clustering (ward linkage, distance threshold 0.5) on 5-D UMAP
+    embeddings.  Results are persisted to the database cache so that the
+    web UI serves them instantly.
 
     Without any arguments, generates clustering for every conference in
     the database combined with each individual year.
@@ -487,6 +523,9 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
 
       # Force recompute
       abstracts-explorer clustering pre-generate --force
+
+      # Use c-TF-IDF keywords instead of LLM labels
+      abstracts-explorer clustering pre-generate --no-llm-labels
         """,
     )
     pre_gen_parser.add_argument(
@@ -501,6 +540,12 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         action="store_true",
         default=False,
         help="Force recompute even if cache already exists",
+    )
+    pre_gen_parser.add_argument(
+        "--no-llm-labels",
+        action="store_true",
+        default=False,
+        help="Use c-TF-IDF keywords instead of LLM-generated labels",
     )
     pre_gen_parser.add_argument(
         "--requests-per-minute",
@@ -1083,6 +1128,46 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         help="Skip the confirmation prompt",
     )
 
+    # Check-consistency command
+    consistency_parser = subparsers.add_parser(
+        "check-consistency",
+        help="Check that papers, embeddings, and clustering data are consistent",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="""
+    Compare the paper database, ChromaDB embeddings, and clustering cache.
+
+    The check reports missing, orphaned, or stale embeddings, embedding-model
+    mismatches, missing or duplicated clustering cache entries, cache payloads
+    that do not match the paper database, and unused ChromaDB collections.
+
+    Use --fix to delete duplicate clustering cache entries and cache entries
+    for scopes that no longer have papers.  Other findings are reported with a
+    suggested command; embeddings and missing caches are never modified
+    automatically.
+
+    Examples:
+      # Check all data
+      abstracts-explorer check-consistency
+
+      # Check one conference/year and print JSON
+      abstracts-explorer check-consistency --conference NeurIPS --year 2025 --json
+
+      # Remove duplicate/stale clustering cache rows
+      abstracts-explorer check-consistency --fix
+        """,
+    )
+    add_conference_year_args(consistency_parser)
+    consistency_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the report as JSON instead of human-readable text.",
+    )
+    consistency_parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="Delete duplicate clustering cache rows and cache rows for scopes without papers.",
+    )
+
     # Delete-data command
     delete_data_parser = subparsers.add_parser(
         "delete-data",
@@ -1162,6 +1247,9 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
       # Recreate embeddings after switching embedding models, without prompting
       abstracts-explorer pre-process --ignore-embedding-model-mismatch --model my-new-model
 
+      # Use c-TF-IDF keywords instead of LLM labels
+      abstracts-explorer pre-process --no-llm-labels
+
       # Do not overlap embeddings and clustering
       abstracts-explorer pre-process --no-overlap-post-process
         """,
@@ -1171,6 +1259,11 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         "--force",
         action="store_true",
         help="Force re-download and reset embeddings/clustering even if they already exist",
+    )
+    pre_process_parser.add_argument(
+        "--no-llm-labels",
+        action="store_true",
+        help="Use c-TF-IDF keywords instead of LLM-generated labels",
     )
     pre_process_parser.add_argument(
         "--no-overlap-post-process",

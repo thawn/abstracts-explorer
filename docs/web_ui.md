@@ -58,6 +58,11 @@ Retrieval-Augmented Generation (RAG).
 4. Ask follow-up questions — the assistant remembers the conversation.
 5. Click **Reset** to start a fresh conversation.
 
+Citation links such as `[Paper-3]` keep the same number for the whole
+conversation, even when the assistant runs several searches in the background.
+The Relevant Papers panel accumulates papers from all searches until you reset
+the conversation.
+
 Chat histories are kept in server memory, are not persisted, and expire after
 24 hours of inactivity by default (`CHAT_HISTORY_TTL`).
 
@@ -75,6 +80,7 @@ tools when you ask certain questions — you do not need to do anything special:
 | `get_paper_details` | Returns full metadata for a specific paper | *"Who are the authors of 'PICProp'?"* |
 | `get_conference_topics` | Lists the main research clusters at a conference | *"What are the main topics at ICLR 2025?"* |
 | `get_cluster_visualization` | Describes the 2-D cluster layout | *"Describe the cluster layout for NeurIPS 2024"* |
+| `suggest_search_terms_from_orcid` | Suggests search terms from a public ORCID record | *"Find papers that are interesting to me based on my ORCID record 0000-0002-2315-9247."* |
 
 See [Chat Example](chat_example.md) for a full worked example conversation.
 
@@ -129,6 +135,9 @@ automatically identified topic cluster.
 
 - **Hover** over a dot to see the paper title.
 - **Click** a dot to view full paper details below the plot.
+- **Hierarchy level slider** — switch between BERTopic hierarchy levels. Every
+  paper dot keeps its hover card; only the cluster colors and star centers
+  change.
 - **Click** a cluster name in the legend to highlight that cluster.
 - **Export Data** — download the raw clustering JSON for further analysis.
 

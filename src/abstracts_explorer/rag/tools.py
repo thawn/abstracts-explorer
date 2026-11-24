@@ -17,6 +17,7 @@ from abstracts_explorer.mcp import (
     recommend_related_papers as mcp_recommend_related_papers,
     search_papers as mcp_search_papers,
     suggest_authors_to_meet as mcp_suggest_authors_to_meet,
+    suggest_search_terms_from_orcid as mcp_suggest_search_terms_from_orcid,
     summarize_interesting_papers as mcp_summarize_interesting_papers,
 )
 from abstracts_explorer.mcp.errors import ToolError
@@ -62,7 +63,7 @@ def _run_rag_tool(
             parsed = json.loads(cached)
             is_error = isinstance(parsed, dict) and "error" in parsed
         except (TypeError, ValueError):
-            pass
+            parsed = None
         if is_error:
             note = (
                 "\n\nNote: this identical tool call already ran and returned an error. "
@@ -70,7 +71,8 @@ def _run_rag_tool(
             )
         else:
             note = "\n\nNote: identical tool call reused from this query's cache."
-        return format_tool_result_for_llm(tool_name, cached) + note
+        paper_numbers = ctx.deps.citations.register(tool_name, parsed)
+        return format_tool_result_for_llm(tool_name, cached, paper_numbers) + note
 
     logger.info("Tool call: %s(keys=%s)", tool_name, sorted(kwargs))
     try:
@@ -81,7 +83,12 @@ def _run_rag_tool(
     with ctx.deps.tool_cache_lock:
         ctx.deps.tool_cache[cache_key] = raw
     ctx.deps.tool_results.append({"name": tool_name, "raw_result": raw})
-    return format_tool_result_for_llm(tool_name, raw)
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        parsed = None
+    paper_numbers = ctx.deps.citations.register(tool_name, parsed)
+    return format_tool_result_for_llm(tool_name, raw, paper_numbers)
 
 
 def _tool_search_papers(
@@ -488,3 +495,39 @@ def _tool_suggest_authors_to_meet(
         kwargs["years"] = resolved_years
 
     return _run_rag_tool(ctx, "suggest_authors_to_meet", mcp_suggest_authors_to_meet, kwargs)
+
+
+def _tool_suggest_search_terms_from_orcid(
+    ctx: RunContext[RAGToolContext],
+    orcid: str,
+    max_terms: int = 15,
+    min_year: Optional[int] = None,
+) -> str:
+    """Suggest paper search terms based on the user's public ORCID record.
+
+    Use this tool when the user provides an ORCID iD or profile URL and asks
+    what to search for at the conference. If the user has not provided an ORCID
+    iD, ask them for it; do not guess. The tool reads public ORCID works and
+    keywords and returns concise search terms.
+
+    Parameters
+    ----------
+    ctx : RunContext[RAGToolContext]
+        Agent context with dependencies.
+    orcid : str
+        ORCID iD or ORCID profile URL (e.g. "0000-0002-2315-9247").
+    max_terms : int, optional
+        Maximum number of search terms to return (default: 15).
+    min_year : int, optional
+        Only consider works published in or after this year.
+    """
+    kwargs: Dict[str, Any] = {"orcid": orcid, "max_terms": max_terms}
+    if min_year is not None:
+        kwargs["min_year"] = min_year
+
+    return _run_rag_tool(
+        ctx,
+        "suggest_search_terms_from_orcid",
+        mcp_suggest_search_terms_from_orcid,
+        kwargs,
+    )

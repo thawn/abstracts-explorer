@@ -8,8 +8,9 @@
 
 [Unit]
 Description=Abstracts Explorer application
-After=abstracts-postgres.service abstracts-chromadb.service abstracts-data-volume.service
+After=abstracts-postgres.service abstracts-chromadb.service abstracts-data-volume.service abstracts-ollaya.service
 Requires=abstracts-postgres.service abstracts-chromadb.service abstracts-data-volume.service
+Wants=abstracts-ollaya.service
 
 [Container]
 Image=ghcr.io/thawn/abstracts-explorer:${ABSTRACTS_EXPLORER_TAG}
@@ -28,6 +29,10 @@ Secret=postgres-password,type=env,target=ABSTRACTS_DB_PASSWORD
 
 # LLM backend API token injected via Podman secret (never stored in plain text).
 Secret=llm-backend-auth-token,type=env,target=LLM_BACKEND_AUTH_TOKEN
+
+# Ollaya guard API token injected via Podman secret (same secret as the
+# abstracts-ollaya container, exposed to the app as GUARD_API_KEY).
+Secret=ollaya-api-key,type=env,target=GUARD_API_KEY
 
 # Optional: uncomment after creating the secret with
 #   printf '%s' 'YOUR_GITHUB_TOKEN' | podman secret create github-token -

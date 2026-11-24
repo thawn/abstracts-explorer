@@ -29,14 +29,19 @@ nano .env
 
 - **CHAT_MODEL**: The LLM model to use for RAG chat (default: `diffbot-small-xl-2508`)
 - **CHAT_TEMPERATURE**: Temperature for LLM responses, 0.0-2.0 (default: `0.7`)
-- **CHAT_MAX_TOKENS**: Maximum tokens in LLM responses (default: `2000`)
+- **CHAT_MAX_TOKENS**: Maximum tokens in LLM responses (default: `4000`)
 - **CLUSTER_LABEL_MODEL**: Chat model used to auto-generate cluster labels during clustering (default: `alias-fast`)
+- **CLUSTER_LABEL_MAX_WORKERS**: Maximum number of cluster-label LLM requests submitted in parallel per labeling batch (default: `8`). Set to `1` to label sequentially. Throughput remains bounded by `REQUESTS_PER_MINUTE`, so parallelism only hides per-request latency.
+- **LLM_MAX_ATTEMPTS**: Total HTTP attempts for any LLM request, including cluster labels, embeddings, evaluation, ORCID, and RAG chat (default: `6`). Set to `1` to disable retries. This maps to the OpenAI SDK's `max_retries = LLM_MAX_ATTEMPTS - 1`; the SDK owns retryable status classification, `Retry-After` handling, and exponential backoff.
+- **LLM_RETRY_BASE_DELAY**: Base delay in seconds for retrying cluster-label responses that contain no usable content (default: `1.0`). HTTP-level backoff is handled by the OpenAI SDK.
+- **LLM_RETRY_MAX_DELAY**: Maximum delay in seconds for empty-content cluster-label retries (default: `10.0`)
+- **LLM_RATE_LIMIT_DELAY**: Cooldown applied after an HTTP `429` when the backend does not send a usable `Retry-After` header (default: `60.0`). The cooldown is shared process-wide so parallel sync and async LLM requests pause together.
 
 ### Embedding Model Settings
 
 - **EMBEDDING_MODEL**: The embedding model to use (default: `text-embedding-qwen3-embedding-4b`)
 - **EMBEDDING_MAX_INPUT_TOKENS**: Maximum number of tokens sent to the embedding model in one request (default: `8192`). Longer titles/abstracts are truncated before the API call; the full text is still stored in ChromaDB. Set to `0` to disable proactive truncation.
-- **REQUESTS_PER_MINUTE**: Maximum embedding API requests per minute, `0` disables rate limiting (default: `60`). Can be overridden per command with `--requests-per-minute`.
+- **REQUESTS_PER_MINUTE**: Maximum OpenAI-compatible API requests per minute. This covers embedding and LLM (chat-completion) calls because both share the same rate-limited HTTP client and global token bucket. Requests are paced smoothly with a one-request burst so an initial burst cannot exhaust a provider’s per-minute quota. `0` disables rate limiting (default: `60`). Can be overridden per command with `--requests-per-minute`.
 - **WEB_RATE_LIMIT_PER_MINUTE**: Maximum expensive web API requests per client per minute for chat, semantic search, cluster search, and topic evolution; `0` disables client rate limiting (default: `30`). The limiter is per-process; multi-worker deployments need a shared store for global enforcement.
 
 ### LLM Backend Configuration
@@ -124,6 +129,25 @@ The configuration automatically detects the type based on the format:
 - URLs starting with `http://` or `https://` are treated as remote ChromaDB services
 - Other values are treated as local file paths (relative to DATA_DIR unless absolute)
 
+- **MIN_FREE_DISK_MB**: Minimum free disk space in MiB required before writing
+  embeddings to a local ChromaDB store (default: `4096`). If the filesystem has
+  less space available, `create-embeddings` fails fast instead of risking a
+  corrupted vector index. Set to `0` to disable the check. Ignored for HTTP
+  `EMBEDDING_DB` values.
+
+!!! warning "Local ChromaDB is single-process"
+    A local ChromaDB (`EMBEDDING_DB` file path) is locked for the lifetime of
+    the process using it. Do **not** run multiple `create-embeddings`,
+    clustering, web UI, or MCP processes against the same local store
+    simultaneously: each process persists its own copy of the HNSW index, and
+    concurrent writers can corrupt the store. A second process now fails fast
+    with an "Another process is using the local ChromaDB" error. For concurrent
+    access, use an HTTP ChromaDB server (`EMBEDDING_DB=http://...`).
+
+    If a local store was corrupted by concurrent writers, stop all processes,
+    move the store aside, and rebuild it with `create-embeddings` (the paper
+    database is unaffected).
+
 ### RAG Settings
 
 - **COLLECTION_NAME**: ChromaDB collection name (default: `papers`)
@@ -134,6 +158,49 @@ The configuration automatically detects the type based on the format:
 - **CHAT_HISTORY_TTL**: Idle time in seconds after which a web chat session's in-memory history is expired (default: `86400`, i.e. 24 hours). Set to `0` to disable expiry. An hourly background sweep removes idle sessions, and stale history is also discarded on next access.
 - **ENABLE_QUERY_REWRITING**: Rewrite follow-up questions into self-contained search queries before retrieval (default: `true`)
 - **QUERY_SIMILARITY_THRESHOLD**: Maximum embedding distance for a rewritten-query answer to be accepted as a hit (default: `0.7`)
+
+### Chat Input Guard (Ollaya)
+
+The optional chat input guard classifies each user message with a local
+[Ollaya](https://ollaya.dev/) decision model before the RAG agent runs. It
+refuses off-topic, coding, general-purpose LLM, and jailbreak requests with a
+polite fixed message. The guard is **fail-open**: if Ollaya is disabled,
+unreachable, slow, or returns an unexpected response, chat proceeds normally.
+
+- **GUARD_ENABLED**: Enable the guard (default: `false`). Container deployments set `true`.
+- **GUARD_BACKEND_URL**: Ollaya base URL (default: `http://127.0.0.1:11435`). The bundled containers use `http://abstracts-ollaya:11435`.
+- **GUARD_API_KEY**: Bearer token for Ollaya (default: empty). Inject it via the `ollaya-api-key` Podman secret in container deployments.
+- **GUARD_MODEL**: Ollaya model name (default: `laya:multilingual`).
+- **GUARD_TIMEOUT**: Per-check HTTP timeout in seconds (default: `2.0`).
+- **GUARD_TOPIC_THRESHOLD**: Minimum probability for the off-topic/abuse scope choice to block a message (default: `0.8`).
+- **GUARD_JAILBREAK_THRESHOLD**: Minimum probability for the jailbreak yes/no question to block a message (default: `0.8`).
+- **GUARD_MAX_CHARS**: Maximum number of characters sent to Ollaya (default: `1500`).
+- **GUARD_REFUSAL_MESSAGE**: Optional custom refusal text. Empty uses the built-in message.
+
+For a host-run development server (`uv run abstracts-explorer ...`), publish
+Ollaya on loopback and use the matching `GUARD_API_KEY`:
+
+```bash
+podman volume create abstracts-ollaya
+
+podman run --rm \
+  -v abstracts-ollaya:/home/ollaya/.ollaya \
+  ghcr.io/ollaya-dev/ollaya pull laya:multilingual
+
+podman run -d --name abstracts-ollaya \
+  -p 127.0.0.1:11435:11435 \
+  -v abstracts-ollaya:/home/ollaya/.ollaya \
+  -e OLLAYA_PRELOAD=laya:multilingual \
+  -e OLLAYA_KEEP_ALIVE=-1 \
+  -e OLLAYA_THREADS=4 \
+  -e OLLAYA_API_KEY="$GUARD_API_KEY" \
+  ghcr.io/ollaya-dev/ollaya
+```
+
+For the containerized stack, Ollaya is reached over the internal network at
+`http://abstracts-ollaya:11435` and no host port is needed. See
+[Docker and Podman Setup](docker.md#optional-chat-input-guard-ollaya) and the
+[local development walkthrough](contributing.md#5-optional-local-ollaya-guard).
 
 ### Web UI Defaults
 
@@ -179,6 +246,32 @@ REGISTRY_REPOSITORY=ghcr.io/thawn/abstracts-data
 ```
 
 See [Registry documentation](registry.md) for complete usage instructions.
+
+### OpenReview Authentication (ICLR)
+
+The ICLR downloader uses OpenReview for years 2017–2019. The OpenReview API
+can be protected by a bot challenge; logging in with an account may avoid it.
+When an unauthenticated request is rejected and no credentials are configured,
+the downloader prompts for an OpenReview email and password in an interactive
+terminal. Leave the email empty to skip the prompt and use the Semantic Scholar
+fallback instead. In non-interactive environments, configure the variables
+below or pass the matching `--openreview-*` command-line options.
+
+- **OPENREVIEW_EMAIL**: OpenReview account email.
+- **OPENREVIEW_PASSWORD**: OpenReview account password.
+- **OPENREVIEW_TOKEN**: Existing OpenReview bearer token. Takes precedence over
+  email/password.
+
+The same values can be passed per command with `--openreview-email`,
+`--openreview-password`, and `--openreview-token`. Prefer environment variables
+or `.env` for the password so it does not appear in shell history.
+
+```bash
+# .env file — OpenReview authentication
+OPENREVIEW_EMAIL=you@example.org
+OPENREVIEW_PASSWORD=your_password
+# OPENREVIEW_TOKEN=alternative_existing_token
+```
 
 ## Example Configurations
 

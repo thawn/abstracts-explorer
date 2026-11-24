@@ -14,6 +14,13 @@ html {
     transition: none !important;
 }
 
+/* The global `transition: all` rule animates SVG marker transforms, making
+   new markers slide in from the plot origin. Keep Plotly rendering instant. */
+.js-plotly-plot,
+.js-plotly-plot * {
+    transition: none !important;
+}
+
 /* Paper card transitions */
 .paper-card {
     transition: transform 0.2s ease, box-shadow 0.2s ease;

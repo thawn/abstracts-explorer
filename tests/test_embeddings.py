@@ -3,10 +3,13 @@ Tests for the embeddings module.
 """
 
 import logging
+import threading
 import time
+from pathlib import Path
 
 import httpx2
 import pytest
+from filelock import FileLock
 from unittest.mock import Mock
 
 from abstracts_explorer.embeddings import (
@@ -1442,7 +1445,7 @@ class TestRateLimiting:
         """Test that a RateLimitedTransport http_client is used when requests_per_minute > 0."""
         from tests.conftest import get_env_test_path
         from abstracts_explorer.config import get_config
-        from abstracts_explorer.rate_limiter import RateLimitedTransport
+        from abstracts_explorer.rate_limiter import CooldownAwareTransport, RateLimitedTransport
         from abstracts_explorer.rate_limiter import (
             TokenBucketRateLimiter,
             set_global_rate_limiter,
@@ -1451,16 +1454,17 @@ class TestRateLimiting:
         set_global_rate_limiter(None)
 
         monkeypatch.setenv("EMBEDDING_DB", str(tmp_path / "chroma"))
-        get_config(reload=True, env_path=get_env_test_path())
+        config = get_config(reload=True, env_path=get_env_test_path())
 
         em = EmbeddingsManager(requests_per_minute=30)
         # Trigger lazy initialization of the OpenAI client
         client = em.openai_client
-        # The underlying httpx2 client should use our rate-limited transport
-        assert isinstance(client._client._transport, RateLimitedTransport)
         transport = client._client._transport
-        assert isinstance(transport._rate_limiter, TokenBucketRateLimiter)
-        assert transport._rate_limiter.requests_per_minute == 30
+        assert isinstance(transport, CooldownAwareTransport)
+        assert isinstance(transport._transport, RateLimitedTransport)
+        assert isinstance(transport._transport._rate_limiter, TokenBucketRateLimiter)
+        assert transport._transport._rate_limiter.requests_per_minute == 30
+        assert client.max_retries == config.llm_max_attempts - 1
         assert client._client.timeout.connect == 10
         assert client._client.timeout.read == 60
 
@@ -1468,16 +1472,17 @@ class TestRateLimiting:
         """Test that no RateLimitedTransport is used when requests_per_minute=0."""
         from tests.conftest import get_env_test_path
         from abstracts_explorer.config import get_config
-        from abstracts_explorer.rate_limiter import RateLimitedTransport
+        from abstracts_explorer.rate_limiter import CooldownAwareTransport, RateLimitedTransport
 
         monkeypatch.setenv("EMBEDDING_DB", str(tmp_path / "chroma"))
         get_config(reload=True, env_path=get_env_test_path())
 
         em = EmbeddingsManager(requests_per_minute=0)
         client = em.openai_client
-        # When rate limiting is disabled, the transport is not rate limited,
-        # but the client still uses the explicit structured timeout.
-        assert not isinstance(getattr(getattr(client, "_client", None), "_transport", None), RateLimitedTransport)
+        # The cooldown wrapper is always present, but rate limiting is disabled.
+        transport = getattr(getattr(client, "_client", None), "_transport", None)
+        assert isinstance(transport, CooldownAwareTransport)
+        assert not isinstance(transport._transport, RateLimitedTransport)
         assert client._client.timeout.connect == 10
         assert client._client.timeout.read == 60
 
@@ -1568,6 +1573,140 @@ class TestQueryEmbedding:
 
         assert query.embedding == [0.3]
         assert manager.generate_embedding.call_count == 2
+
+
+class TestConcurrentClientCreation:
+    """Tests for concurrent ChromaDB client creation."""
+
+    def test_client_creation_is_serialized_across_managers(self, embeddings_manager, monkeypatch):
+        """Concurrent managers must not create ChromaDB clients at the same time."""
+        active = 0
+        max_active = 0
+        counter_lock = threading.Lock()
+        barrier = threading.Barrier(2)
+
+        def fake_persistent_client(*args, **kwargs):
+            nonlocal active, max_active
+            with counter_lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.05)
+            with counter_lock:
+                active -= 1
+            return Mock()
+
+        monkeypatch.setattr(
+            "abstracts_explorer.embeddings.chroma.chromadb.PersistentClient",
+            fake_persistent_client,
+        )
+
+        managers = [
+            EmbeddingsManager(collection_name="test_collection"),
+            EmbeddingsManager(collection_name="test_collection"),
+        ]
+        errors = []
+
+        def connect(manager):
+            barrier.wait(timeout=5)
+            try:
+                _ = manager.client
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=connect, args=(manager,)) for manager in managers]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+
+        assert all(not thread.is_alive() for thread in threads)
+        assert errors == []
+        assert max_active == 1
+
+
+class TestLocalChromaLock:
+    """Tests for the exclusive process-lifetime lock on local ChromaDB."""
+
+    @staticmethod
+    def _foreign_lock(manager) -> FileLock:
+        lock_path = Path(manager.embedding_db) / ".chroma.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock = FileLock(str(lock_path), thread_local=False)
+        lock.acquire(timeout=0)
+        return lock
+
+    def test_foreign_holder_is_rejected(self, embeddings_manager):
+        """A local client fails fast when another process holds the lock."""
+        foreign = self._foreign_lock(embeddings_manager)
+        try:
+            with pytest.raises(EmbeddingsError, match="(?i)another process"):
+                _ = embeddings_manager.client
+        finally:
+            foreign.release()
+
+    def test_lock_is_released_on_close(self, embeddings_manager):
+        """Closing the manager releases the lock so another process can take it."""
+        _ = embeddings_manager.client
+        embeddings_manager.close()
+
+        foreign = self._foreign_lock(embeddings_manager)
+        foreign.release()
+
+    def test_same_process_managers_share_the_lock(self, tmp_path, monkeypatch):
+        """Multiple managers in one process may connect to the same local path."""
+        from abstracts_explorer.config import get_config
+
+        chroma_path = tmp_path / "shared_chroma"
+        monkeypatch.setenv("EMBEDDING_DB", str(chroma_path))
+        get_config(reload=True)
+
+        first = EmbeddingsManager()
+        second = EmbeddingsManager()
+        try:
+            assert first.client is not None
+            assert second.client is not None
+        finally:
+            first.close()
+            second.close()
+
+    def test_http_mode_does_not_take_the_local_lock(self, monkeypatch):
+        """HTTP backends rely on the server for concurrency and need no lock."""
+        import abstracts_explorer.embeddings.chroma as chroma_module
+
+        monkeypatch.setattr(chroma_module.chromadb, "HttpClient", Mock(return_value=Mock()))
+
+        manager = EmbeddingsManager.__new__(EmbeddingsManager)
+        manager.embedding_db = "http://localhost:8000"
+        manager._client = None
+        manager._collection = None
+        manager._chroma_lock_path = None
+        manager._init_lock = threading.RLock()
+
+        manager._connect()
+
+        assert manager._client is not None
+        assert manager._chroma_lock_path is None
+
+
+class TestDiskSpacePreflight:
+    """Tests for the disk-space check before embedding writes."""
+
+    def test_embed_from_database_rejects_low_disk(
+        self, embeddings_manager, test_database, mock_lm_studio, monkeypatch
+    ):
+        """Embedding writes fail with a clear error instead of risking corruption."""
+        from abstracts_explorer.utils.disk_utils import InsufficientDiskSpaceError
+
+        def _raise(*args, **kwargs):
+            raise InsufficientDiskSpaceError("disk full")
+
+        monkeypatch.setattr("abstracts_explorer.embeddings.ingest.ensure_free_space", _raise)
+
+        with pytest.raises(EmbeddingsError, match="disk full"):
+            embeddings_manager.embed_from_database()
+
+        assert embeddings_manager.get_collection_stats()["count"] == 0
+        embeddings_manager.close()
 
 
 class TestDistanceHelpers:
@@ -1757,3 +1896,44 @@ class TestEmbeddingInputTruncation:
             em.generate_embedding("Some text")
 
         assert em.openai_client.embeddings.create.call_count == 1
+
+
+class TestCentralLLMRetries:
+    """The SDK owns retries; attempts come from config and the cooldown wraps it."""
+
+    def test_sdk_retries_derived_from_max_attempts(self, embeddings_manager, monkeypatch):
+        """The OpenAI client gets ``LLM_MAX_ATTEMPTS - 1`` retries."""
+        created = {}
+
+        def fake_openai(**kwargs):
+            created.update(kwargs)
+            return Mock()
+
+        monkeypatch.setattr("abstracts_explorer.embeddings.models.OpenAI", fake_openai)
+        monkeypatch.setattr("abstracts_explorer.embeddings.models.httpx2.Client", Mock())
+        embeddings_manager.requests_per_minute = 0
+        embeddings_manager.llm_max_attempts = 6
+
+        embeddings_manager._create_openai_client()
+
+        assert created["max_retries"] == 5
+
+    def test_cooldown_transport_always_wraps_client(self, embeddings_manager, monkeypatch):
+        """Every client has the shared-cooldown transport, even without rate limiting."""
+        from abstracts_explorer.rate_limiter import CooldownAwareTransport, RateLimitedTransport
+
+        captured = {}
+
+        def fake_client(**kwargs):
+            captured.update(kwargs)
+            return Mock()
+
+        monkeypatch.setattr("abstracts_explorer.embeddings.models.OpenAI", Mock())
+        monkeypatch.setattr("abstracts_explorer.embeddings.models.httpx2.Client", fake_client)
+        embeddings_manager.requests_per_minute = 0
+
+        embeddings_manager._create_openai_client()
+
+        transport = captured["transport"]
+        assert isinstance(transport, CooldownAwareTransport)
+        assert not isinstance(transport._transport, RateLimitedTransport)

@@ -3,6 +3,7 @@ ChromaDB connection and collection management.
 """
 
 import logging
+import threading
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -10,9 +11,16 @@ from urllib.parse import urlparse
 import chromadb
 from chromadb.config import Settings
 
-from abstracts_explorer.embeddings.errors import translate_errors
+from abstracts_explorer.embeddings.errors import EmbeddingsError, translate_errors
+from abstracts_explorer.embeddings.locking import (
+    LocalChromaInUseError,
+    acquire_local_chroma_lock,
+    release_local_chroma_lock,
+)
 
 logger = logging.getLogger(__name__)
+
+_CLIENT_CREATION_LOCK = threading.Lock()
 
 
 class ChromaMixin:
@@ -20,6 +28,7 @@ class ChromaMixin:
 
     _client: Optional[Any]
     _collection: Optional[Any]
+    _chroma_lock_path: Optional[str]
     _openai_client: Any
     _init_lock: Any
     embedding_db: str
@@ -82,22 +91,33 @@ class ChromaMixin:
         """Connect to ChromaDB via HTTP for URLs or persistent storage for local paths."""
         with translate_errors("Failed to connect to ChromaDB"):
             parsed = urlparse(self.embedding_db)
-            if parsed.scheme in ("http", "https"):
-                self._client = chromadb.HttpClient(
-                    host=parsed.hostname or "localhost",
-                    port=parsed.port or 8000,
-                    ssl=parsed.scheme == "https",
-                    settings=Settings(anonymized_telemetry=False),
-                )
-                logger.debug("Connected to ChromaDB HTTP service at: %s", self.embedding_db)
-            else:
-                chroma_path = Path(self.embedding_db)
-                chroma_path.mkdir(parents=True, exist_ok=True)
-                self._client = chromadb.PersistentClient(
-                    path=str(chroma_path),
-                    settings=Settings(anonymized_telemetry=False),
-                )
-                logger.debug("Connected to ChromaDB at: %s", chroma_path)
+            with _CLIENT_CREATION_LOCK:
+                if parsed.scheme in ("http", "https"):
+                    self._client = chromadb.HttpClient(
+                        host=parsed.hostname or "localhost",
+                        port=parsed.port or 8000,
+                        ssl=parsed.scheme == "https",
+                        settings=Settings(anonymized_telemetry=False),
+                    )
+                    logger.debug("Connected to ChromaDB HTTP service at: %s", self.embedding_db)
+                else:
+                    chroma_path = Path(self.embedding_db)
+                    chroma_path.mkdir(parents=True, exist_ok=True)
+                    try:
+                        acquire_local_chroma_lock(str(chroma_path))
+                    except LocalChromaInUseError as exc:
+                        raise EmbeddingsError(str(exc)) from exc
+                    self._chroma_lock_path = str(chroma_path)
+                    try:
+                        self._client = chromadb.PersistentClient(
+                            path=str(chroma_path),
+                            settings=Settings(anonymized_telemetry=False),
+                        )
+                    except Exception:
+                        release_local_chroma_lock(self._chroma_lock_path)
+                        self._chroma_lock_path = None
+                        raise
+                    logger.debug("Connected to ChromaDB at: %s", chroma_path)
 
     def create_collection(self, reset: bool = False) -> None:
         """
@@ -148,6 +168,10 @@ class ChromaMixin:
         if self._client is not None:
             self._client = None
             self._collection = None
+            lock_path = getattr(self, "_chroma_lock_path", None)
+            if lock_path is not None:
+                release_local_chroma_lock(lock_path)
+                self._chroma_lock_path = None
             logger.debug("ChromaDB connection closed")
 
     def get_collection_stats(self) -> dict[str, Any]:

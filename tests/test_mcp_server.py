@@ -327,16 +327,22 @@ class TestAnalyzeClusterTopics:
             {"title": "Paper 4", "keywords": ["nlp", "gpt"], "session": "NLP", "year": 2024},
         ]
         cm.cluster_label_names = {0: "Machine Learning", 1: "Natural Language Processing"}
+        cm.cluster_descriptions = {
+            0: "Papers apply neural networks to learning problems.",
+            1: "Papers process language with transformer models.",
+        }
         cm.cluster_keywords = {0: ["neural", "deep", "learning"], 1: ["nlp", "bert", "gpt"]}
 
         db = Mock(spec=DatabaseManager)
 
         result_0 = analyze_cluster_topics(cm, db, cluster_id=0)
-        assert result_0["topic"] == "Machine Learning"
+        assert result_0["topic"] == "Papers apply neural networks to learning problems."
+        assert result_0["label"] == "Machine Learning"
         assert result_0["keywords"] == ["neural", "deep", "learning"]
 
         result_1 = analyze_cluster_topics(cm, db, cluster_id=1)
-        assert result_1["topic"] == "Natural Language Processing"
+        assert result_1["topic"] == "Papers process language with transformer models."
+        assert result_1["label"] == "Natural Language Processing"
         assert result_1["keywords"] == ["nlp", "bert", "gpt"]
 
     def test_analyze_empty_cluster(self):
@@ -403,33 +409,23 @@ class TestAnalyzeClusterTopics:
 class TestMCPTools:
     """Tests for MCP tool functions."""
 
-    @patch("abstracts_explorer.mcp.resources.load_clustering_data")
-    @patch("abstracts_explorer.mcp.tools.topics.analyze_cluster_topics")
+    @patch("abstracts_explorer.mcp.resources._get_shared_database")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
-    def test_get_conference_topics(self, mock_config, mock_analyze, mock_load):
-        """Test get_conference_topics tool with cached results."""
-        # Setup config mock
+    def test_get_conference_topics(self, mock_config, mock_get_db):
+        """Test get_conference_topics tool with cached hierarchy results."""
         mock_config_obj = Mock()
         mock_config_obj.collection_name = "papers"
         mock_config_obj.embedding_model = "test-model"
         mock_config.return_value = mock_config_obj
 
-        # Setup mocks
-        mock_cm = Mock()
-        mock_cm.embeddings_manager = Mock()
-        mock_cm.paper_ids = ["p1", "p2", "p3", "p4"]
         mock_db = Mock()
-        mock_load.return_value = (mock_cm, mock_db)
-
-        mock_cm.load_embeddings.return_value = 100
-
-        # db.get_clustering_cache returns cached results (includes cluster names and keywords)
+        mock_get_db.return_value = mock_db
         mock_db.get_clustering_cache.return_value = {
             "points": [
-                {"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0},
-                {"id": "p2", "cluster": 0, "x": 1.0, "y": 1.0},
-                {"id": "p3", "cluster": 1, "x": 2.0, "y": 2.0},
-                {"id": "p4", "cluster": 1, "x": 3.0, "y": 3.0},
+                {"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0, "title": "Paper 1"},
+                {"id": "p2", "cluster": 0, "x": 1.0, "y": 1.0, "title": "Paper 2"},
+                {"id": "p3", "cluster": 1, "x": 2.0, "y": 2.0, "title": "Paper 3"},
+                {"id": "p4", "cluster": 1, "x": 3.0, "y": 3.0, "title": "Paper 4"},
             ],
             "statistics": {
                 "n_clusters": 2,
@@ -438,57 +434,43 @@ class TestMCPTools:
                 "total_papers": 4,
             },
             "cluster_labels": {"0": "Machine Learning", "1": "Natural Language Processing"},
+            "cluster_descriptions": {
+                "0": "Papers apply neural networks to learning problems.",
+                "1": "Papers process language with transformer models.",
+            },
             "cluster_keywords": {"0": ["neural", "deep"], "1": ["nlp", "bert"]},
+            "hierarchy": {
+                "method": "bertopic",
+                "n_topics": 2,
+                "tree": [
+                    {
+                        "id": 10,
+                        "topics": [0, 1],
+                        "label": "Machine Learning",
+                        "description": "Papers apply neural networks to learning problems.",
+                        "distance": 0.5,
+                        "child_left_id": 0,
+                        "child_right_id": 1,
+                    }
+                ],
+            },
         }
 
-        mock_cm.get_cluster_statistics.return_value = {
-            "n_clusters": 2,
-            "n_noise": 0,
-            "cluster_sizes": {0: 2, 1: 2},
-            "total_papers": 4,
-        }
-
-        mock_analyze.side_effect = [
-            {
-                "topic": "Machine Learning",
-                "paper_count": 2,
-                "keywords": ["neural", "deep"],
-                "sample_titles": ["Paper 1", "Paper 2"],
-            },
-            {
-                "topic": "Natural Language Processing",
-                "paper_count": 2,
-                "keywords": ["nlp", "bert"],
-                "sample_titles": ["Paper 3", "Paper 4"],
-            },
-        ]
-
-        # Import and call the tool
         from abstracts_explorer.mcp_server import get_conference_topics
 
         result_str = get_conference_topics(conferences=["NeurIPS"])
         result = json.loads(result_str)
 
-        # Verify result uses topic-centric structure
-        assert result["n_topics"] == 2
+        assert result["n_topics"] == 1
         assert result["total_papers"] == 4
-        # topic_sizes should use topic names (sorted by size desc)
-        assert result["topic_sizes"] == {
-            "Machine Learning": 2,
-            "Natural Language Processing": 2,
-        }
-        assert "topics" in result
-        assert len(result["topics"]) == 2
-        assert result["topics"][0]["topic"] == "Machine Learning"
-        assert result["topics"][0]["keywords"] == ["neural", "deep"]
-        assert result["topics"][1]["topic"] == "Natural Language Processing"
+        assert result["hierarchy_level"] == 0
+        assert result["topic_sizes"] == {"Papers apply neural networks to learning problems.": 4}
+        assert len(result["topics"]) == 1
+        assert result["topics"][0]["topic"] == "Papers apply neural networks to learning problems."
+        assert result["topics"][0]["label"] == "Machine Learning"
+        assert result["topics"][0]["keywords"] == ["neural", "deep", "nlp", "bert"]
+        assert result["topics"][0]["sample_titles"] == ["Paper 1", "Paper 2", "Paper 3", "Paper 4"]
         assert result["conference"] == "NeurIPS"
-
-        # Verify _apply_cached_cluster_labels restored cluster_label_names and cluster_keywords
-        assert mock_cm.cluster_label_names == {0: "Machine Learning", 1: "Natural Language Processing"}
-        assert mock_cm.cluster_keywords == {0: ["neural", "deep"], 1: ["nlp", "bert"]}
-
-        # Verify cache was queried with correct params
         mock_db.get_clustering_cache.assert_called_once()
 
     @patch("abstracts_explorer.mcp.resources.load_clustering_data")
@@ -500,19 +482,17 @@ class TestMCPTools:
         with pytest.raises(ToolError, match="conference must be specified"):
             get_conference_topics()
 
-    @patch("abstracts_explorer.mcp.resources.load_clustering_data")
+    @patch("abstracts_explorer.mcp.resources._get_shared_database")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
-    def test_get_conference_topics_no_cache(self, mock_config, mock_load):
+    def test_get_conference_topics_no_cache(self, mock_config, mock_get_db):
         """Test get_conference_topics returns error when no cached results exist."""
         mock_config_obj = Mock()
         mock_config_obj.collection_name = "papers"
         mock_config_obj.embedding_model = "test-model"
         mock_config.return_value = mock_config_obj
 
-        mock_cm = Mock()
-        mock_cm.embeddings_manager = Mock()
         mock_db = Mock()
-        mock_load.return_value = (mock_cm, mock_db)
+        mock_get_db.return_value = mock_db
         mock_db.get_clustering_cache.return_value = None
 
         from abstracts_explorer.mcp_server import get_conference_topics
@@ -520,46 +500,26 @@ class TestMCPTools:
         with pytest.raises(ToolError, match="No pre-computed clustering data"):
             get_conference_topics(conferences=["NeurIPS"])
 
-    @patch("abstracts_explorer.mcp.resources.load_clustering_data")
-    @patch("abstracts_explorer.mcp.tools.topics.analyze_cluster_topics")
+    @patch("abstracts_explorer.mcp.resources._get_shared_database")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
-    def test_get_conference_topics_with_year_in_name(self, mock_config, mock_analyze, mock_load):
+    def test_get_conference_topics_with_year_in_name(self, mock_config, mock_get_db):
         """Test get_conference_topics parses year from conference name like 'NeurIPS 2025'."""
         mock_config_obj = Mock()
         mock_config_obj.collection_name = "papers"
         mock_config_obj.embedding_model = "test-model"
         mock_config.return_value = mock_config_obj
 
-        mock_cm = Mock()
-        mock_cm.embeddings_manager = Mock()
-        mock_cm.paper_ids = ["p1", "p2"]
         mock_db = Mock()
-        mock_load.return_value = (mock_cm, mock_db)
-
-        mock_cm.load_embeddings.return_value = 100
+        mock_get_db.return_value = mock_db
         mock_db.get_clustering_cache.return_value = {
             "points": [
-                {"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0},
-                {"id": "p2", "cluster": 0, "x": 1.0, "y": 1.0},
+                {"id": "p1", "cluster": 0, "x": 0.0, "y": 0.0, "title": "Paper 1"},
+                {"id": "p2", "cluster": 0, "x": 1.0, "y": 1.0, "title": "Paper 2"},
             ],
             "statistics": {"n_clusters": 1, "n_noise": 0, "cluster_sizes": {0: 2}, "total_papers": 2},
             "cluster_labels": {"0": "Deep Learning"},
             "cluster_keywords": {"0": ["neural", "deep"]},
-        }
-
-        mock_cm.get_cluster_statistics.return_value = {
-            "n_clusters": 1,
-            "n_noise": 0,
-            "cluster_sizes": {0: 2},
-            "total_papers": 2,
-        }
-        mock_cm.cluster_label_names = {0: "Deep Learning"}
-
-        mock_analyze.return_value = {
-            "topic": "Deep Learning",
-            "paper_count": 2,
-            "keywords": ["neural", "deep"],
-            "sample_titles": ["Paper 1"],
+            "hierarchy": {"method": "bertopic", "n_topics": 1, "tree": []},
         }
 
         from abstracts_explorer.mcp_server import get_conference_topics
@@ -567,12 +527,9 @@ class TestMCPTools:
         result_str = get_conference_topics(conferences=["NeurIPS 2025"])
         result = json.loads(result_str)
 
-        # Should succeed (no error) by parsing "NeurIPS 2025" → conference="NeurIPS", years=[2025]
         assert "error" not in result
         assert result["conference"] == "NeurIPS"
         assert "topics" in result
-
-        # Verify the cache was looked up with the parsed conference name (not "NeurIPS 2025")
         call_args = mock_db.get_clustering_cache.call_args_list[0]
         assert call_args[1]["conference"] == "NeurIPS"
         assert call_args[1]["year"] == 2025
@@ -667,37 +624,17 @@ class TestParseConferenceYear:
         # 3-digit numbers shouldn't be parsed as years
         assert parse_conference_year("NeurIPS 123") == ("NeurIPS 123", None)
 
-    @patch("abstracts_explorer.mcp.resources.load_clustering_data")
-    @patch("abstracts_explorer.mcp.tools.topics.analyze_cluster_topics")
+    @patch("abstracts_explorer.mcp.resources._get_shared_database")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
-    def test_missing_year_cache_does_not_fallback(self, mock_config, mock_analyze, mock_load):
+    def test_missing_year_cache_does_not_fallback(self, mock_config, mock_get_db):
         """A missing per-year cache must not be replaced by all-years data."""
         mock_config_obj = Mock()
         mock_config_obj.collection_name = "papers"
         mock_config_obj.embedding_model = "test-model"
         mock_config.return_value = mock_config_obj
 
-        mock_cm = Mock()
-        mock_cm.embeddings_manager = Mock()
-        mock_cm.paper_ids = ["p1"]
         mock_db = Mock()
-        mock_load.return_value = (mock_cm, mock_db)
-        mock_cm.load_embeddings.return_value = 10
-        mock_cm.get_cluster_statistics.return_value = {
-            "n_clusters": 1,
-            "n_noise": 0,
-            "cluster_sizes": {0: 1},
-            "total_papers": 1,
-        }
-        mock_cm.cluster_label_names = {0: "AI"}
-
-        mock_analyze.return_value = {
-            "topic": "AI",
-            "paper_count": 1,
-            "keywords": ["artificial"],
-            "sample_titles": ["Paper 1"],
-        }
-
+        mock_get_db.return_value = mock_db
         mock_db.get_clustering_cache.return_value = None
 
         from abstracts_explorer.mcp_server import _get_conference_topics_for_single_conference
@@ -927,14 +864,13 @@ class TestTopicEvolutionAndRelevance:
         assert result["topic"] == "deep learning"
         assert mock_db.search.call_args.kwargs["where_filters"] == filters
 
-    @patch("abstracts_explorer.mcp.resources.load_clustering_data")
+    @patch("abstracts_explorer.mcp.tools.visualization.derive_hierarchy_levels")
+    @patch("abstracts_explorer.mcp.resources._get_shared_database")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
-    def test_get_cluster_visualization(self, mock_config, mock_load):
+    def test_get_cluster_visualization(self, mock_config, mock_get_db, mock_derive):
         mock_config.return_value = Mock(collection_name="papers", embedding_model="test-model")
-        mock_cm = Mock()
-        mock_cm.embeddings_manager = Mock()
         mock_db = Mock()
-        mock_load.return_value = (mock_cm, mock_db)
+        mock_get_db.return_value = mock_db
         mock_db.get_clustering_cache.return_value = {
             "points": [
                 {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0, "title": "Paper 1"},
@@ -942,7 +878,36 @@ class TestTopicEvolutionAndRelevance:
             ],
             "statistics": {"n_clusters": 2, "n_noise": 0, "cluster_sizes": {0: 1, 1: 1}, "total_papers": 2},
             "n_dimensions": 2,
+            "cluster_centers": {"0": {"x": 0.0, "y": 0.0}, "1": {"x": 1.0, "y": 1.0}},
+            "cluster_labels": {"0": "Cluster A", "1": "Cluster B"},
+            "cluster_descriptions": {"0": "First cluster", "1": "Second cluster"},
         }
+
+        levels = []
+        for index in range(10):
+            levels.append(
+                {
+                    "level": index,
+                    "mapping": {"0": index * 10, "1": index * 10 + 1},
+                    "clusters": [
+                        {
+                            "id": index * 10,
+                            "label": f"Level {index} A",
+                            "description": f"Level {index} first",
+                            "size": 1,
+                            "center": {"x": float(index), "y": float(index)},
+                        },
+                        {
+                            "id": index * 10 + 1,
+                            "label": f"Level {index} B",
+                            "description": f"Level {index} second",
+                            "size": 1,
+                            "center": {"x": float(index + 1), "y": float(index + 1)},
+                        },
+                    ],
+                }
+            )
+        mock_derive.return_value = {"levels": levels}
 
         from abstracts_explorer.mcp_server import get_cluster_visualization
 
@@ -950,24 +915,105 @@ class TestTopicEvolutionAndRelevance:
 
         assert result["n_dimensions"] == 2
         assert result["n_points"] == 2
+        assert [point["cluster"] for point in result["points"]] == [90, 91]
+        assert result["cluster_centers"]["90"] == {"x": 9.0, "y": 9.0}
+        assert result["cluster_labels"] == {"90": "Level 9 A", "91": "Level 9 B"}
+        assert result["cluster_descriptions"] == {"90": "Level 9 first", "91": "Level 9 second"}
+        assert result["statistics"]["n_clusters"] == 2
         mock_db.get_clustering_cache.assert_called_once()
 
-    @patch("abstracts_explorer.mcp.resources.load_clustering_data")
+    @patch("abstracts_explorer.mcp.resources._get_shared_database")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
-    def test_get_cluster_visualization_no_conference(self, mock_config, mock_load):
+    def test_get_cluster_visualization_requires_hierarchy_tree(self, mock_config, mock_get_db):
+        mock_config.return_value = Mock(collection_name="papers", embedding_model="test-model")
+        mock_db = Mock()
+        mock_get_db.return_value = mock_db
+        mock_db.get_clustering_cache.return_value = {
+            "points": [{"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0}],
+            "statistics": {"n_clusters": 1, "total_papers": 1},
+            "hierarchy": {"method": "bertopic"},
+        }
+
+        from abstracts_explorer.mcp_server import get_cluster_visualization
+
+        with pytest.raises(ToolError, match="missing their hierarchy tree"):
+            get_cluster_visualization(conferences=["NeurIPS"])
+
+    @patch("abstracts_explorer.mcp.tools.visualization._select_visualization_level")
+    @patch("abstracts_explorer.mcp.resources._get_shared_database")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
+    def test_get_cluster_visualization_renumbers_multiple_conferences(self, mock_config, mock_get_db, mock_select):
+        mock_config.return_value = Mock(collection_name="papers", embedding_model="test-model")
+        mock_db = Mock()
+        mock_get_db.return_value = mock_db
+        mock_db.get_clustering_cache.side_effect = [
+            {
+                "points": [{"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0, "title": "Paper 1"}],
+                "statistics": {"n_clusters": 1, "total_papers": 1},
+                "cluster_centers": {"0": {"x": 0.0, "y": 0.0}},
+                "cluster_labels": {"0": "First"},
+                "cluster_descriptions": {"0": "First cluster"},
+            },
+            {
+                "points": [{"id": "p2", "x": 5.0, "y": 5.0, "cluster": 0, "title": "Paper 2"}],
+                "statistics": {"n_clusters": 1, "total_papers": 1},
+                "cluster_centers": {"0": {"x": 5.0, "y": 5.0}},
+                "cluster_labels": {"0": "Second"},
+                "cluster_descriptions": {"0": "Second cluster"},
+            },
+        ]
+        mock_select.side_effect = [
+            {
+                "mapping": {"0": 10},
+                "clusters": [
+                    {
+                        "id": 10,
+                        "label": "First",
+                        "description": "First cluster",
+                        "size": 1,
+                        "center": {"x": 0.0, "y": 0.0},
+                    }
+                ],
+            },
+            {
+                "mapping": {"0": 20},
+                "clusters": [
+                    {
+                        "id": 20,
+                        "label": "Second",
+                        "description": "Second cluster",
+                        "size": 1,
+                        "center": {"x": 5.0, "y": 5.0},
+                    }
+                ],
+            },
+        ]
+
+        from abstracts_explorer.mcp_server import get_cluster_visualization
+
+        result = json.loads(get_cluster_visualization(conferences=["NeurIPS", "ICLR"]))
+
+        assert [point["cluster"] for point in result["points"]] == [0, 1]
+        assert result["cluster_centers"]["0"] == {"x": 0.0, "y": 0.0}
+        assert result["cluster_centers"]["1"] == {"x": 5.0, "y": 5.0}
+        assert result["cluster_labels"] == {"0": "First", "1": "Second"}
+        assert result["cluster_descriptions"] == {"0": "First cluster", "1": "Second cluster"}
+        assert result["statistics"]["n_clusters"] == 2
+        assert result["statistics"]["total_papers"] == 2
+
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
+    def test_get_cluster_visualization_no_conference(self, mock_config):
         from abstracts_explorer.mcp_server import get_cluster_visualization
 
         with pytest.raises(ToolError, match="conference must be specified"):
             get_cluster_visualization()
 
-    @patch("abstracts_explorer.mcp.resources.load_clustering_data")
+    @patch("abstracts_explorer.mcp.resources._get_shared_database")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
-    def test_get_cluster_visualization_no_cache(self, mock_config, mock_load):
+    def test_get_cluster_visualization_no_cache(self, mock_config, mock_get_db):
         mock_config.return_value = Mock(collection_name="papers", embedding_model="test-model")
-        mock_cm = Mock()
-        mock_cm.embeddings_manager = Mock()
         mock_db = Mock()
-        mock_load.return_value = (mock_cm, mock_db)
+        mock_get_db.return_value = mock_db
         mock_db.get_clustering_cache.return_value = None
 
         from abstracts_explorer.mcp_server import get_cluster_visualization
@@ -999,6 +1045,7 @@ class TestMCPServerIntegration:
             "summarize_interesting_papers",
             "recommend_related_papers",
             "suggest_authors_to_meet",
+            "suggest_search_terms_from_orcid",
         }
 
 

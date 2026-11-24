@@ -286,7 +286,10 @@ def chat_command(args: argparse.Namespace) -> int:
                         print("\r" + " " * 50 + "\r", end="")  # Clear the line
 
                         # Display response
-                        print(f"Assistant (based on {result['metadata']['n_papers']} papers):")
+                        if result.get("metadata", {}).get("guard", {}).get("blocked"):
+                            print("Assistant:")
+                        else:
+                            print(f"Assistant (based on {result['metadata']['n_papers']} papers):")
                         print(result["response"])
                         print()
 

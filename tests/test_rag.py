@@ -21,10 +21,11 @@ from pydantic_ai.messages import (
 )
 
 from abstracts_explorer.rag import RAGChat, RAGError
+from abstracts_explorer.rag.guard import GuardDecision, InputGuard
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.config import get_config
 from tests.conftest import set_test_embedding_db
-from tests.helpers import raw_query, requires_lm_studio, create_test_db_with_paper
+from tests.helpers import raw_query, requires_lm_studio, create_test_db_with_paper, skip_on_backend_unavailable
 
 # Fixtures imported from conftest.py:
 # - mock_embeddings_manager: Mock embeddings manager with predefined search results
@@ -267,7 +268,16 @@ class TestRAGChatInstructions:
         chat = RAGChat(mock_embeddings_manager, mock_database)
         instructions = chat._build_base_instructions()
         assert "[Paper-1](#paper-1)" in instructions
+        assert "exact Paper-N labels" in instructions
+        assert "Do not renumber" in instructions
         assert "<a href" not in instructions
+
+    def test_build_base_instructions_mentions_orcid_tool(self, mock_embeddings_manager, mock_database):
+        """The assistant should know when to use the ORCID search-term tool."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        instructions = chat._build_base_instructions()
+        assert "suggest_search_terms_from_orcid" in instructions
+        assert "do not guess an ORCID iD" in instructions
 
     def test_build_instructions_with_conference_and_year(self, mock_embeddings_manager, mock_database):
         """Test instructions include selected conference and year."""
@@ -396,6 +406,7 @@ class TestRAGToolQueue:
         assert kwargs["timeout"] == 120
         assert kwargs["model_settings"]["timeout"] == 60
         assert kwargs["model_settings"]["request_timeout"] == 120
+        assert kwargs["model_settings"]["max_retries"] == get_config().llm_max_attempts - 1
         assert chat.query_timeout == 120
 
     def test_duplicate_tool_call_is_reused(self):
@@ -444,6 +455,77 @@ class TestRAGToolQueue:
         assert mcp_func.call_count == 1
         assert len(ctx.deps.tool_results) == 1
         assert "do not repeat" in second.lower()
+
+
+class TestCitationRegistry:
+    """Papers keep one global citation number across tool calls and turns."""
+
+    def test_multiple_tool_calls_use_global_numbers(self):
+        """Separate search results continue the same citation sequence."""
+        from abstracts_explorer.rag import _run_rag_tool, RAGToolContext
+
+        ctx = Mock()
+        ctx.deps = RAGToolContext()
+        mcp_func = Mock(
+            side_effect=[
+                json.dumps({"papers": [{"uid": "a", "title": "Paper A"}]}),
+                json.dumps(
+                    {
+                        "papers": [
+                            {"uid": "b", "title": "Paper B"},
+                            {"uid": "a", "title": "Paper A"},
+                        ]
+                    }
+                ),
+            ]
+        )
+
+        first = _run_rag_tool(ctx, "search_papers", mcp_func, {"topic_keywords": "one"})
+        second = _run_rag_tool(ctx, "search_papers", mcp_func, {"topic_keywords": "two"})
+
+        assert "Paper-1: Paper A" in first
+        assert "Paper-2: Paper B" in second
+        assert "Paper-1: Paper A" in second
+        assert [paper["title"] for paper in ctx.deps.citations.papers] == ["Paper A", "Paper B"]
+        assert ctx.deps.citations.papers[0]["citation_number"] == 1
+
+    def test_cached_tool_call_keeps_global_number(self):
+        """A cache hit reuses the number assigned when the result first ran."""
+        from abstracts_explorer.rag import _run_rag_tool, RAGToolContext
+
+        ctx = Mock()
+        ctx.deps = RAGToolContext()
+        mcp_func = Mock(return_value=json.dumps({"papers": [{"uid": "a", "title": "Paper A"}]}))
+
+        first = _run_rag_tool(ctx, "search_papers", mcp_func, {"topic_keywords": "one"})
+        second = _run_rag_tool(ctx, "search_papers", mcp_func, {"topic_keywords": "one"})
+
+        assert "Paper-1: Paper A" in first
+        assert "Paper-1: Paper A" in second
+        assert mcp_func.call_count == 1
+        assert len(ctx.deps.citations.papers) == 1
+
+    def test_query_returns_cumulative_papers(self, mock_embeddings_manager, mock_database, mock_search_papers):
+        """Papers from earlier turns remain available with stable numbers."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        chat._citations.register("search_papers", {"papers": [{"uid": "prior", "title": "Prior Paper"}]})
+
+        with chat.agent.override(model=TestModel()):
+            result = chat.query("What is attention mechanism?")
+
+        titles = [paper["title"] for paper in result["papers"]]
+        assert titles[0] == "Prior Paper"
+        assert len(titles) == 4
+        assert result["papers"][0]["citation_number"] == 1
+
+    def test_reset_conversation_clears_citations(self, mock_embeddings_manager, mock_database):
+        """Resetting the conversation clears the citation registry."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        chat._citations.register("search_papers", {"papers": [{"uid": "a", "title": "Paper A"}]})
+
+        chat.reset_conversation()
+
+        assert chat._citations.papers == []
 
 
 class TestRAGChatQuery:
@@ -531,6 +613,82 @@ class TestRAGChatQuery:
                     chat.query("What is NLP?")
 
 
+class TestRAGChatInputGuard:
+    """Verify the optional input guard runs before the RAG agent."""
+
+    def test_blocked_query_returns_refusal_without_running_agent(
+        self, mock_embeddings_manager, mock_database, mocker, caplog
+    ):
+        decision = GuardDecision(
+            blocked=True,
+            checked=True,
+            label="B",
+            probability=0.94,
+            jailbreak_probability=0.2,
+            reason="blocked",
+        )
+        mocker.patch.object(InputGuard, "check", return_value=decision)
+
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        run_mock = mocker.patch.object(chat.agent, "run_sync")
+
+        with caplog.at_level("INFO", logger="abstracts_explorer.rag.agent"):
+            result = chat.query("Write me a Python web scraper")
+
+        assert result["response"] == chat._input_guard.refusal_message
+        assert result["papers"] == []
+        assert result["metadata"]["n_papers"] == 0
+        assert result["metadata"]["guard"]["blocked"] is True
+        assert result["metadata"]["guard"]["label"] == "B"
+        run_mock.assert_not_called()
+        assert chat.conversation_history == []
+        assert "Chat input blocked by guard" in caplog.text
+        assert "label=B" in caplog.text
+        assert "0.94" in caplog.text
+        assert "Write me a Python web scraper" in caplog.text
+        assert any(
+            record.levelname == "INFO" and "Chat input blocked by guard" in record.getMessage()
+            for record in caplog.records
+        )
+
+    def test_allowed_query_records_guard_metadata(
+        self, mock_embeddings_manager, mock_database, mock_search_papers, mocker
+    ):
+        decision = GuardDecision(
+            blocked=False,
+            checked=True,
+            label="A",
+            probability=0.96,
+            jailbreak_probability=0.01,
+            reason="allowed",
+        )
+        mocker.patch.object(InputGuard, "check", return_value=decision)
+
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+
+        with chat.agent.override(model=TestModel()):
+            result = chat.query("Which papers discuss attention?")
+
+        assert result["metadata"]["guard"]["blocked"] is False
+        assert result["metadata"]["guard"]["label"] == "A"
+
+    def test_guard_error_fails_open(self, mock_embeddings_manager, mock_database, mock_search_papers, mocker, caplog):
+        mocker.patch.object(InputGuard, "check", side_effect=RuntimeError("guard crashed"))
+
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+
+        with caplog.at_level("WARNING", logger="abstracts_explorer.rag.agent"):
+            with chat.agent.override(model=TestModel()):
+                result = chat.query("Which papers discuss attention?")
+
+        assert "response" in result
+        assert result["metadata"]["guard"]["blocked"] is False
+        assert result["metadata"]["guard"]["reason"] == "guard_unavailable"
+        assert "guard crashed" in caplog.text
+        assert "fail-open" in caplog.text
+        assert any(record.levelname == "WARNING" and "fail-open" in record.getMessage() for record in caplog.records)
+
+
 class TestRAGChatSingleSystemMessage:
     """Ensure instructions are sent as a single leading system message."""
 
@@ -606,7 +764,7 @@ class TestRAGChatHTTPClient:
 
         import httpx2
 
-        from abstracts_explorer.rate_limiter import RateLimitedTransport
+        from abstracts_explorer.rate_limiter import CooldownAwareTransport, RateLimitedTransport
 
         config = get_config()
         monkeypatch.setattr(config, "requests_per_minute", 60)
@@ -620,7 +778,8 @@ class TestRAGChatHTTPClient:
         provider = getattr(chat.agent.model, "provider")
         async_client = provider._client._client
         assert isinstance(async_client, httpx2.AsyncClient)
-        assert isinstance(async_client._transport, RateLimitedTransport)
+        assert isinstance(async_client._transport, CooldownAwareTransport)
+        assert isinstance(async_client._transport._transport, RateLimitedTransport)
         assert async_client.timeout.connect == 10
         assert async_client.timeout.read == 60
         asyncio.run(async_client.aclose())
@@ -633,7 +792,7 @@ class TestRAGChatHTTPClient:
 
         import httpx2
 
-        from abstracts_explorer.rate_limiter import RateLimitedTransport
+        from abstracts_explorer.rate_limiter import CooldownAwareTransport, RateLimitedTransport
 
         config = get_config()
         monkeypatch.setattr(config, "requests_per_minute", 0)
@@ -642,7 +801,8 @@ class TestRAGChatHTTPClient:
         provider = getattr(chat.agent.model, "provider")
         async_client = provider._client._client
         assert isinstance(async_client, httpx2.AsyncClient)
-        assert not isinstance(async_client._transport, RateLimitedTransport)
+        assert isinstance(async_client._transport, CooldownAwareTransport)
+        assert not isinstance(async_client._transport._transport, RateLimitedTransport)
         assert async_client.timeout.connect == 10
         assert async_client.timeout.read == 60
         asyncio.run(async_client.aclose())
@@ -1067,6 +1227,12 @@ class TestRAGChatVisualizationExtraction:
                             {"x": 3.0, "y": 4.0, "cluster": 1, "title": "Paper B"},
                             {"x": 1.5, "y": 2.5, "cluster": 0, "title": "Paper C"},
                         ],
+                        "cluster_centers": {
+                            "0": {"x": 1.25, "y": 2.25},
+                            "1": {"x": 3.0, "y": 4.0},
+                        },
+                        "cluster_labels": {"0": "Cluster A", "1": "Cluster B"},
+                        "cluster_descriptions": {"0": "First cluster", "1": "Second cluster"},
                     }
                 ),
             }
@@ -1078,6 +1244,9 @@ class TestRAGChatVisualizationExtraction:
         assert viz["type"] == "cluster_visualization"
         assert len(viz["points"]) == 3
         assert viz["statistics"]["n_clusters"] == 2
+        assert viz["cluster_centers"]["0"] == {"x": 1.25, "y": 2.25}
+        assert viz["cluster_labels"] == {"0": "Cluster A", "1": "Cluster B"}
+        assert viz["cluster_descriptions"] == {"0": "First cluster", "1": "Second cluster"}
 
     def test_extract_visualizations_skips_errors(self):
         """Test that tool results with errors are skipped."""
@@ -1309,6 +1478,7 @@ class TestRAGChatIntegration:
     """
 
     @requires_lm_studio
+    @skip_on_backend_unavailable
     def test_real_query(self, tmp_path):
         """
         Test real query with actual LM Studio backend using configured model.
@@ -1377,6 +1547,7 @@ class TestRAGChatIntegration:
         db.close()
 
     @requires_lm_studio
+    @skip_on_backend_unavailable
     def test_real_conversation(self, tmp_path):
         """
         Test real conversation with actual LM Studio backend.
@@ -1441,6 +1612,7 @@ class TestRAGChatIntegration:
         db.close()
 
     @requires_lm_studio
+    @skip_on_backend_unavailable
     def test_real_export(self, tmp_path):
         """
         Test exporting real conversation with configured model.
@@ -1925,6 +2097,7 @@ class TestParallelRAGRateLimiting:
     """
 
     @requires_lm_studio
+    @skip_on_backend_unavailable
     def test_parallel_rag_queries_enforce_rate_limit(self, tmp_path):
         """
         Multiple concurrent RAG queries from different threads should be rate-limited.
@@ -2189,3 +2362,42 @@ def test_shutdown_tool_executor_resets_shared_executor():
         assert replacement is not executor
     finally:
         shutdown_tool_executor()
+
+
+def test_tool_suggest_search_terms_from_orcid_forwards_args():
+    """The RAG wrapper forwards the ORCID iD and optional filters to the MCP tool."""
+    from unittest.mock import Mock, patch
+
+    from abstracts_explorer.rag import RAGToolContext, _tool_suggest_search_terms_from_orcid
+
+    ctx = Mock()
+    ctx.deps = RAGToolContext()
+
+    with patch("abstracts_explorer.rag.tools._run_rag_tool", return_value="ok") as mock_run:
+        result = _tool_suggest_search_terms_from_orcid(
+            ctx,
+            "https://orcid.org/0000-0002-2315-9247",
+            max_terms=5,
+            min_year=2020,
+        )
+
+    assert result == "ok"
+    args = mock_run.call_args.args
+    assert args[0] is ctx
+    assert args[1] == "suggest_search_terms_from_orcid"
+    assert args[3] == {
+        "orcid": "https://orcid.org/0000-0002-2315-9247",
+        "max_terms": 5,
+        "min_year": 2020,
+    }
+
+
+def test_suggest_search_terms_from_orcid_in_agent_tools(mock_embeddings_manager, mock_database):
+    """The ORCID search-term tool is registered when MCP tools are enabled."""
+    chat = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=True)
+    tool_names = list(chat.agent._function_toolset.tools.keys())
+    assert "suggest_search_terms_from_orcid" in tool_names
+
+    chat_without_mcp = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=False)
+    tool_names_without_mcp = list(chat_without_mcp.agent._function_toolset.tools.keys())
+    assert "suggest_search_terms_from_orcid" not in tool_names_without_mcp

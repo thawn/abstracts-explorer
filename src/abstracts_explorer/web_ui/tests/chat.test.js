@@ -207,6 +207,14 @@ describe('Chat Module', () => {
             const papers = document.getElementById('chat-papers');
             expect(papers.innerHTML).toContain('Using cached papers');
         });
+
+        it('should use citation_number for the card number and anchor', () => {
+            displayChatPapers([{ uid: 'p1', title: 'Paper', authors: [], citation_number: 4 }]);
+
+            const papers = document.getElementById('chat-papers');
+            expect(papers.innerHTML).toContain('#4');
+            expect(papers.innerHTML).toContain('id="paper-4"');
+        });
     });
 
     describe('addChatMessage', () => {
@@ -407,10 +415,48 @@ describe('Chat Module', () => {
             expect(global.Plotly.newPlot).toHaveBeenCalledTimes(1);
             const [plotId, traces, layout] = global.Plotly.newPlot.mock.calls[0];
             expect(plotId).toMatch(/^chat-plot-/);
-            // Two clusters should produce two traces
-            expect(traces).toHaveLength(2);
+            // Two clusters plus one cluster-center star trace
+            expect(traces).toHaveLength(3);
+            expect(traces[2].marker.symbol).toBe('star');
+            expect(traces[2].x).toEqual([1.25, 3.0]);
+            expect(traces[2].y).toEqual([2.25, 4.0]);
+            expect(traces[2].text).toEqual(['Cluster 0', 'Cluster 1']);
+            expect(traces[2].hovertemplate).toContain('papers');
+            expect(traces[2].showlegend).toBe(false);
             expect(layout.title).toContain('3 papers');
             expect(layout.title).toContain('2 clusters');
+            expect(layout.showlegend).toBe(false);
+        });
+
+        it('should use forwarded centers and labels for cluster stars', () => {
+            const visualizations = [{
+                type: 'cluster_visualization',
+                points: [
+                    { x: 1.0, y: 2.0, cluster: 0, title: 'Paper A' },
+                    { x: 3.0, y: 4.0, cluster: 1, title: 'Paper B' }
+                ],
+                statistics: { n_clusters: 2, total_papers: 2 },
+                cluster_centers: {
+                    '0': { x: 10.0, y: 20.0 },
+                    '1': { x: 30.0, y: 40.0 }
+                },
+                cluster_labels: { '0': 'Machine Learning', '1': 'NLP' },
+                cluster_descriptions: { '0': 'ML papers', '1': 'NLP papers' }
+            }];
+
+            renderChatVisualizations(visualizations);
+
+            const traces = global.Plotly.newPlot.mock.calls[0][1];
+            const starTrace = traces[traces.length - 1];
+            expect(starTrace.marker.symbol).toBe('star');
+            expect(starTrace.x).toEqual([10.0, 30.0]);
+            expect(starTrace.y).toEqual([20.0, 40.0]);
+            expect(starTrace.text).toEqual(['Machine Learning', 'NLP']);
+            expect(starTrace.hovertemplate).toContain('%{customdata.description}');
+            expect(starTrace.customdata).toEqual([
+                { size: 1, description: 'ML papers' },
+                { size: 1, description: 'NLP papers' }
+            ]);
         });
 
         it('should render multiple visualizations', () => {
@@ -476,8 +522,12 @@ describe('Chat Module', () => {
 
             expect(global.Plotly.newPlot).toHaveBeenCalledTimes(1);
             const traces = global.Plotly.newPlot.mock.calls[0][1];
-            expect(traces).toHaveLength(1);
+            // One document trace plus one cluster-center star trace
+            expect(traces).toHaveLength(2);
             expect(traces[0].name).toBe('Cluster 5');
+            expect(traces[1].marker.symbol).toBe('star');
+            expect(traces[1].x).toEqual([1.0]);
+            expect(traces[1].y).toEqual([2.0]);
         });
     });
 
@@ -802,6 +852,9 @@ describe('Chat Module', () => {
             expect(html).toContain('suggest other papers');
             // Authors to meet
             expect(html).toContain('Who should I meet');
+            // ORCID search terms
+            expect(html).toContain('ORCID');
+            expect(html).toContain('0000-0002-2315-9247');
         });
 
         it('removeMcpToolsHint should add hide class when hint exists', () => {

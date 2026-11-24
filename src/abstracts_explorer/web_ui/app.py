@@ -12,7 +12,7 @@ import sys
 import logging
 import json
 from pathlib import Path
-from flask import Flask, render_template, request, jsonify, send_file, abort
+from flask import Flask, Response, render_template, request, jsonify, send_file, abort
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from abstracts_explorer.database import normalize_model_name
@@ -20,8 +20,11 @@ from abstracts_explorer.db.errors import DatabaseError
 from abstracts_explorer.clustering import (
     DEFAULT_CLUSTERING_METHOD,
     DEFAULT_CLUSTERING_PARAMS,
+    DEFAULT_LEVEL_SCALE,
     DEFAULT_N_COMPONENTS,
+    DEFAULT_NR_LEVELS,
     DEFAULT_REDUCTION_METHOD,
+    derive_hierarchy_levels,
 )
 from abstracts_explorer.embeddings import QueryEmbedding
 from abstracts_explorer.export_utils import export_papers_to_zip
@@ -373,7 +376,7 @@ def get_filters():
 
 @app.route("/api/available-filters")
 @api_error_handler
-def get_available_filters_endpoint():
+def get_available_filters_endpoint() -> Response:
     """
     Get available conferences and years from the database.
 
@@ -396,7 +399,7 @@ def get_available_filters_endpoint():
     db_conference_years = database.get_conference_years_from_db()
 
     conferences = sorted(db_conference_years.keys())
-    all_years: set = set()
+    all_years: set[int] = set()
     for years in db_conference_years.values():
         all_years.update(years)
     years_sorted = sorted(all_years, reverse=True)
@@ -637,9 +640,9 @@ def compute_clusters():
     """
     Return pre-computed clustering results from the database cache.
 
-    Clustering always uses agglomerative clustering with
-    distance_threshold=150, linkage=ward, and t-SNE dimensionality
-    reduction.  Results must be pre-generated via the CLI
+    Clustering always uses BERTopic with Agglomerative clustering
+    (distance_threshold=0.5, linkage=ward) on 5-D UMAP embeddings and
+    2-D UMAP visualization.  Results must be pre-generated via the CLI
     ``clustering pre-generate`` command.
 
     Request Body
@@ -652,12 +655,30 @@ def compute_clusters():
     Returns
     -------
     dict
-        Clustering results with points, statistics, and metadata
+        Clustering results with points, statistics, hierarchy levels derived
+        from the cached tree, and metadata
     """
     data = get_json_object()
 
     conferences = coerce_str_list(data.get("conferences"), "conferences", max_items=_MAX_FILTER_ITEMS) or None
     years = coerce_int_list(data.get("years"), "years", max_items=_MAX_FILTER_ITEMS) or None
+    hierarchy_levels = coerce_limit(
+        data.get("hierarchy_levels"),
+        default=DEFAULT_NR_LEVELS,
+        minimum=1,
+        maximum=100,
+    )
+    level_scale = (
+        coerce_text(
+            data.get("hierarchy_level_scale"),
+            "hierarchy_level_scale",
+            max_length=32,
+            default=DEFAULT_LEVEL_SCALE,
+        ).strip()
+        or DEFAULT_LEVEL_SCALE
+    )
+    if level_scale not in ("linear", "lin", "log", "logarithmic"):
+        raise ApiError("hierarchy_level_scale must be 'linear' or 'log'", 400)
 
     # Get config and database
     config = services.get_config()
@@ -687,6 +708,17 @@ def compute_clusters():
     )
 
     if cached:
+        if "tree" not in (cached.get("hierarchy") or {}):
+            raise ApiError(
+                "Cached clustering data is outdated. Regenerate it with "
+                "'abstracts-explorer clustering pre-generate --force'.",
+                409,
+            )
+        cached["hierarchy"] = derive_hierarchy_levels(
+            cached,
+            nr_levels=hierarchy_levels,
+            level_scale=level_scale,
+        )
         return jsonify(cached)
 
     return (

@@ -801,6 +801,20 @@ class TestExtractTopKeywords:
             result = extract_top_keywords(papers, n_keywords=n)
             assert len(result) <= n
 
+    def test_supports_custom_ngram_range(self):
+        """Should honor a custom n-gram range such as unigrams and bigrams."""
+        from abstracts_explorer.paper_utils import extract_top_keywords
+
+        papers = [
+            {"title": "Deep Learning for Vision"},
+            {"title": "Deep Learning at Scale"},
+        ]
+
+        result = extract_top_keywords(papers, n_keywords=5, ngram_range=(1, 2))
+
+        assert result
+        assert all(len(keyword.split()) <= 2 for keyword in result)
+
     def test_search_response_includes_related_topics(self, client):
         """Test that search response includes related_topics field."""
         from unittest.mock import MagicMock, patch
@@ -851,6 +865,36 @@ class TestChatEndpoint:
         response = client.post("/api/chat/reset")
         # May fail if LM Studio not running, but should not crash
         assert response.status_code in [200, 500]
+
+    def test_chat_returns_guard_refusal(self):
+        """A blocked chat message is returned as a normal assistant response."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.request_services.get_rag_chat") as mock_get_rag:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_get_config:
+                    mock_config = Mock()
+                    mock_config.max_context_papers = 3
+                    mock_get_config.return_value = mock_config
+
+                    mock_rag = Mock()
+                    mock_rag.query.return_value = {
+                        "response": "I can only help with conference abstracts.",
+                        "papers": [],
+                        "visualizations": [],
+                        "metadata": {
+                            "n_papers": 0,
+                            "guard": {"blocked": True, "label": "B", "probability": 0.94},
+                        },
+                    }
+                    mock_get_rag.return_value = mock_rag
+
+                    response = client.post("/api/chat", json={"message": "Write me a script"})
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["response"]["response"] == "I can only help with conference abstracts."
+        assert data["response"]["metadata"]["guard"]["blocked"] is True
 
 
 class TestPaperEndpoint:
@@ -2057,13 +2101,13 @@ class TestServerInitialization:
             / "static"
             / "modules"
             / "utils"
-            / "constants.js"
+            / "constants.ts"
         )
         with open(constants_path, "r", encoding="utf-8") as f:
             constants_content = f.read()
 
         # Check that Plotly colors are defined (using constant naming convention)
-        assert "PLOTLY_COLORS = [" in constants_content, "Plotly colors should be explicitly defined in constants.js"
+        assert "PLOTLY_COLORS" in constants_content, "Plotly colors should be explicitly defined in constants.ts"
 
         # Check clustering module for color assignment
         clustering_path = (
@@ -2073,7 +2117,7 @@ class TestServerInitialization:
             / "web_ui"
             / "static"
             / "modules"
-            / "clustering.js"
+            / "clustering.ts"
         )
         with open(clustering_path, "r", encoding="utf-8") as f:
             clustering_content = f.read()
@@ -2211,6 +2255,50 @@ class TestSessionScopedChatHistory:
         assert len(chats) == 2
         assert chats[0] is not chats[1]
         assert _chat_sessions["same-session"].history == ["assistant", "user"]
+
+    def test_citation_registry_is_shared_between_requests(self):
+        """Citation numbers persist across requests and reset with the chat."""
+        from abstracts_explorer.web_ui.app import app
+        from abstracts_explorer.web_ui.request_services import (
+            _chat_sessions,
+            _reset_rag_chat_local,
+            chat_session,
+        )
+
+        _reset_rag_chat_local()
+        _chat_sessions.clear()
+
+        mock_config = Mock()
+        mock_config.llm_backend_url = "http://localhost"
+        mock_config.chat_model = "test"
+
+        def factory(*args, message_history=None, citation_registry=None, **kwargs):
+            chat = Mock()
+            chat.message_history = list(message_history or [])
+            chat.citation_registry = citation_registry
+            return chat
+
+        with (
+            patch("abstracts_explorer.web_ui.request_services.RAGChat", side_effect=factory),
+            patch("abstracts_explorer.web_ui.request_services.get_database"),
+            patch("abstracts_explorer.web_ui.request_services.get_embeddings_manager"),
+            patch("abstracts_explorer.web_ui.request_services.get_config", return_value=mock_config),
+        ):
+            with app.test_request_context():
+                from flask import session as flask_session
+
+                flask_session["_session_id"] = "citations-session"
+
+                with chat_session() as first:
+                    first.citation_registry.register("search_papers", {"papers": [{"uid": "a", "title": "Paper A"}]})
+
+                with chat_session() as second:
+                    assert [paper["uid"] for paper in second.citation_registry.papers] == ["a"]
+
+                with chat_session(reset=True) as third:
+                    assert third.citation_registry.papers == []
+
+        assert _chat_sessions["citations-session"].citations.papers == []
 
     def test_different_sessions_get_isolated_history(self):
         """Two distinct sessions must not see each other's messages."""
@@ -2522,6 +2610,7 @@ class TestClusteringEndpoint:
             "points": [{"id": "test", "x": 1.0, "y": 2.0, "cluster": 0}],
             "statistics": {"n_clusters": 1, "total_papers": 1},
             "cluster_centers": {"0": {"x": 1.0, "y": 2.0}},
+            "hierarchy": {"method": "bertopic", "n_topics": 1, "tree": []},
         }
 
         with app.test_client() as client:
@@ -2543,12 +2632,106 @@ class TestClusteringEndpoint:
                     # Verify cache was queried with fixed parameters
                     mock_db.get_clustering_cache.assert_called_once()
                     call_kwargs = mock_db.get_clustering_cache.call_args[1]
-                    assert call_kwargs["clustering_method"] == "agglomerative"
-                    assert call_kwargs["reduction_method"] == "tsne"
+                    assert call_kwargs["clustering_method"] == "bertopic-agglomerative"
+                    assert call_kwargs["reduction_method"] == "umap"
                     assert call_kwargs["n_components"] == 2
                     assert call_kwargs["n_clusters"] is None
                     assert call_kwargs["conference"] is None
                     assert call_kwargs["year"] is None
+
+    def test_compute_clusters_derives_levels_from_tree(self):
+        """Cached trees are converted to hierarchy levels and the tree is not returned."""
+        from abstracts_explorer.web_ui.app import app
+
+        cached_results = {
+            "points": [
+                {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0},
+                {"id": "p2", "x": 1.0, "y": 1.0, "cluster": 1},
+            ],
+            "statistics": {"n_clusters": 2, "cluster_sizes": {0: 1, 1: 1}, "total_papers": 2},
+            "cluster_labels": {"0": "A", "1": "B"},
+            "cluster_descriptions": {"0": "A desc.", "1": "B desc."},
+            "cluster_keywords": {"0": ["a"], "1": ["b"]},
+            "hierarchy": {
+                "method": "bertopic",
+                "n_topics": 2,
+                "tree": [
+                    {
+                        "id": 10,
+                        "topics": [0, 1],
+                        "label": "Parent",
+                        "description": "Parent desc.",
+                        "distance": 0.1,
+                        "child_left_id": 0,
+                        "child_right_id": 1,
+                    }
+                ],
+            },
+        }
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
+                    mock_config.return_value = Mock(embedding_model="test-model")
+                    mock_db = Mock()
+                    mock_db.get_clustering_cache.return_value = cached_results
+                    mock_get_db.return_value = mock_db
+
+                    response = client.post(
+                        "/api/clusters/compute",
+                        json={"hierarchy_levels": 1},
+                    )
+
+                    assert response.status_code == 200
+                    data = response.get_json()
+                    assert "tree" not in data["hierarchy"]
+                    assert len(data["hierarchy"]["levels"]) == 1
+                    level = data["hierarchy"]["levels"][0]
+                    assert level["mapping"] == {"0": 10, "1": 10}
+                    assert level["clusters"][0]["label"] == "Parent"
+
+    def test_compute_clusters_rejects_outdated_cache(self):
+        """Cached rows without a hierarchy tree return an outdated-cache error."""
+        from abstracts_explorer.web_ui.app import app
+
+        cached_results = {
+            "points": [],
+            "statistics": {"n_clusters": 2},
+            "hierarchy": {"method": "bertopic", "levels": []},
+        }
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
+                    mock_config.return_value = Mock(embedding_model="test-model")
+                    mock_db = Mock()
+                    mock_db.get_clustering_cache.return_value = cached_results
+                    mock_get_db.return_value = mock_db
+
+                    response = client.post("/api/clusters/compute", json={})
+
+                    assert response.status_code == 409
+                    assert "outdated" in response.get_json()["error"].lower()
+
+    def test_compute_clusters_rejects_invalid_level_scale(self):
+        """Invalid hierarchy level scale values are rejected."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
+                    mock_config.return_value = Mock(embedding_model="test-model")
+                    mock_db = Mock()
+                    mock_db.get_clustering_cache.return_value = {"points": [], "statistics": {}}
+                    mock_get_db.return_value = mock_db
+
+                    response = client.post(
+                        "/api/clusters/compute",
+                        json={"hierarchy_level_scale": "quadratic"},
+                    )
+
+                    assert response.status_code == 400
+                    assert "hierarchy_level_scale" in response.get_json()["error"]
 
     def test_compute_clusters_returns_404_when_no_cache(self, tmp_path):
         """Test that compute_clusters returns 404 when no cached data is available."""
@@ -2579,6 +2762,7 @@ class TestClusteringEndpoint:
         cached_results = {
             "points": [],
             "statistics": {"n_clusters": 0, "total_papers": 0},
+            "hierarchy": {"method": "bertopic", "n_topics": 0, "tree": []},
         }
 
         with app.test_client() as client:

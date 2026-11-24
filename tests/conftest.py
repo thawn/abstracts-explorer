@@ -18,12 +18,14 @@ from abstracts_explorer.config import get_config
 @pytest.fixture(autouse=True)
 def _reset_global_rate_limiter():
     """Reset the global rate limiter between tests to avoid test pollution."""
-    from abstracts_explorer.rate_limiter import set_global_rate_limiter
+    from abstracts_explorer.rate_limiter import set_global_cooldown, set_global_rate_limiter
     from abstracts_explorer.web_ui.rate_limit import reset_client_rate_limiter
 
     set_global_rate_limiter(None)
+    set_global_cooldown(None)
     reset_client_rate_limiter()
     yield
+    set_global_cooldown(None)
     reset_client_rate_limiter()
 
 
@@ -31,12 +33,15 @@ def _reset_global_rate_limiter():
 def _reset_process_caches():
     """Reset process-level schema and metadata caches between tests."""
     from abstracts_explorer.database import reset_metadata_cache, reset_schema_cache
+    from abstracts_explorer.orcid import _ORCID_CACHE
 
     reset_schema_cache()
     reset_metadata_cache()
+    _ORCID_CACHE.clear()
     yield
     reset_schema_cache()
     reset_metadata_cache()
+    _ORCID_CACHE.clear()
 
 
 @pytest.fixture(autouse=True)

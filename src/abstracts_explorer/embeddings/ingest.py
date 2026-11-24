@@ -9,6 +9,7 @@ from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings.batching import EMBED_BATCH_SIZE, iter_batches
 from abstracts_explorer.embeddings.errors import translate_errors
 from abstracts_explorer.embeddings.hashing import hash_text
+from abstracts_explorer.utils.disk_utils import ensure_free_space
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +19,24 @@ class IngestMixin:
 
     collection: Any
     model_name: str
+    embedding_db: str
+    min_free_disk_mb: int
     generate_embedding: Any
     generate_embeddings: Any
     _get_records: Any
+
+    def _ensure_disk_space(self) -> None:
+        """Refuse to write embeddings when the local filesystem is nearly full."""
+        if self.embedding_db.startswith(("http://", "https://")):
+            return
+        min_free_mb = getattr(self, "min_free_disk_mb", 0)
+        if min_free_mb <= 0:
+            return
+        ensure_free_space(
+            self.embedding_db,
+            min_free_mb * 1024 * 1024,
+            description="writing embeddings",
+        )
 
     @staticmethod
     def embedding_text_from_paper(paper: dict) -> str:
@@ -122,6 +138,7 @@ class IngestMixin:
         >>> count = em.embed_from_database(where_filters={"award": {"$ne": None}})
         """
         with translate_errors("Failed to embed from database"):
+            self._ensure_disk_space()
             with DatabaseManager() as db_manager:
                 db_manager.set_embedding_model(self.model_name)
                 rows = db_manager.get_paper(where_filters, limit=0)

@@ -19,7 +19,7 @@ A live demo is available at [abstracts.hzdr.de](https://abstracts.hzdr.de).
 - **Plugin system** for downloading from workshops and other conferences
 - **Store abstracts** in a SQL database (SQLite or PostgreSQL) with full metadata
 - **Create vector embeddings** for semantic search
-- **Cluster and visualize** paper embeddings (agglomerative clustering with hierarchical topic exploration)
+- **Cluster and visualize** paper embeddings (BERTopic clustering with a hierarchy-level slider)
 - **MCP server** for LLM-based cluster analysis and topic exploration
 - **RAG (Retrieval-Augmented Generation)** chat interface for querying papers
 - **Web interface** for browsing and searching papers
@@ -108,6 +108,7 @@ api/mcp_server
 api/mcp_tools
 api/export_utils
 api/paper_utils
+api/orcid
 api/db_models
 api/evaluation
 ```

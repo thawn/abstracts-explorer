@@ -22,6 +22,7 @@ from abstracts_explorer.config import get_config
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.rag import RAGChat
+from abstracts_explorer.rag.citations import PaperCitationRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ class _ChatSessionState:
     """Conversation state retained between requests for one browser session."""
 
     history: List[Any] = field(default_factory=list)
+    citations: PaperCitationRegistry = field(default_factory=PaperCitationRegistry)
     lock: threading.Lock = field(default_factory=threading.Lock)
     last_used: float = field(default_factory=time.monotonic)
 
@@ -240,6 +242,7 @@ def get_rag_chat() -> RAGChat:
         backend_url=config.llm_backend_url,
         model=config.chat_model,
         message_history=state.history,
+        citation_registry=state.citations,
     )
 
 
@@ -262,6 +265,7 @@ def chat_session(reset: bool = False) -> Iterator[RAGChat]:
     with state.lock:
         if reset:
             state.history = []
+            state.citations.clear()
 
         chat = get_rag_chat()
         try:
@@ -282,6 +286,7 @@ def reset_chat_history() -> None:
     state = _get_chat_session_state(_get_session_id())
     with state.lock:
         state.history = []
+        state.citations.clear()
 
 
 def _reset_rag_chat_local():

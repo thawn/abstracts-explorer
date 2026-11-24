@@ -76,6 +76,11 @@ In the chat interface:
 
 [here is an example chat](chat_example.md)
 
+To enable the optional offline input guard, run Ollaya locally and set
+`GUARD_ENABLED=true`; see the
+[local Ollaya guard setup](contributing.md#5-optional-local-ollaya-guard) and
+[configuration](configuration.md#chat-input-guard-ollaya).
+
 ## Python API
 
 ### Database Operations

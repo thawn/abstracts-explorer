@@ -1,33 +1,44 @@
 """
 Clustering package.
 
-Clusters paper embeddings with Agglomerative clustering (ward linkage) on the
-full embeddings and uses t-SNE for 2-D visualization. ChromaDB stores the
-vectors; paper metadata comes from the SQL database.
+Clusters paper embeddings with BERTopic using Agglomerative clustering on UMAP
+reduced embeddings. The server stores visualization data as JSON in the
+clustering cache; Plotly rendering happens exclusively in the browser.
 
 Public API is re-exported here so ``from abstracts_explorer.clustering import
 ...`` keeps working.
 """
 
-from abstracts_explorer.clustering.algorithms import calculate_default_clusters
 from abstracts_explorer.clustering.constants import (
     DEFAULT_CLUSTERING_METHOD,
     DEFAULT_CLUSTERING_PARAMS,
+    DEFAULT_LEVEL_SCALE,
     DEFAULT_N_COMPONENTS,
+    DEFAULT_NR_LEVELS,
     DEFAULT_REDUCTION_METHOD,
+    PIPELINE_VERSION,
+    clustering_params_for,
 )
 from abstracts_explorer.clustering.errors import ClusteringError
 from abstracts_explorer.clustering.manager import ClusteringManager
-from abstracts_explorer.clustering.pipeline import compute_clusters_with_cache, perform_clustering
+from abstracts_explorer.clustering.pipeline import (
+    compute_clusters_with_cache,
+    perform_clustering,
+)
+from abstracts_explorer.clustering.results import derive_hierarchy_levels
 
 __all__ = [
     "ClusteringManager",
     "ClusteringError",
     "perform_clustering",
     "compute_clusters_with_cache",
-    "calculate_default_clusters",
+    "derive_hierarchy_levels",
     "DEFAULT_CLUSTERING_METHOD",
     "DEFAULT_REDUCTION_METHOD",
     "DEFAULT_N_COMPONENTS",
+    "DEFAULT_NR_LEVELS",
+    "DEFAULT_LEVEL_SCALE",
     "DEFAULT_CLUSTERING_PARAMS",
+    "PIPELINE_VERSION",
+    "clustering_params_for",
 ]

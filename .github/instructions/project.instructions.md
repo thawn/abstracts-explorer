@@ -61,7 +61,7 @@ src/abstracts_explorer/
 ├── database.py          # Database manager (SQLAlchemy)
 ├── db_models.py         # Paper, EmbeddingsMetadata, ClusteringCache
 ├── embeddings.py        # ChromaDB embeddings
-├── clustering.py        # Clustering, reduction, labeling
+├── clustering/          # BERTopic pipeline, hierarchy tree, labeling
 ├── rag.py               # RAG chat (pydantic-ai)
 ├── mcp_server.py        # MCP server (mcp MCPServer)
 ├── mcp_tools.py         # MCP tool schemas and execution
@@ -74,7 +74,7 @@ src/abstracts_explorer/
 ├── plugin.py            # Plugin system
 ├── cli.py               # argparse CLI
 ├── plugins/             # Conference downloaders
-└── web_ui/              # Flask app, ES6 modules, templates, Jest tests
+└── web_ui/              # Flask app, TypeScript modules, templates, Jest tests
 
 tests/                   # pytest suite (one file per source module)
 docs/                    # Sphinx Markdown docs
@@ -87,7 +87,7 @@ See `docs/plugins.md` for adding one.
 ## Testing
 
 - Python: pytest + pytest-mock; target **>90%** coverage.
-- JavaScript: Jest + jsdom; target **>80%** coverage.
+- Frontend: Jest + jsdom via `@swc/jest` for TypeScript sources; target **>80%** coverage.
 - One test file per source module (`database.py` → `tests/test_database.py`).
   Test-type exceptions: `test_integration.py`, `test_web_integration.py`,
   `test_web_e2e.py`, `test_staging_e2e.py`, `test_stress.py`.
@@ -109,6 +109,8 @@ uv run pytest --cov=src/abstracts_explorer
 uv run pytest tests/test_database.py::test_add_paper
 
 npm install        # also installs vendor assets and git hooks
+npm run typecheck  # tsc --noEmit
+npm run build:js   # esbuild bundle -> static/dist/
 npm test
 npm run test:coverage
 ```
@@ -165,17 +167,19 @@ them from `static/modules/`.
 - **Embeddings**: ChromaDB stores paper UIDs, vectors, and SHA-256 content
   hashes only. The SQL database is the single source of truth for paper
   metadata; filters resolve to UIDs in SQL and are passed to ChromaDB as IDs.
-- **Clustering**: CLI/web/MCP pipeline is fixed to Agglomerative (ward, distance
-  threshold 150) + t-SNE. `clustering.py` still exposes K-Means, DBSCAN,
-  Agglomerative, Spectral, Fuzzy C-Means and PCA/t-SNE; UMAP was removed.
-  LLM auto-labeling uses TF-IDF keywords; results are cached in the database.
+- **Clustering**: CLI/web/MCP pipeline is fixed to BERTopic with Agglomerative
+  clustering (ward, distance threshold 0.5) on 5-D UMAP embeddings; a separate
+  2-D UMAP supplies visualization coordinates. LLM labels are used for flat and
+  merged hierarchy topics, with retry and keyword fallback. The complete JSON
+  payload is cached in the database; Plotly runs only in the browser.
 - **RAG**: `pydantic-ai` agent against an OpenAI-compatible backend; it can
   auto-invoke MCP tools.
 - **MCP**: `MCPServer` from the `mcp` package. Tools include topic relevance,
   conference topics, topic evolution, paper search, cluster visualization,
   paper details, interesting-paper summaries, and recommendations.
-- **Web UI**: Flask 3.0+, 20+ API routes, 15 modular ES6 modules (8 top-level +
-  `utils/`), Plotly/Marked/KaTeX/DOMPurify vendor assets, Waitress in production.
+- **Web UI**: Flask 3.0+, 20+ API routes, TypeScript modules bundled with
+  esbuild (`static/dist/`), Plotly (basic build, lazy-loaded)/Marked/KaTeX/DOMPurify
+  imported from npm, Waitress in production.
 - **Registry/evaluation**: OCI artifacts via `oras`; automatic RAG evaluation.
 
 ## Common Tasks

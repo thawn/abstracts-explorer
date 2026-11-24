@@ -1,251 +1,498 @@
 /**
- * Unit tests for hierarchical clustering functionality
+ * Tests for hierarchy-level slider behavior in the clustering module.
  */
 
 import { jest } from '@jest/globals';
 
-// Mock global objects before importing modules
 global.fetch = jest.fn();
 global.Plotly = {
-    newPlot: jest.fn(),
-    relayout: jest.fn(),
-    restyle: jest.fn()
+    newPlot: jest.fn(() => Promise.resolve()),
+    relayout: jest.fn(() => Promise.resolve()),
+    restyle: jest.fn(() => Promise.resolve()),
+    react: jest.fn(() => Promise.resolve()),
+    addTraces: jest.fn(() => Promise.resolve())
 };
-global.alert = jest.fn();
-global.console.warn = jest.fn();
-global.console.error = jest.fn();
+global.console = {
+    ...console,
+    log: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn()
+};
 
-// Import clustering module - we need to mock it since it has circular dependencies
-// For now, we'll test the buildLevelDataFromHierarchy logic directly
+jest.unstable_mockModule('../static/modules/utils/constants.js', () => ({
+    API_BASE: '',
+    PLOTLY_COLORS: ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
+}));
 
-describe('Hierarchical Clustering', () => {
-    // Sample hierarchy tree structure matching backend format
-    const mockHierarchyTree = {
-        nodes: {
-            0: { node_id: 0, is_leaf: true, children: [], samples: [0], level: 0, label: 'Paper 1' },
-            1: { node_id: 1, is_leaf: true, children: [], samples: [1], level: 0, label: 'Paper 2' },
-            2: { node_id: 2, is_leaf: true, children: [], samples: [2], level: 0, label: 'Paper 3' },
-            3: { node_id: 3, is_leaf: true, children: [], samples: [3], level: 0, label: 'Paper 4' },
-            4: { node_id: 4, is_leaf: false, children: [0, 1], samples: [0, 1], level: 1, label: 'ML Cluster' },
-            5: { node_id: 5, is_leaf: false, children: [2, 3], samples: [2, 3], level: 1, label: 'NLP Cluster' },
-            6: { node_id: 6, is_leaf: false, children: [4, 5], samples: [0, 1, 2, 3], level: 2, label: 'AI Cluster' }
-        },
-        root: 6,
-        max_level: 2
+jest.unstable_mockModule('../static/modules/utils/ui-utils.js', () => ({
+    showLoading: jest.fn(),
+    showErrorInElement: jest.fn()
+}));
+
+jest.unstable_mockModule('../static/modules/paper-card.js', () => ({
+    formatPaperCard: jest.fn((paper) => `<div>${paper.title}</div>`)
+}));
+
+const { loadClusters, setHierarchyLevel, resetClusters } = await import(
+    '../static/modules/clustering.js'
+);
+
+function buildData(levels) {
+    return {
+        points: [
+            { id: 'p1', x: 1, y: 1, cluster: 0, title: 'Paper 1', year: 2025, conference: 'NeurIPS' },
+            { id: 'p2', x: 2, y: 2, cluster: 1, title: 'Paper 2', year: 2025, conference: 'NeurIPS' }
+        ],
+        statistics: { total_papers: 2, n_clusters: 2, n_noise: 0, cluster_sizes: { 0: 1, 1: 1 } },
+        cluster_labels: { 0: 'Cat', 1: 'Dog' },
+        cluster_descriptions: { 0: 'Papers about cats.', 1: 'Papers about dogs.' },
+        cluster_centers: { 0: { x: 1, y: 1 }, 1: { x: 2, y: 2 } },
+        hierarchy: { levels }
     };
+}
 
-    describe('buildLevelDataFromHierarchy', () => {
-        // Helper function that mimics the JavaScript function
-        function buildLevelDataFromHierarchy(tree, level, parentId = null) {
-            if (!tree || !tree.nodes) {
-                return { clusters: [], level: 0, max_level: 0, labels: {} };
-            }
-            
-            // Get all nodes at this level
-            const nodesAtLevel = [];
-            for (const [nodeId, nodeInfo] of Object.entries(tree.nodes)) {
-                if (nodeInfo.level === level) {
-                    nodesAtLevel.push(parseInt(nodeId));
-                }
-            }
-            
-            // Filter by parent if specified
-            let filteredNodes = nodesAtLevel;
-            if (parentId !== null && tree.nodes[parentId]) {
-                const parentChildren = tree.nodes[parentId].children || [];
-                filteredNodes = nodesAtLevel.filter(nodeId => parentChildren.includes(nodeId));
-            }
-            
-            // Build cluster info for each node
-            const clusters = filteredNodes.map(nodeId => {
-                const node = tree.nodes[nodeId];
-                return {
-                    cluster_id: nodeId,
-                    node_id: nodeId,
-                    label: node.label || `Cluster ${nodeId}`,
-                    size: node.samples ? node.samples.length : 0,
-                    samples: node.samples || [],
-                    is_leaf: node.is_leaf || false,
-                    has_children: (node.children && node.children.length > 0) || false
-                };
-            });
-            
-            return {
-                clusters: clusters,
-                level: level,
-                max_level: tree.max_level || 0,
-                labels: {}
-            };
+const flatLevel = {
+    level: 0,
+    max_distance: 0.1,
+    clusters: [
+        {
+            id: 0,
+            label: 'Cat',
+            description: 'Papers about cats.',
+            size: 1,
+            center: { x: 1, y: 1 },
+            keywords: []
+        },
+        {
+            id: 1,
+            label: 'Dog',
+            description: 'Papers about dogs.',
+            size: 1,
+            center: { x: 2, y: 2 },
+            keywords: []
         }
+    ],
+    mapping: { 0: 0, 1: 1 }
+};
 
-        it('should return empty data for invalid tree', () => {
-            const result = buildLevelDataFromHierarchy(null, 0);
-            expect(result.clusters).toEqual([]);
-            expect(result.level).toBe(0);
-            expect(result.max_level).toBe(0);
-        });
+const mergedLevel = {
+    level: 1,
+    max_distance: 0.2,
+    clusters: [
+        {
+            id: 100,
+            label: 'Animals',
+            description: 'Papers about domestic animals.',
+            size: 2,
+            center: { x: 1.5, y: 1.5 },
+            keywords: []
+        }
+    ],
+    mapping: { 0: 100, 1: 100 }
+};
 
-        it('should return empty data for tree without nodes', () => {
-            const result = buildLevelDataFromHierarchy({}, 0);
-            expect(result.clusters).toEqual([]);
-            expect(result.level).toBe(0);
-        });
+const fourTopicFlatLevel = {
+    level: 0,
+    max_distance: 0.1,
+    clusters: [0, 1, 2, 3].map(id => ({
+        id,
+        label: `Topic ${id}`,
+        description: `Papers about topic ${id}.`,
+        size: 1,
+        center: { x: id + 1, y: id + 1 },
+        keywords: []
+    })),
+    mapping: { 0: 0, 1: 1, 2: 2, 3: 3 }
+};
 
-        it('should get all leaf nodes at level 0', () => {
-            const result = buildLevelDataFromHierarchy(mockHierarchyTree, 0);
-            expect(result.clusters.length).toBe(4);  // 4 leaf nodes
-            expect(result.level).toBe(0);
-            expect(result.max_level).toBe(2);
-            expect(result.clusters[0].is_leaf).toBe(true);
-            expect(result.clusters[0].samples).toHaveLength(1);
-        });
+const fourTopicMidLevel = {
+    level: 1,
+    max_distance: 0.2,
+    clusters: [
+        {
+            id: 10,
+            label: 'Topics 0 + 1',
+            description: 'Papers about topics 0 and 1.',
+            size: 2,
+            center: { x: 1.5, y: 1.5 },
+            keywords: []
+        },
+        {
+            id: 2,
+            label: 'Topic 2',
+            description: 'Papers about topic 2.',
+            size: 1,
+            center: { x: 3, y: 3 },
+            keywords: []
+        },
+        {
+            id: 3,
+            label: 'Topic 3',
+            description: 'Papers about topic 3.',
+            size: 1,
+            center: { x: 4, y: 4 },
+            keywords: []
+        }
+    ],
+    mapping: { 0: 10, 1: 10, 2: 2, 3: 3 }
+};
 
-        it('should get intermediate nodes at level 1', () => {
-            const result = buildLevelDataFromHierarchy(mockHierarchyTree, 1);
-            expect(result.clusters.length).toBe(2);  // 2 intermediate nodes
-            expect(result.level).toBe(1);
-            expect(result.clusters[0].is_leaf).toBe(false);
-            expect(result.clusters[0].has_children).toBe(true);
-        });
+const fourTopicHighLevel = {
+    level: 2,
+    max_distance: 0.3,
+    clusters: [
+        {
+            id: 100,
+            label: 'Topics 0 + 1',
+            description: 'Papers about topics 0 and 1.',
+            size: 2,
+            center: { x: 1.5, y: 1.5 },
+            keywords: []
+        },
+        {
+            id: 200,
+            label: 'Topics 2 + 3',
+            description: 'Papers about topics 2 and 3.',
+            size: 2,
+            center: { x: 3.5, y: 3.5 },
+            keywords: []
+        }
+    ],
+    mapping: { 0: 100, 1: 100, 2: 200, 3: 200 }
+};
 
-        it('should get root node at level 2', () => {
-            const result = buildLevelDataFromHierarchy(mockHierarchyTree, 2);
-            expect(result.clusters.length).toBe(1);  // Root node
-            expect(result.level).toBe(2);
-            expect(result.clusters[0].node_id).toBe(6);
-            expect(result.clusters[0].samples).toHaveLength(4);
-        });
+const fourTopicLevels = [fourTopicFlatLevel, fourTopicMidLevel, fourTopicHighLevel];
 
-        it('should filter by parent node', () => {
-            // Get children of node 4 (which has children 0 and 1 at level 0)
-            const result = buildLevelDataFromHierarchy(mockHierarchyTree, 0, 4);
-            expect(result.clusters.length).toBe(2);
-            const nodeIds = result.clusters.map(c => c.node_id);
-            expect(nodeIds).toContain(0);
-            expect(nodeIds).toContain(1);
-            expect(nodeIds).not.toContain(2);
-            expect(nodeIds).not.toContain(3);
-        });
+function buildFourTopicData(levels) {
+    const points = [0, 1, 2, 3].map(id => ({
+        id: `p${id}`,
+        x: id + 1,
+        y: id + 1,
+        cluster: id,
+        title: `Paper ${id}`,
+        year: 2025,
+        conference: 'NeurIPS'
+    }));
+    return {
+        points,
+        statistics: { total_papers: 4, n_clusters: 4, n_noise: 0, cluster_sizes: { 0: 1, 1: 1, 2: 1, 3: 1 } },
+        cluster_labels: { 0: 'Topic 0', 1: 'Topic 1', 2: 'Topic 2', 3: 'Topic 3' },
+        cluster_descriptions: {
+            0: 'Papers about topic 0.',
+            1: 'Papers about topic 1.',
+            2: 'Papers about topic 2.',
+            3: 'Papers about topic 3.'
+        },
+        cluster_centers: { 0: { x: 1, y: 1 }, 1: { x: 2, y: 2 }, 2: { x: 3, y: 3 }, 3: { x: 4, y: 4 } },
+        hierarchy: { levels }
+    };
+}
 
-        it('should return empty when parent has no children at level', () => {
-            // Try to get level 2 nodes that are children of node 4 (but node 4 is at level 1)
-            const result = buildLevelDataFromHierarchy(mockHierarchyTree, 2, 4);
-            expect(result.clusters.length).toBe(0);
-        });
-
-        it('should calculate correct cluster sizes', () => {
-            const result = buildLevelDataFromHierarchy(mockHierarchyTree, 1);
-            expect(result.clusters[0].size).toBe(2);  // Each intermediate node has 2 samples
-            expect(result.clusters[1].size).toBe(2);
-        });
-
-        it('should include cluster labels', () => {
-            const result = buildLevelDataFromHierarchy(mockHierarchyTree, 1);
-            expect(result.clusters[0].label).toBeTruthy();
-            expect(result.clusters[0].label).toMatch(/Cluster|ML|NLP/);
-        });
+describe('Hierarchy slider', () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+        resetClusters();
+        document.body.innerHTML = `
+            <div id="cluster-plot"></div>
+            <div id="cluster-legend"></div>
+            <div id="hierarchy-controls" class="hidden">
+                <input id="hierarchy-level-slider" type="range" min="0" max="9" value="4" />
+                <span id="hierarchy-level-label"></span>
+            </div>
+        `;
+        const plotDiv = document.getElementById('cluster-plot');
+        plotDiv.on = jest.fn();
+        plotDiv.data = [];
     });
 
-    describe('Hierarchy validation', () => {
-        it('should validate tree has nodes', () => {
-            const tree = { root: 1, max_level: 1 };  // Missing nodes
-            const result = buildLevelDataFromHierarchy(tree, 0);
-            expect(result.clusters).toEqual([]);
-        });
+    it('hides controls when the cache has no hierarchy levels', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildData([]) });
 
-        it('should handle tree with empty nodes object', () => {
-            const tree = { nodes: {}, root: 0, max_level: 0 };
-            const result = buildLevelDataFromHierarchy(tree, 0);
-            expect(result.clusters).toEqual([]);
-        });
+        await loadClusters();
+
+        expect(document.getElementById('hierarchy-controls').classList.contains('hidden')).toBe(true);
+        const traces = global.Plotly.newPlot.mock.calls[0][1];
+        expect(traces).toHaveLength(2);
+        expect(traces[1].x).toEqual([1, 2]);
     });
 
-    describe('Edge cases', () => {
-        it('should handle nodes without samples array', () => {
-            const tree = {
-                nodes: {
-                    0: { node_id: 0, is_leaf: true, children: [], level: 0 }
-                },
-                root: 0,
-                max_level: 0
-            };
-            const result = buildLevelDataFromHierarchy(tree, 0);
-            expect(result.clusters[0].samples).toEqual([]);
-            expect(result.clusters[0].size).toBe(0);
-        });
+    it('clamps the default level when fewer than four levels exist', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildData([flatLevel, mergedLevel]) });
 
-        it('should handle nodes without children array', () => {
-            const tree = {
-                nodes: {
-                    0: { node_id: 0, is_leaf: false, samples: [0], level: 0 }
-                },
-                root: 0,
-                max_level: 0
-            };
-            const result = buildLevelDataFromHierarchy(tree, 0);
-            expect(result.clusters[0].has_children).toBe(false);
-        });
+        await loadClusters();
 
-        it('should handle nodes without label', () => {
-            const tree = {
-                nodes: {
-                    0: { node_id: 0, is_leaf: true, children: [], samples: [0], level: 0 }
-                },
-                root: 0,
-                max_level: 0
-            };
-            const result = buildLevelDataFromHierarchy(tree, 0);
-            expect(result.clusters[0].label).toBe('Cluster 0');
-        });
+        const slider = document.getElementById('hierarchy-level-slider');
+        expect(slider.max).toBe('1');
+        expect(slider.value).toBe('1');
+        expect(document.getElementById('hierarchy-level-label').textContent).toContain('Level 1');
+    });
 
-        it('should handle level beyond max_level', () => {
-            const result = buildLevelDataFromHierarchy(mockHierarchyTree, 10);
-            expect(result.clusters).toEqual([]);  // No nodes at level 10
-        });
+    it('merges document colors and stars at a merged level', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildData([flatLevel, mergedLevel]) });
 
-        it('should handle negative level', () => {
-            const result = buildLevelDataFromHierarchy(mockHierarchyTree, -1);
-            expect(result.clusters).toEqual([]);  // No nodes at negative level
+        await loadClusters();
+
+        const mergedTraces = global.Plotly.newPlot.mock.calls[0][1];
+        expect(mergedTraces[0].marker.color[0]).toBe(mergedTraces[0].marker.color[1]);
+        expect(mergedTraces[1].text).toEqual(['Animals']);
+        expect(mergedTraces[1].x).toEqual([1.5]);
+        expect(mergedTraces[1].customdata[0].description).toBe('Papers about domestic animals.');
+        expect(mergedTraces[1].hovertemplate).toContain('%{customdata.description}');
+
+        global.Plotly.newPlot.mockClear();
+        setHierarchyLevel(0);
+
+        const flatTraces = global.Plotly.newPlot.mock.calls[0][1];
+        expect(flatTraces[1].text).toEqual(['Cat', 'Dog']);
+        expect(flatTraces[1].x).toEqual([1, 2]);
+    });
+
+    it('clamps invalid slider indices', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildData([flatLevel, mergedLevel]) });
+
+        await loadClusters();
+        setHierarchyLevel(99);
+
+        expect(document.getElementById('hierarchy-level-slider').value).toBe('1');
+        setHierarchyLevel(-5);
+        expect(document.getElementById('hierarchy-level-slider').value).toBe('0');
+    });
+
+    it('assigns stable ids to document and star traces', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildData([flatLevel, mergedLevel]) });
+
+        await loadClusters();
+        setHierarchyLevel(0);
+        await flushPromises();
+
+        const traces = global.Plotly.newPlot.mock.calls.at(-1)[1];
+        expect(traces[0].ids).toEqual(['p1', 'p2']);
+        expect(traces[1].ids).toEqual(['0', '1']);
+    });
+
+    it('hides cluster points when toggled off and restores them when toggled on', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildData([flatLevel, mergedLevel]) });
+
+        await loadClusters();
+        setHierarchyLevel(0);
+        await flushPromises();
+        document.getElementById('cluster-plot').data = [
+            { x: [1, 2], y: [1, 2] },
+            { x: [1.5], y: [1.5] }
+        ];
+        global.Plotly.restyle.mockClear();
+
+        const items = document.querySelectorAll('#cluster-legend [data-cluster-id]');
+        expect(items).toHaveLength(2);
+
+        items[0].click();
+
+        const hiddenCall = getDocumentRestyleCall();
+        expect(hiddenCall[1].x[0]).toEqual([2]);
+        expect(hiddenCall[1].y[0]).toEqual([2]);
+        expect(hiddenCall[1].text[0]).toEqual(['Paper 2']);
+        expect(hiddenCall[1].ids[0]).toEqual(['p2']);
+        expect(hiddenCall[1].customdata[0]).toHaveLength(1);
+        expect(hiddenCall[1].customdata[0][0].id).toBe('p2');
+        expect(hiddenCall[1]['marker.color'][0]).toEqual(['#ff7f0e']);
+        expect(hiddenCall[1]['marker.color'][0]).not.toContain('#e5e7eb');
+
+        const starHiddenCall = getStarRestyleCall();
+        expect(starHiddenCall[1].ids[0]).toEqual(['1']);
+
+        global.Plotly.restyle.mockClear();
+        items[0].click();
+
+        const restoredCall = getDocumentRestyleCall();
+        expect(restoredCall[1].x[0]).toEqual([1, 2]);
+        expect(restoredCall[1].text[0]).toEqual(['Paper 1', 'Paper 2']);
+        expect(restoredCall[1].ids[0]).toEqual(['p1', 'p2']);
+        expect(restoredCall[1]['marker.color'][0]).toEqual(['#1f77b4', '#ff7f0e']);
+    });
+
+    it('keeps noise points visible until all clusters are cleared', async () => {
+        const data = buildData([flatLevel, mergedLevel]);
+        data.points.push({
+            id: 'noise-1',
+            x: 3,
+            y: 3,
+            cluster: -1,
+            title: 'Noise paper',
+            year: 2025,
+            conference: 'NeurIPS'
         });
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => data });
+
+        await loadClusters();
+        setHierarchyLevel(0);
+        await flushPromises();
+        document.getElementById('cluster-plot').data = [
+            { x: [1, 2, 3], y: [1, 2, 3] },
+            { x: [1.5], y: [1.5] }
+        ];
+        global.Plotly.restyle.mockClear();
+
+        const items = document.querySelectorAll('#cluster-legend [data-cluster-id]');
+        items[0].click();
+
+        const hiddenCall = getDocumentRestyleCall();
+        expect(hiddenCall[1].customdata[0].map(point => point.id)).toEqual(['p2', 'noise-1']);
+        expect(hiddenCall[1].ids[0]).toEqual(['p2', 'noise-1']);
+
+        const noneButton = Array.from(document.querySelectorAll('#cluster-legend button'))
+            .find(button => button.textContent === 'None');
+        expect(noneButton).toBeDefined();
+        global.Plotly.restyle.mockClear();
+        noneButton.click();
+
+        const clearedCall = getDocumentRestyleCall();
+        expect(clearedCall[1].x[0]).toEqual([]);
+        expect(clearedCall[1].ids[0]).toEqual([]);
+        expect(clearedCall[1].customdata[0]).toEqual([]);
+    });
+
+    it('only splits visible clusters into children when lowering the level', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildFourTopicData(fourTopicLevels) });
+
+        await loadClusters();
+        await flushPromises();
+        primePlotData(4);
+
+        clickLegendItem('200');
+        global.Plotly.restyle.mockClear();
+
+        setHierarchyLevel(1);
+
+        expect(getSelectionRestyleCall(1)[1].ids[0]).toEqual(['10']);
+        expect(getSelectionRestyleCall(0)[1].ids[0]).toEqual(['p0', 'p1']);
+        expect(getLegendItem('10').style.opacity).toBe('1');
+        expect(getLegendItem('2').style.opacity).toBe('0.4');
+        expect(getLegendItem('3').style.opacity).toBe('0.4');
+
+        setHierarchyLevel(0);
+
+        expect(getSelectionRestyleCall(1)[1].ids[0]).toEqual(['0', '1']);
+        expect(getSelectionRestyleCall(0)[1].ids[0]).toEqual(['p0', 'p1']);
+    });
+
+    it('shows whole parent clusters with visible children when raising the level', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildFourTopicData(fourTopicLevels) });
+
+        await loadClusters();
+        await flushPromises();
+        primePlotData(4);
+
+        setHierarchyLevel(0);
+        clickLegendButton('None');
+        clickLegendItem('2');
+        global.Plotly.restyle.mockClear();
+
+        setHierarchyLevel(1);
+
+        expect(getSelectionRestyleCall(1)[1].ids[0]).toEqual(['2']);
+        expect(getSelectionRestyleCall(0)[1].ids[0]).toEqual(['p2']);
+
+        setHierarchyLevel(2);
+
+        expect(getSelectionRestyleCall(1)[1].ids[0]).toEqual(['200']);
+        expect(getSelectionRestyleCall(0)[1].ids[0]).toEqual(['p2', 'p3']);
+        expect(getLegendItem('200').style.opacity).toBe('1');
+        expect(getLegendItem('100').style.opacity).toBe('0.4');
+    });
+
+    it('raises every parent with a visible child', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildFourTopicData(fourTopicLevels) });
+
+        await loadClusters();
+        await flushPromises();
+        primePlotData(4);
+
+        setHierarchyLevel(0);
+        clickLegendButton('None');
+        clickLegendItem('0');
+        clickLegendItem('2');
+        global.Plotly.restyle.mockClear();
+
+        setHierarchyLevel(2);
+
+        expect(getSelectionRestyleCall(1)[1].ids[0]).toEqual(['100', '200']);
+        expect(getSelectionRestyleCall(0)[1].ids[0]).toEqual(['p0', 'p1', 'p2', 'p3']);
+    });
+
+    it('preserves the selection when lowering and raising back', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildFourTopicData(fourTopicLevels) });
+
+        await loadClusters();
+        await flushPromises();
+        primePlotData(4);
+
+        clickLegendItem('200');
+        setHierarchyLevel(0);
+        global.Plotly.restyle.mockClear();
+
+        setHierarchyLevel(2);
+
+        expect(getSelectionRestyleCall(1)[1].ids[0]).toEqual(['100']);
+        expect(getSelectionRestyleCall(0)[1].ids[0]).toEqual(['p0', 'p1']);
     });
 });
 
-// Helper function mimicking the JS logic
-function buildLevelDataFromHierarchy(tree, level, parentId = null) {
-    if (!tree || !tree.nodes) {
-        return { clusters: [], level: 0, max_level: 0, labels: {} };
-    }
-    
-    const nodesAtLevel = [];
-    for (const [nodeId, nodeInfo] of Object.entries(tree.nodes)) {
-        if (nodeInfo.level === level) {
-            nodesAtLevel.push(parseInt(nodeId));
-        }
-    }
-    
-    let filteredNodes = nodesAtLevel;
-    if (parentId !== null && tree.nodes[parentId]) {
-        const parentChildren = tree.nodes[parentId].children || [];
-        filteredNodes = nodesAtLevel.filter(nodeId => parentChildren.includes(nodeId));
-    }
-    
-    const clusters = filteredNodes.map(nodeId => {
-        const node = tree.nodes[nodeId];
-        return {
-            cluster_id: nodeId,
-            node_id: nodeId,
-            label: node.label || `Cluster ${nodeId}`,
-            size: node.samples ? node.samples.length : 0,
-            samples: node.samples || [],
-            is_leaf: node.is_leaf || false,
-            has_children: (node.children && node.children.length > 0) || false
-        };
-    });
-    
-    return {
-        clusters: clusters,
-        level: level,
-        max_level: tree.max_level || 0,
-        labels: {}
-    };
+async function flushPromises() {
+    await Promise.resolve();
+    await Promise.resolve();
+}
+
+function primePlotData(pointCount) {
+    const plotDiv = document.getElementById('cluster-plot');
+    const xs = Array.from({ length: pointCount }, (_, index) => index);
+    plotDiv.data = [
+        { x: xs, y: xs },
+        { x: [] }
+    ];
+}
+
+function getLegendItem(clusterId) {
+    return document.querySelector(`#cluster-legend [data-cluster-id="${clusterId}"]`);
+}
+
+function clickLegendItem(clusterId) {
+    const item = getLegendItem(clusterId);
+    expect(item).toBeTruthy();
+    item.click();
+    return item;
+}
+
+function clickLegendButton(label) {
+    const button = Array.from(document.querySelectorAll('#cluster-legend button'))
+        .find(candidate => candidate.textContent === label);
+    expect(button).toBeDefined();
+    button.click();
+    return button;
+}
+
+function getSelectionRestyleCall(traceIndex) {
+    const calls = global.Plotly.restyle.mock.calls.filter(call => (
+        Array.isArray(call[2])
+        && call[2][0] === traceIndex
+        && call[1]
+        && Array.isArray(call[1].ids)
+    ));
+    return calls[calls.length - 1];
+}
+
+function getDocumentRestyleCall() {
+    return getRestyleCall(0);
+}
+
+function getStarRestyleCall() {
+    return getRestyleCall(1);
+}
+
+function getRestyleCall(traceIndex) {
+    return global.Plotly.restyle.mock.calls.find(call => (
+        Array.isArray(call[2])
+        && call[2][0] === traceIndex
+        && call[1]
+        && Array.isArray(call[1].x)
+    ));
 }

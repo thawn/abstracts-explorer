@@ -43,6 +43,7 @@ import requests as _requests
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, expect
 
 from abstracts_explorer.config import get_config
+from abstracts_explorer.orcid import OrcidError, fetch_orcid_record
 from tests.conftest import get_env_test_path
 
 # CSS selectors used for chart detection in the chat area
@@ -52,6 +53,15 @@ _CSS_CHAT_PLOT_CONTAINER = "div[id^='chat-plot-']"
 # Default conference and year selected in chat-related tests
 _DEFAULT_CONFERENCE = "NeurIPS"
 _DEFAULT_YEAR = "2025"
+
+# Public ORCID record used by the ORCID MCP tool smoke test
+_ORCID_ID = "0000-0002-2315-9247"
+
+# Search requests on staging take ~16s, so allow headroom above that.
+_SEARCH_TIMEOUT = 30
+
+# Plotly is lazy-loaded, so allow extra time for the chunk to arrive/render.
+_CHART_TIMEOUT = 30
 
 # ---------------------------------------------------------------------------
 # Conference / year selection helper
@@ -214,7 +224,7 @@ def _has_complete_response(page: Page) -> bool:
     return assistant_msgs.last.locator(".spinner").count() == 0
 
 
-def _check_chart_rendered(page: Page, timeout: int = 15) -> tuple:
+def _check_chart_rendered(page: Page, timeout: int = _CHART_TIMEOUT) -> tuple:
     """
     Check whether a Plotly chart has been rendered inside the chat.
 
@@ -395,11 +405,11 @@ def _seed_interesting_papers(
     _submit_search_query(page, query)
 
     stars = page.locator("#search-results .paper-star")
-    expect(stars.first).to_be_attached(timeout=15000)
+    expect(stars.first).to_be_attached(timeout=_SEARCH_TIMEOUT * 1000)
 
     for index in range(count):
         star = stars.nth(index * 5 + 4)
-        expect(star).to_be_attached(timeout=15000)
+        expect(star).to_be_attached(timeout=_SEARCH_TIMEOUT * 1000)
         star.click()
 
     page.wait_for_function(
@@ -543,7 +553,7 @@ class TestCoreSearch:
         _submit_search_query(staging_page, "learning")
 
         results = staging_page.locator("#search-results .bg-white.rounded-lg")
-        expect(results.first).to_be_attached(timeout=15000)
+        expect(results.first).to_be_attached(timeout=_SEARCH_TIMEOUT * 1000)
 
         assert results.count() > 0, "Search should return at least one result"
 
@@ -604,7 +614,7 @@ class TestAuthorSearch:
     """Verify author-name searches with different query formats."""
 
     _RESULT_CARD_CSS = "#search-results .bg-white.rounded-lg"
-    _WAIT_TIMEOUT = 30
+    _WAIT_TIMEOUT = _SEARCH_TIMEOUT
 
     def test_author_name_only(self, staging_url, staging_page):
         """
@@ -715,7 +725,7 @@ class TestPaperDisplay:
         _submit_search_query(staging_page, "learning")
 
         cards = staging_page.locator("#search-results .paper-card")
-        expect(cards.first).to_be_attached(timeout=15000)
+        expect(cards.first).to_be_attached(timeout=_SEARCH_TIMEOUT * 1000)
 
         assert cards.count() > 0, "Should have at least one paper card"
 
@@ -747,7 +757,9 @@ class TestPaperDisplay:
 
         _submit_search_query(staging_page, "large language models")
 
-        expect(staging_page.locator("#search-results .bg-white.rounded-lg").first).to_be_attached(timeout=15000)
+        expect(staging_page.locator("#search-results .bg-white.rounded-lg").first).to_be_attached(
+            timeout=_SEARCH_TIMEOUT * 1000
+        )
 
         # Paper cards use native <details>/<summary> for collapsible abstracts
         # when the abstract is longer than ~300 characters.
@@ -1218,6 +1230,44 @@ class TestMCPToolSmokeTests:
             criteria=(
                 "the response should name at least one author who works on topics similar to the "
                 "user's interesting papers, ideally with a session or poster location"
+            ),
+        )
+
+    def test_suggest_search_terms_from_orcid(self, staging_url, staging_page):
+        """
+        MCP tool: ``suggest_search_terms_from_orcid``.
+
+        Example query: *"Find papers that are interesting to me based on my
+        ORCID record 0000-0002-2315-9247."*
+
+        Success criteria (LLM-judged): the response recommends or lists
+        multiple papers whose topics relate to the researcher's ORCID profile
+        and explains why they might be interesting.
+
+        Parameters
+        ----------
+        staging_url : str
+            Base URL of the staging deployment.
+        staging_page : Page
+            Playwright page instance.
+        """
+        try:
+            record = fetch_orcid_record(_ORCID_ID, timeout=30)
+        except OrcidError as exc:
+            pytest.skip(f"ORCID public API unavailable: {exc}")
+        assert record["works"], "Expected public works on the ORCID record"
+
+        query = f"Find papers that are interesting to me based on my ORCID record {_ORCID_ID}."
+        response, _ = self._send_chat_query(staging_url, staging_page, query)
+        if not response:
+            pytest.skip("LLM backend unavailable – no response received")
+        _assert_llm_judgment(
+            query,
+            response,
+            criteria=(
+                "the response should recommend or list multiple conference papers whose "
+                "topics relate to the researcher's ORCID works (for example biocomputation, "
+                "computational biology, or machine learning) and explain why they are interesting"
             ),
         )
 

@@ -64,7 +64,7 @@ def _download_single(
     kwargs: Dict[str, Any] = {}
 
     max_workers = getattr(args, "max_workers", None)
-    if plugin.plugin_name in {"ml4ps", "agu"} and max_workers is not None:
+    if plugin.plugin_name in {"ml4ps", "agu", "neurips", "icml", "iclr"} and max_workers is not None:
         kwargs["max_workers"] = max_workers
 
     if plugin.plugin_name == "agu":
@@ -73,11 +73,21 @@ def _download_single(
             kwargs["request_delay"] = request_delay
         if getattr(args, "no_resume", False):
             kwargs["resume"] = False
+    elif plugin.plugin_name in {"neurips", "icml", "iclr"}:
+        request_delay = getattr(args, "request_delay", None)
+        if request_delay is not None:
+            kwargs["request_delay"] = request_delay
 
     if plugin.plugin_name == "chi":
         input_file = getattr(args, "input_file", None)
         if input_file:
             kwargs["input_path"] = input_file
+
+    if plugin.plugin_name == "iclr":
+        for key in ("openreview_email", "openreview_password", "openreview_token"):
+            value = getattr(args, key, None)
+            if value:
+                kwargs[key] = value
 
     target_path = json_path or (output_path.parent / f"{plugin.plugin_name}_{year}.json")
     return plugin.download(year=year, output_path=str(target_path), force_download=force, **kwargs)

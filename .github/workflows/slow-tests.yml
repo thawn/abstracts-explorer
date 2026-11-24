@@ -7,6 +7,10 @@ on:
             - 'src/**/*.py'
             - 'tests/**/*.py'
             - 'src/abstracts_explorer/web_ui/static/**/*.js'
+            - 'src/abstracts_explorer/web_ui/static/**/*.ts'
+            - 'src/abstracts_explorer/web_ui/types/**'
+            - 'tsconfig.json'
+            - 'scripts/**'
             - 'src/abstracts_explorer/web_ui/templates/**'
             - 'pyproject.toml'
             - 'uv.lock'
@@ -22,6 +26,10 @@ on:
             - 'src/**/*.py'
             - 'tests/**/*.py'
             - 'src/abstracts_explorer/web_ui/static/**/*.js'
+            - 'src/abstracts_explorer/web_ui/static/**/*.ts'
+            - 'src/abstracts_explorer/web_ui/types/**'
+            - 'tsconfig.json'
+            - 'scripts/**'
             - 'src/abstracts_explorer/web_ui/templates/**'
             - 'pyproject.toml'
             - 'uv.lock'
@@ -64,6 +72,9 @@ jobs:
               run: |
                   npm install
                   npm run install:vendor
+
+            - name: Build web UI bundle
+              run: npm run build:js
 
 
             - name: Install Playwright Chromium for E2E tests

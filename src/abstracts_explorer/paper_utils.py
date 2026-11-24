@@ -23,6 +23,28 @@ class PaperFormattingError(Exception):
     pass
 
 
+def paper_citation_key(paper: Dict[str, Any]) -> str:
+    """
+    Return a stable key used to deduplicate papers for citations.
+
+    Parameters
+    ----------
+    paper : dict
+        Paper record returned by a search or database tool.
+
+    Returns
+    -------
+    str
+        First non-empty identifier among ``uid``, ``id``, ``original_id``, and
+        ``title``; an empty string when no identifier is available.
+    """
+    for field in ("uid", "id", "original_id", "title"):
+        value = paper.get(field)
+        if value:
+            return str(value)
+    return ""
+
+
 def format_search_results(
     search_results: Dict[str, Any],
     database,
@@ -120,7 +142,12 @@ def format_search_results(
     return papers
 
 
-def extract_top_keywords(papers: list, n_keywords: int = 5) -> list:
+def extract_top_keywords(
+    papers: list,
+    n_keywords: int = 5,
+    *,
+    ngram_range: tuple[int, int] = (2, 3),
+) -> list:
     """
     Extract top keywords from a list of papers using TF-IDF.
 
@@ -130,6 +157,8 @@ def extract_top_keywords(papers: list, n_keywords: int = 5) -> list:
         List of paper dicts, each with optional 'title' and 'abstract' keys.
     n_keywords : int, optional
         Number of top keywords to return (default: 5).
+    ngram_range : tuple of int, optional
+        Minimum and maximum n-gram sizes to extract (default: ``(2, 3)``).
 
     Returns
     -------
@@ -155,7 +184,7 @@ def extract_top_keywords(papers: list, n_keywords: int = 5) -> list:
             max_features=_TFIDF_MAX_FEATURES,
             min_df=min_df,
             stop_words="english",
-            ngram_range=(2, 3),
+            ngram_range=ngram_range,
         )
         tfidf_matrix = tfidf.fit_transform(docs)
         feature_names = tfidf.get_feature_names_out()

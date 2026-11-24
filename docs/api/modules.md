@@ -24,6 +24,7 @@ Complete API documentation for Abstracts Explorer.
 
 - [Export Utilities](export_utils.md) — paper export (ZIP, Markdown)
 - [Paper Utilities](paper_utils.md) — paper formatting helpers
+- [ORCID Module](orcid.md) — public ORCID record lookup and search-term suggestions
 - [Database Models](db_models.md) — SQLAlchemy ORM models
 - [Evaluation Module](evaluation.md) — automatic RAG evaluation
 
@@ -34,12 +35,13 @@ for stable imports:
 
 - `abstracts_explorer.db` — `DatabaseManager` mixins (`database.py` facade)
 - `abstracts_explorer.embeddings` — ChromaDB store, generation, queries, artifacts
-- `abstracts_explorer.clustering` — Agglomerative + t-SNE, hierarchy, labeling, cache
+- `abstracts_explorer.clustering` — BERTopic + UMAP, hierarchy tree and derived levels, labeling, cache
 - `abstracts_explorer.plugin` — plugin framework, models, registry, HTTP, persistence
 - `abstracts_explorer.mcp` — MCP server/resources/cache/tools (`mcp_server.py` facade)
 - `abstracts_explorer.rag` — agent, tool wrappers, conversation, extraction
 - `abstracts_explorer.evaluation` — prompts, formatting, generation, running
 - `abstracts_explorer.interesting_papers` — loading, summary, recommendations, author suggestions
+- `abstracts_explorer.orcid` — public ORCID record lookup and search-term suggestions
 - `abstracts_explorer.export` — Markdown/ZIP export (`export_utils.py` facade)
 - `abstracts_explorer.cli` — `main.py` dispatch, `parsers.py` wiring, per-command modules
 - `abstracts_explorer.utils` — shared time/json/url/conference/presentation helpers
