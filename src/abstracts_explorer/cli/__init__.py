@@ -24,6 +24,7 @@ from abstracts_explorer.cli.clustering import (
     pre_generate_clustering_command,
 )
 from abstracts_explorer.cli.data_mgmt import delete_data_command
+from abstracts_explorer.cli.consistency import consistency_check_command
 from abstracts_explorer.cli.download import (
     _download_single,
     _report_failed_downloads,
@@ -87,6 +88,7 @@ __all__ = [
     "chat_command",
     "clear_clustering_cache_command",
     "cluster_embeddings_command",
+    "consistency_check_command",
     "create_embeddings_command",
     "delete_data_command",
     "download_command",

@@ -446,6 +446,68 @@ class ClusteringCacheMixin(SessionMixin):
         except Exception as e:
             raise self._db_error("Failed to save clustering cache", e)
 
+    def delete_clustering_cache_by_id(self, cache_id: int) -> bool:
+        """
+        Delete a single clustering cache entry by its primary key.
+
+        Parameters
+        ----------
+        cache_id : int
+            Primary key of the cache row to delete.
+
+        Returns
+        -------
+        bool
+            ``True`` when a row was deleted, ``False`` when it did not exist.
+
+        Raises
+        ------
+        DatabaseError
+            If the deletion fails.
+        """
+        try:
+            stmt = delete(ClusteringCache).where(ClusteringCache.id == cache_id)
+            result = self.session.execute(stmt)
+            self.session.commit()
+            deleted = (getattr(result, "rowcount", 0) or 0) > 0
+            if deleted:
+                logger.info("Deleted clustering cache entry %s", cache_id)
+            return deleted
+        except Exception as e:
+            raise self._db_error(f"Failed to delete clustering cache entry {cache_id}", e)
+
+    def delete_clustering_cache_ids(self, cache_ids: List[int]) -> int:
+        """
+        Delete clustering cache entries by primary key.
+
+        Parameters
+        ----------
+        cache_ids : list of int
+            Primary keys of the cache rows to delete.  Duplicates are ignored.
+
+        Returns
+        -------
+        int
+            Number of cache entries deleted.
+
+        Raises
+        ------
+        DatabaseError
+            If the deletion fails.
+        """
+        ids = sorted({int(cache_id) for cache_id in cache_ids})
+        if not ids:
+            return 0
+        try:
+            stmt = delete(ClusteringCache).where(ClusteringCache.id.in_(ids))
+            result = self.session.execute(stmt)
+            count = getattr(result, "rowcount", 0) or 0
+            self.session.commit()
+            logger.info("Deleted %d clustering cache entries", count)
+            return count
+        except Exception as e:
+            raise self._db_error("Failed to delete clustering cache entries", e)
+
     def delete_clustering_cache_by_conference_year(self, conference: str, year: int) -> int:
         """
         Delete all clustering cache entries for a specific conference and year.
