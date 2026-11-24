@@ -614,11 +614,11 @@ class TestParseRetryAfterSeconds:
 
         assert parse_retry_after_seconds(None) is None
 
-    def test_caps_at_max_wait(self):
+    def test_honors_large_server_value(self):
         from abstracts_explorer.rate_limiter import parse_retry_after_seconds
 
         headers = httpx2.Headers({"retry-after": "9999"})
-        assert parse_retry_after_seconds(headers, max_wait=120) == 120.0
+        assert parse_retry_after_seconds(headers) == 9999.0
 
 
 class TestCooldownAwareTransport:

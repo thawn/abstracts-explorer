@@ -213,7 +213,7 @@ class TestSDKRetryIntegration:
             client.close()
 
         assert calls["n"] == 1
-        cooldown.defer.assert_called_once_with(120.0)
+        cooldown.defer.assert_called_once_with(9999.0)
 
     def test_retries_consume_rate_limit_tokens(self, monkeypatch):
         set_global_rate_limiter(None)

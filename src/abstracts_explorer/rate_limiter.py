@@ -10,6 +10,7 @@ sync and async OpenAI clients are throttled transparently.
 
 import asyncio
 import logging
+import math
 import threading
 import time
 from datetime import datetime, timezone
@@ -465,20 +466,19 @@ class RateLimitCooldown:
             self._until = max(self._until, time.monotonic() + max(0.0, delay))
 
 
-def parse_retry_after_seconds(headers: Optional[httpx2.Headers], *, max_wait: float = 120.0) -> Optional[float]:
+def parse_retry_after_seconds(headers: Optional[httpx2.Headers]) -> Optional[float]:
     """
     Parse a ``Retry-After`` header into a non-negative delay in seconds.
 
     ``retry-after-ms`` takes precedence over ``Retry-After`` (matching the
     OpenAI SDK). Numeric values are treated as seconds; HTTP-date values are
-    converted to the remaining time. The result is capped at *max_wait*.
+    converted to the remaining time. The server-provided delay is honored as
+    given, without an upper bound.
 
     Parameters
     ----------
     headers : httpx2.Headers or None
         Response headers.
-    max_wait : float, optional
-        Upper bound for the returned delay in seconds (default 120).
 
     Returns
     -------
@@ -496,7 +496,9 @@ def parse_retry_after_seconds(headers: Optional[httpx2.Headers], *, max_wait: fl
             delay = float(value) / divisor
         except (TypeError, ValueError):
             continue
-        return max(0.0, min(delay, max_wait))
+        if not math.isfinite(delay):
+            return None
+        return max(0.0, delay)
 
     value = headers.get("retry-after")
     if not value:
@@ -507,7 +509,10 @@ def parse_retry_after_seconds(headers: Optional[httpx2.Headers], *, max_wait: fl
         return None
     if retry_at.tzinfo is None:
         retry_at = retry_at.replace(tzinfo=timezone.utc)
-    return max(0.0, min((retry_at - datetime.now(timezone.utc)).total_seconds(), max_wait))
+    delay = (retry_at - datetime.now(timezone.utc)).total_seconds()
+    if not math.isfinite(delay):
+        return None
+    return max(0.0, delay)
 
 
 class CooldownAwareTransport(httpx2.BaseTransport, httpx2.AsyncBaseTransport):
@@ -530,9 +535,6 @@ class CooldownAwareTransport(httpx2.BaseTransport, httpx2.AsyncBaseTransport):
     rate_limit_delay : float, optional
         Cooldown used for a ``429`` without a usable ``Retry-After`` header
         (default 60 seconds).
-    max_retry_after : float, optional
-        Upper bound for a cooldown derived from ``Retry-After`` (default 120
-        seconds).
     cooldown : RateLimitCooldown, optional
         Shared cooldown instance. Defaults to the process-global cooldown.
     rate_limiter : TokenBucketRateLimiter, optional
@@ -545,20 +547,18 @@ class CooldownAwareTransport(httpx2.BaseTransport, httpx2.AsyncBaseTransport):
         transport: httpx2.BaseTransport | httpx2.AsyncBaseTransport,
         *,
         rate_limit_delay: float = 60.0,
-        max_retry_after: float = 120.0,
         cooldown: Optional[RateLimitCooldown] = None,
         rate_limiter: Optional[TokenBucketRateLimiter] = None,
     ) -> None:
         self._transport = transport
         self._rate_limit_delay = max(0.0, rate_limit_delay)
-        self._max_retry_after = max(0.0, max_retry_after)
         self._cooldown = cooldown or get_global_cooldown()
         self._rate_limiter = rate_limiter
 
     def _handle_response(self, response: httpx2.Response) -> None:
         """Extend the shared cooldown when *response* is a rate-limit response."""
         if response.status_code == 429:
-            delay = parse_retry_after_seconds(response.headers, max_wait=self._max_retry_after)
+            delay = parse_retry_after_seconds(response.headers)
             if delay is None:
                 delay = self._rate_limit_delay
             self._cooldown.defer(delay)
