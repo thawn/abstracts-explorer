@@ -305,3 +305,73 @@ class TestSharedCooldownAcrossClients:
 
         assert not thread.is_alive()
         assert elapsed >= 0.1
+
+
+class _WindowRateLimitBackend:
+    """Mock backend that allows a fixed number of requests per one-second window."""
+
+    def __init__(self, clock: Any, limit_per_window: int = 1) -> None:
+        self._clock = clock
+        self._limit = limit_per_window
+        self._lock = threading.Lock()
+        self._windows: dict[int, int] = {}
+        self.accepted = 0
+        self.rejected = 0
+        self.arrivals: list[float] = []
+
+    def handle(self, request: httpx2.Request) -> httpx2.Response:
+        now = self._clock.monotonic()
+        window = int(now)
+        with self._lock:
+            count = self._windows.get(window, 0) + 1
+            self._windows[window] = count
+            self.arrivals.append(now)
+            if count > self._limit:
+                self.rejected += 1
+                return _error(request, headers={"retry-after": "1"})
+            self.accepted += 1
+        return _ok(request, content="Label: Parallel Cluster\nDescription: A parallel cluster.")
+
+
+class TestClusterLabelRateLimitE2E:
+    """End-to-end cluster labeling against a mocked rate-limited backend."""
+
+    def test_parallel_labeling_respects_60_requests_per_minute(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import abstracts_explorer.embeddings.models as models_module
+        from abstracts_explorer.clustering.representation import ProjectLLMRepresentation
+        from abstracts_explorer.embeddings import EmbeddingsManager
+        from tests.helpers import FakeTime
+
+        clock = FakeTime()
+        monkeypatch.setattr("abstracts_explorer.rate_limiter.time", clock)
+
+        backend = _WindowRateLimitBackend(clock, limit_per_window=1)
+        monkeypatch.setattr(
+            models_module.httpx2,
+            "HTTPTransport",
+            lambda *args, **kwargs: httpx2.MockTransport(backend.handle),
+        )
+
+        embeddings_manager = EmbeddingsManager(backend_url="http://test", requests_per_minute=60)
+        client = embeddings_manager.openai_client
+        try:
+            representation = ProjectLLMRepresentation(embeddings_manager, max_workers=8)
+            topic_model = Mock()
+            topic_model._extract_representative_docs.return_value = (
+                {topic: [f"doc {topic}"] for topic in range(25)},
+                None,
+                None,
+                None,
+            )
+            topics = {topic: [(f"keyword{topic}", 1.0)] for topic in range(25)}
+
+            updated = representation.extract_topics(topic_model, ["d"], None, topics)
+        finally:
+            client.close()
+
+        assert len(updated) == 25
+        assert all(updated[topic][0][0].startswith("Parallel Cluster") for topic in range(25))
+        assert backend.accepted == 25
+        assert backend.rejected == 0
+        assert max(backend._windows.values()) <= 1
+        assert backend.arrivals[-1] - backend.arrivals[0] >= 24.0
