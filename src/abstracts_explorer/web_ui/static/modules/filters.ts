@@ -113,8 +113,63 @@ function populateSessionSelect(select: HTMLSelectElement | null, sessions: strin
         option.value = session;
         option.textContent = session;
         option.selected = true;
+        option.hidden = false;
+        option.style.display = '';
         select.appendChild(option);
     });
+}
+
+/**
+ * Determine whether a session option is currently visible after filtering.
+ *
+ * @param option - Option element to inspect
+ * @returns True when the option is visible
+ */
+function isSessionOptionVisible(option: HTMLOptionElement): boolean {
+    return !option.hidden && option.style.display !== 'none';
+}
+
+/**
+ * Filter session options live based on a search query.
+ *
+ * Matching is a case-insensitive substring search over each option's value and
+ * label. Non-matching options are hidden but remain in the DOM so their
+ * selection state is preserved.
+ *
+ * @param selectId - ID of the multi-select to filter
+ * @param query - Search query entered by the user
+ */
+export function filterSessionOptions(selectId: string, query: string): void {
+    const select = document.getElementById(selectId) as HTMLSelectElement | null;
+    if (!select) return;
+
+    const normalized = query.trim().toLowerCase();
+    Array.from(select.options).forEach((option) => {
+        const matches =
+            normalized === '' ||
+            option.value.toLowerCase().includes(normalized) ||
+            (option.textContent?.toLowerCase().includes(normalized) ?? false);
+        option.hidden = !matches;
+        option.style.display = matches ? '' : 'none';
+    });
+}
+
+/**
+ * Clear the session search field and reveal all session options.
+ */
+function resetSessionSearch(): void {
+    const input = document.getElementById('modal-session-search') as HTMLInputElement | null;
+    if (input) {
+        input.value = '';
+    }
+
+    const select = document.getElementById('modal-session-filter') as HTMLSelectElement | null;
+    if (select) {
+        Array.from(select.options).forEach((option) => {
+            option.hidden = false;
+            option.style.display = '';
+        });
+    }
 }
 
 /**
@@ -260,17 +315,21 @@ export async function loadFilterOptions(): Promise<void> {
 export function selectAllFilter(filterId: string): void {
     const select = document.getElementById(filterId) as HTMLSelectElement;
     Array.from(select.options).forEach(option => {
-        option.selected = true;
+        option.selected = isSessionOptionVisible(option);
     });
 }
 
 /**
- * Deselect all options in a filter.
+ * Deselect all visible options in a filter.
+ *
+ * Options hidden by the session search keep their current selection state.
  */
 export function deselectAllFilter(filterId: string): void {
     const select = document.getElementById(filterId) as HTMLSelectElement;
     Array.from(select.options).forEach(option => {
-        option.selected = false;
+        if (isSessionOptionVisible(option)) {
+            option.selected = false;
+        }
     });
 }
 
@@ -279,6 +338,7 @@ export function deselectAllFilter(filterId: string): void {
  */
 export function openSearchSettings(): void {
     syncFiltersToModal('search');
+    resetSessionSearch();
 
     document.getElementById('modal-title')!.textContent = 'Search Settings';
 
@@ -297,6 +357,7 @@ export function openSearchSettings(): void {
  */
 export function openChatSettings(): void {
     syncFiltersToModal('chat');
+    resetSessionSearch();
 
     document.getElementById('modal-title')!.textContent = 'Chat Settings';
 

@@ -35,6 +35,7 @@ import {
     loadFilterOptions,
     selectAllFilter,
     deselectAllFilter,
+    filterSessionOptions,
     openSearchSettings,
     openChatSettings,
     closeSettings,
@@ -198,6 +199,7 @@ function attachToWindow(): void {
 
     window.selectAllFilter = selectAllFilter;
     window.deselectAllFilter = deselectAllFilter;
+    window.filterSessionOptions = filterSessionOptions;
     window.openSearchSettings = openSearchSettings;
     window.openChatSettings = openChatSettings;
     window.closeSettings = closeSettings;

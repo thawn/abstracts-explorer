@@ -10,6 +10,7 @@ import {
     loadFilterOptions, 
     selectAllFilter, 
     deselectAllFilter,
+    filterSessionOptions,
     openSearchSettings,
     openChatSettings,
     closeSettings,
@@ -42,6 +43,7 @@ describe('Filters Module', () => {
             <div id="search-settings-section"></div>
             <div id="chat-settings-section"></div>
             <select id="modal-session-filter" multiple></select>
+            <input id="modal-session-search" type="text" />
             <div id="conference-error-banner" class="hidden"></div>
             <p id="conference-error-message"></p>
             <div id="conference-error-available"></div>
@@ -353,6 +355,26 @@ describe('Filters Module', () => {
 
             expect(Array.from(select.options).every(opt => opt.selected)).toBe(true);
         });
+
+        it('should select only visible options and deselect hidden ones', () => {
+            const select = document.getElementById('modal-session-filter');
+            select.innerHTML = `
+                <option value="Alpha Session">Alpha Session</option>
+                <option value="Beta Session">Beta Session</option>
+                <option value="Gamma Session">Gamma Session</option>
+            `;
+            select.options[0].hidden = true;
+            select.options[0].style.display = 'none';
+            select.options[0].selected = true;
+            select.options[1].selected = false;
+            select.options[2].selected = false;
+
+            selectAllFilter('modal-session-filter');
+
+            expect(select.options[0].selected).toBe(false);
+            expect(select.options[1].selected).toBe(true);
+            expect(select.options[2].selected).toBe(true);
+        });
     });
 
     describe('deselectAllFilter', () => {
@@ -363,6 +385,63 @@ describe('Filters Module', () => {
             deselectAllFilter('session-filter');
 
             expect(Array.from(select.options).every(opt => !opt.selected)).toBe(true);
+        });
+
+        it('should deselect only visible options and preserve hidden selections', () => {
+            const select = document.getElementById('modal-session-filter');
+            select.innerHTML = `
+                <option value="Alpha Session" selected>Alpha Session</option>
+                <option value="Beta Session" selected>Beta Session</option>
+                <option value="Gamma Session" selected>Gamma Session</option>
+            `;
+            select.options[0].hidden = true;
+            select.options[0].style.display = 'none';
+
+            deselectAllFilter('modal-session-filter');
+
+            expect(select.options[0].selected).toBe(true);
+            expect(select.options[1].selected).toBe(false);
+            expect(select.options[2].selected).toBe(false);
+        });
+    });
+
+    describe('filterSessionOptions', () => {
+        beforeEach(() => {
+            const select = document.getElementById('modal-session-filter');
+            select.innerHTML = `
+                <option value="Transformers in Vision">Transformers in Vision</option>
+                <option value="Reinforcement Learning">Reinforcement Learning</option>
+                <option value="Graph Neural Networks">Graph Neural Networks</option>
+            `;
+        });
+
+        it('should hide non-matching options as the user types', () => {
+            filterSessionOptions('modal-session-filter', 'learn');
+
+            const select = document.getElementById('modal-session-filter');
+            expect(select.options[0].hidden).toBe(true);
+            expect(select.options[1].hidden).toBe(false);
+            expect(select.options[2].hidden).toBe(true);
+        });
+
+        it('should match case-insensitively and against option labels', () => {
+            filterSessionOptions('modal-session-filter', 'GRAPH');
+
+            const select = document.getElementById('modal-session-filter');
+            expect(select.options[2].hidden).toBe(false);
+            expect(select.options[2].style.display).toBe('');
+        });
+
+        it('should reveal all options for an empty query', () => {
+            filterSessionOptions('modal-session-filter', 'learn');
+            filterSessionOptions('modal-session-filter', '');
+
+            const select = document.getElementById('modal-session-filter');
+            expect(Array.from(select.options).every((opt) => !opt.hidden)).toBe(true);
+        });
+
+        it('should not throw for an unknown select', () => {
+            expect(() => filterSessionOptions('missing-filter', 'x')).not.toThrow();
         });
     });
 
@@ -383,6 +462,23 @@ describe('Filters Module', () => {
             const chatSection = document.getElementById('chat-settings-section');
             expect(searchSection.classList.contains('hidden')).toBe(false);
             expect(chatSection.classList.contains('hidden')).toBe(true);
+        });
+
+        it('should clear the session search and reveal all sessions', () => {
+            const input = document.getElementById('modal-session-search');
+            const modalSelect = document.getElementById('modal-session-filter');
+            modalSelect.innerHTML = `
+                <option value="Visible Session">Visible Session</option>
+                <option value="Hidden Session" hidden>Hidden Session</option>
+            `;
+            modalSelect.options[1].style.display = 'none';
+            input.value = 'visible';
+
+            openSearchSettings();
+
+            expect(input.value).toBe('');
+            expect(Array.from(modalSelect.options).every((opt) => !opt.hidden)).toBe(true);
+            expect(Array.from(modalSelect.options).every((opt) => opt.style.display === '')).toBe(true);
         });
     });
 
