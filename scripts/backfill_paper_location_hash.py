@@ -23,10 +23,12 @@ from typing import Iterable, Optional, Tuple
 
 import requests
 from sqlalchemy import inspect, text
+from tqdm import tqdm
 
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.utils.hashing import paper_content_hash
-from abstracts_explorer.plugin.locations import LocationMap, build_neurips_location_map
+from abstracts_explorer.plugin.locations import LocationMap
+from abstracts_explorer.plugins.neurips_downloader import build_neurips_location_map
 
 _USER_AGENT = "abstracts-explorer location backfill"
 _BATCH_SIZE = 1000
@@ -65,24 +67,42 @@ def _backfill_content_hashes(
         params["year"] = year
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
+    scope = "all papers"
+    if conference or year:
+        scope = f"{conference or 'all conferences'} / {year or 'all years'}"
+    print(f"Content hashes: scanning {scope}...")
+
     updated = 0
+    skipped = 0
     pending = []
     rows = db.session.execute(
         text(f"SELECT uid, title, abstract, content_hash FROM papers {where} ORDER BY uid"), params
     ).all()
-    for uid, title, abstract, existing in rows:
-        expected = paper_content_hash(title, abstract)
-        if not force and existing == expected:
-            continue
-        pending.append({"hash": expected, "uid": uid})
-        updated += 1
-        if len(pending) >= _BATCH_SIZE:
+    print(f"Content hashes: {len(rows):,} row(s) to inspect")
+
+    progress = tqdm(total=len(rows), desc="Content hashes", unit="row")
+    try:
+        for uid, title, abstract, existing in rows:
+            expected = paper_content_hash(title, abstract)
+            if not force and existing == expected:
+                skipped += 1
+                progress.update(1)
+                continue
+            pending.append({"hash": expected, "uid": uid})
+            updated += 1
+            progress.update(1)
+            progress.set_postfix(updated=f"{updated:,}", unchanged=f"{skipped:,}")
+            if len(pending) >= _BATCH_SIZE:
+                db.session.execute(text("UPDATE papers SET content_hash = :hash WHERE uid = :uid"), pending)
+                db.session.commit()
+                pending.clear()
+        if pending:
             db.session.execute(text("UPDATE papers SET content_hash = :hash WHERE uid = :uid"), pending)
-            db.session.commit()
-            pending.clear()
-    if pending:
-        db.session.execute(text("UPDATE papers SET content_hash = :hash WHERE uid = :uid"), pending)
-    db.session.commit()
+        db.session.commit()
+    finally:
+        progress.close()
+
+    print(f"Content hashes: updated {updated:,}, unchanged {skipped:,}")
     return updated
 
 
@@ -119,38 +139,54 @@ def _backfill_locations(
 ) -> int:
     """Derive and persist locations for multi-site NeurIPS years."""
     total = 0
-    for scope_conference, scope_year in _iter_scope(db, conference, year):
+    scopes = list(_iter_scope(db, conference, year))
+    print(f"Locations: inspecting {len(scopes)} conference/year scope(s)")
+
+    for scope_conference, scope_year in tqdm(scopes, desc="Location scopes", unit="scope"):
         if scope_conference.lower() != "neurips":
+            print(f"Locations: skipping {scope_conference} {scope_year} (not NeurIPS)")
             continue
+        print(f"Locations: discovering sites for {scope_conference} {scope_year} from neurips.cc...")
         try:
             location_map: LocationMap = build_neurips_location_map(scope_year, lambda url: _fetch_text(url, timeout))
         except Exception as exc:
-            print(f"Skipping {scope_conference} {scope_year}: {exc}", file=sys.stderr)
+            print(f"Locations: skipping {scope_conference} {scope_year}: {exc}", file=sys.stderr)
             continue
         if not location_map.is_multi_location:
+            print(f"Locations: skipping {scope_conference} {scope_year} (single site)")
             continue
 
+        print(f"Locations: {scope_conference} {scope_year} -> {', '.join(location_map.locations)}")
         rows = db.session.execute(
-            text("SELECT uid, session, room_name FROM papers " "WHERE conference = :conference AND year = :year"),
+            text("SELECT uid, session, room_name FROM papers WHERE conference = :conference AND year = :year"),
             {"conference": scope_conference, "year": scope_year},
         ).all()
         updated = 0
         pending = []
-        for uid, session, room_name in rows:
-            location = location_map.assign(session, room_name)
-            if location is None:
-                continue
-            pending.append({"location": location, "uid": uid})
-            updated += 1
-            if len(pending) >= _BATCH_SIZE:
+        progress = tqdm(total=len(rows), desc=f"{scope_conference} {scope_year}", unit="row")
+        try:
+            for uid, session, room_name in rows:
+                location = location_map.assign(session, room_name)
+                progress.update(1)
+                if location is None:
+                    continue
+                pending.append({"location": location, "uid": uid})
+                updated += 1
+                progress.set_postfix(updated=f"{updated:,}")
+                if len(pending) >= _BATCH_SIZE:
+                    db.session.execute(text("UPDATE papers SET location = :location WHERE uid = :uid"), pending)
+                    db.session.commit()
+                    pending.clear()
+            if pending:
                 db.session.execute(text("UPDATE papers SET location = :location WHERE uid = :uid"), pending)
-                db.session.commit()
-                pending.clear()
-        if pending:
-            db.session.execute(text("UPDATE papers SET location = :location WHERE uid = :uid"), pending)
-        db.session.commit()
+            db.session.commit()
+        finally:
+            progress.close()
         total += updated
-        print(f"{scope_conference} {scope_year}: {updated} presentations across {', '.join(location_map.locations)}")
+        print(
+            f"Locations: {scope_conference} {scope_year} updated {updated:,} of {len(rows):,} "
+            f"presentation(s) across {', '.join(location_map.locations)}"
+        )
     return total
 
 
@@ -169,14 +205,23 @@ def main() -> int:
         if args.paper_db:
             db.database_url = args.paper_db
         db.connect()
+        print(f"Backfill target: {db.database_url}")
+        if args.conference or args.year:
+            print(f"Scope: conference={args.conference or '*'} year={args.year or '*'}")
+        else:
+            print("Scope: all conferences and years")
         _ensure_columns(db)
         updated_hashes = _backfill_content_hashes(
             db, force=args.force_hashes, conference=args.conference, year=args.year
         )
-        print(f"Content hash updated for {updated_hashes} row(s)")
+        print("")
+        print(f"Content hash updated for {updated_hashes:,} row(s)")
         if not args.skip_locations:
+            print("")
             updated_locations = _backfill_locations(db, args.conference, args.year, args.timeout)
-            print(f"Location updated for {updated_locations} row(s)")
+            print(f"Location updated for {updated_locations:,} row(s)")
+        print("")
+        print("Backfill complete.")
     return 0
 
 
