@@ -16,7 +16,7 @@ from abstracts_explorer.embeddings.tokens import (
     token_margin,
     truncate_with_counts,
 )
-from abstracts_explorer.utils.http_utils import is_llm_timeout
+from abstracts_explorer.utils.http_utils import is_llm_rate_limit_error, is_llm_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -235,6 +235,8 @@ class GenerationMixin:
                     ordered = sorted(response.data, key=lambda item: item.index)
                     return [item.embedding for item in ordered]
         except Exception as e:
+            if is_llm_rate_limit_error(e):
+                raise EmbeddingsError(f"Batch embedding was rate-limited: {e}") from e
             if is_context_length_error(e):
                 fallback_reason = "input exceeded the model context window"
             elif is_llm_timeout(e):

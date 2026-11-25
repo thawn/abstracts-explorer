@@ -10,6 +10,7 @@ from abstracts_explorer.embeddings.batching import EMBED_BATCH_SIZE, iter_batche
 from abstracts_explorer.embeddings.errors import translate_errors
 from abstracts_explorer.embeddings.hashing import hash_text
 from abstracts_explorer.utils.disk_utils import ensure_free_space
+from abstracts_explorer.utils.http_utils import is_llm_rate_limit_error
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,13 @@ class IngestMixin:
                             )
                             embedded_count += len(update_uids)
                         except Exception as batch_error:
+                            if is_llm_rate_limit_error(batch_error):
+                                logger.error(
+                                    "Embedding batch was rate-limited (%s); aborting instead of "
+                                    "retrying papers individually",
+                                    batch_error,
+                                )
+                                raise
                             logger.error("Failed to embed batch (%s); retrying papers individually", batch_error)
                             for uid in update_uids:
                                 try:

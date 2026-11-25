@@ -452,7 +452,31 @@ class TestLLMHelpers:
         budgets = [call.kwargs["max_tokens"] for call in chat.call_args_list]
         assert budgets == [600, 1200]
 
-    def test_generate_label_does_not_retry_http_errors(self, mocker):
+    def test_generate_label_retries_http_429_after_cooldown(self, mocker):
+        config = mocker.Mock(
+            llm_max_attempts=5,
+            llm_retry_base_delay=0,
+            llm_retry_max_delay=0,
+            llm_request_timeout=5,
+            cluster_label_model="model",
+        )
+        mocker.patch("abstracts_explorer.clustering.llm.get_config", return_value=config)
+        mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
+        cooldown = mocker.Mock()
+        mocker.patch("abstracts_explorer.clustering.llm.get_global_cooldown", return_value=cooldown)
+        chat = mocker.patch(
+            "abstracts_explorer.clustering.llm.chat_completion_text",
+            side_effect=MockError(status_code=429),
+        )
+        em = mocker.Mock(openai_client=object())
+
+        with pytest.raises(MockError):
+            generate_llm_label(em, "system", "user")
+
+        assert chat.call_count == 3
+        assert cooldown.wait.call_count == 2
+
+    def test_generate_label_does_not_retry_non_429_http_errors(self, mocker):
         config = mocker.Mock(
             llm_max_attempts=3,
             llm_retry_base_delay=0,
@@ -464,7 +488,7 @@ class TestLLMHelpers:
         mocker.patch("abstracts_explorer.clustering.llm.time.sleep")
         chat = mocker.patch(
             "abstracts_explorer.clustering.llm.chat_completion_text",
-            side_effect=MockError(status_code=429),
+            side_effect=MockError(status_code=503),
         )
         em = mocker.Mock(openai_client=object())
 

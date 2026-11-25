@@ -157,6 +157,11 @@ class Config:
     llm_rate_limit_delay : float
         Shared cooldown applied after HTTP 429 responses when the backend does
         not provide a usable ``Retry-After`` header (default: 60.0).
+    llm_adaptive_rate_limit : bool
+        Whether the shared rate limiter lowers its effective request rate after
+        sustained ``429`` responses and recovers on success (default True).
+    llm_adaptive_min_rpm : int
+        Lower bound for the adaptively throttled request rate (default 6).
     enable_query_rewriting : bool
         Whether to enable query rewriting for better semantic search.
     query_similarity_threshold : float
@@ -353,6 +358,8 @@ class Config:
         self.llm_retry_base_delay = max(0.0, self._get_env_float("LLM_RETRY_BASE_DELAY", default=1.0))
         self.llm_retry_max_delay = max(0.0, self._get_env_float("LLM_RETRY_MAX_DELAY", default=10.0))
         self.llm_rate_limit_delay = max(0.0, self._get_env_float("LLM_RATE_LIMIT_DELAY", default=60.0))
+        self.llm_adaptive_rate_limit = self._get_env_bool("ADAPTIVE_RATE_LIMIT_ENABLED", default=True)
+        self.llm_adaptive_min_rpm = max(1, self._get_env_int("ADAPTIVE_MIN_RPM", default=6))
 
         # Query Rewriting Settings
         self.enable_query_rewriting = self._get_env_bool("ENABLE_QUERY_REWRITING", default=True)
@@ -568,6 +575,8 @@ class Config:
             "llm_retry_base_delay": self.llm_retry_base_delay,
             "llm_retry_max_delay": self.llm_retry_max_delay,
             "llm_rate_limit_delay": self.llm_rate_limit_delay,
+            "llm_adaptive_rate_limit": self.llm_adaptive_rate_limit,
+            "llm_adaptive_min_rpm": self.llm_adaptive_min_rpm,
             "web_rate_limit_per_minute": self.web_rate_limit_per_minute,
             "web_ui_threads": self.web_ui_threads,
             "guard_enabled": self.guard_enabled,

@@ -8,6 +8,7 @@ and exploring the abstracts database.
 import os
 import secrets
 import signal
+import socket
 import sys
 import logging
 import json
@@ -1101,7 +1102,41 @@ def internal_error(e):
     return jsonify({"error": "Internal server error"}), 500
 
 
-def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=None):
+def _port_conflict_message(host: str, port: int) -> str:
+    """Return an actionable message for an already occupied web UI port."""
+    return (
+        f"Port {port} on {host} is already in use. On macOS, port 5000 is often "
+        "occupied by AirPlay Receiver, which answers with HTTP 403 Forbidden. "
+        "Choose another port with --port or disable AirPlay Receiver in "
+        "System Settings > General > AirDrop & Handoff."
+    )
+
+
+def _port_in_use(host: str, port: int) -> bool:
+    """
+    Return True when a TCP listener already accepts connections on host:port.
+
+    Parameters
+    ----------
+    host : str
+        Host the web UI would bind to.
+    port : int
+        Port the web UI would bind to.
+
+    Returns
+    -------
+    bool
+        ``True`` if something is already listening, otherwise ``False``.
+    """
+    probe_host = "127.0.0.1" if host in ("", "0.0.0.0", "::", "localhost") else host
+    try:
+        with socket.create_connection((probe_host, port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def run_server(host="127.0.0.1", port=5001, debug=False, dev=False, threads=None):
     """
     Run the Flask web server.
 
@@ -1110,7 +1145,7 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=None
     host : str
         Host to bind to (default: 127.0.0.1)
     port : int
-        Port to bind to (default: 5000)
+        Port to bind to (default: 5001)
     debug : bool
         Enable debug mode (default: False)
     dev : bool
@@ -1122,7 +1157,7 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=None
     Raises
     ------
     ValueError
-        If threads is less than 1.
+        If threads is less than 1 or the port is already occupied.
     FileNotFoundError
         If the database file does not exist.
     """
@@ -1166,6 +1201,9 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=None
     # Print embeddings configuration
     print(f"Embeddings: {config.embedding_db}")
 
+    if _port_in_use(host, port):
+        print(f"\n⚠️  {_port_conflict_message(host, port)}", file=sys.stderr)
+
     print(f"Server: http://{host}:{port}")
 
     # Register SIGTERM handler for graceful shutdown (e.g., docker stop).
@@ -1175,33 +1213,36 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=None
 
     services.start_chat_history_cleanup()
 
-    # Use Flask development server if explicitly requested
-    if dev:
-        print("\n⚠️  Using Flask development server (not suitable for production)")
-        print("   Use without --dev flag for production server")
-        print("\nPress CTRL+C to stop the server")
-        # LGTM: Debug mode only used when explicitly requested via --dev flag or -vv
-        # This is intentionally for development/debugging purposes only
-        app.run(host=host, port=port, debug=debug)
-    else:
-        # Use Waitress production server (debug mode works with Waitress too)
-        try:
-            from waitress import serve  # type: ignore[import-untyped]
-
-            print("\n✅ Using Waitress production WSGI server")
-            if debug:
-                print("⚠️  Debug mode enabled (logging level set to DEBUG via -vv)")
-            print(f"Waitress threads: {threads}")
+    try:
+        # Use Flask development server if explicitly requested
+        if dev:
+            print("\n⚠️  Using Flask development server (not suitable for production)")
+            print("   Use without --dev flag for production server")
             print("\nPress CTRL+C to stop the server")
-            # Set Flask debug mode even with Waitress for better error messages
-            app.debug = debug
-            serve(app, host=host, port=port, threads=threads)
-        except ImportError:
-            print("\n⚠️  Waitress not installed, falling back to Flask development server", file=sys.stderr)
-            print("   Install Waitress with: pip install waitress", file=sys.stderr)
-            print("   Or install web extras: pip install abstracts-explorer[web]", file=sys.stderr)
-            print("\nPress CTRL+C to stop the server")
+            # LGTM: Debug mode only used when explicitly requested via --dev flag or -vv
+            # This is intentionally for development/debugging purposes only
             app.run(host=host, port=port, debug=debug)
+        else:
+            # Use Waitress production server (debug mode works with Waitress too)
+            try:
+                from waitress import serve  # type: ignore[import-untyped]
+
+                print("\n✅ Using Waitress production WSGI server")
+                if debug:
+                    print("⚠️  Debug mode enabled (logging level set to DEBUG via -vv)")
+                print(f"Waitress threads: {threads}")
+                print("\nPress CTRL+C to stop the server")
+                # Set Flask debug mode even with Waitress for better error messages
+                app.debug = debug
+                serve(app, host=host, port=port, threads=threads)
+            except ImportError:
+                print("\n⚠️  Waitress not installed, falling back to Flask development server", file=sys.stderr)
+                print("   Install Waitress with: pip install waitress", file=sys.stderr)
+                print("   Or install web extras: pip install abstracts-explorer[web]", file=sys.stderr)
+                print("\nPress CTRL+C to stop the server")
+                app.run(host=host, port=port, debug=debug)
+    except OSError as exc:
+        raise ValueError(_port_conflict_message(host, port)) from exc
 
 
 if __name__ == "__main__":
@@ -1209,7 +1250,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Abstracts Explorer Web Interface")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
-    parser.add_argument("--port", type=int, default=5000, help="Port to bind to")
+    parser.add_argument("--port", type=int, default=5001, help="Port to bind to")
     parser.add_argument(
         "--debug",
         action="store_true",

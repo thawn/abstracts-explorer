@@ -154,7 +154,13 @@ automatically identified topic cluster.
 abstracts-explorer web-ui
 ```
 
-**2. Open your browser** at <http://127.0.0.1:5000>.
+**2. Open your browser** at <http://127.0.0.1:5001>.
+
+> **macOS note:** Port 5000 is often occupied by AirPlay Receiver
+> (ControlCenter), which answers with HTTP 403 Forbidden. The web UI therefore
+> defaults to port 5001. If a different port is already in use, choose another
+> with `--port` or disable AirPlay Receiver in
+> System Settings > General > AirDrop & Handoff.
 
 ### Command-line options
 
@@ -165,7 +171,7 @@ abstracts-explorer web-ui [OPTIONS]
 | Option | Description |
 |--------|-------------|
 | `--host TEXT` | Bind address (default: `127.0.0.1`) |
-| `--port INTEGER` | Port number (default: `5000`) |
+| `--port INTEGER` | Port number (default: `5001`) |
 | `--dev` | Use Flask development server instead of Waitress |
 | `-v` / `-vv` | Increase log verbosity |
 

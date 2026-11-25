@@ -36,12 +36,14 @@ nano .env
 - **LLM_RETRY_BASE_DELAY**: Base delay in seconds for retrying cluster-label responses that contain no usable content (default: `1.0`). HTTP-level backoff is handled by the OpenAI SDK.
 - **LLM_RETRY_MAX_DELAY**: Maximum delay in seconds for empty-content cluster-label retries (default: `10.0`)
 - **LLM_RATE_LIMIT_DELAY**: Cooldown applied after an HTTP `429` when the backend does not send a usable `Retry-After` header (default: `60.0`). The cooldown is shared process-wide so parallel sync and async LLM requests pause together.
+- **ADAPTIVE_RATE_LIMIT_ENABLED**: Whether the shared rate limiter lowers its effective request rate after sustained `429` responses and recovers it after successful requests (default: `true`). Disable to keep the rate fixed at `REQUESTS_PER_MINUTE`.
+- **ADAPTIVE_MIN_RPM**: Lower bound for the adaptively throttled request rate in requests per minute (default: `6`). The limiter halves the effective rate on each `429` down to this floor and restores it as requests succeed again.
 
 ### Embedding Model Settings
 
 - **EMBEDDING_MODEL**: The embedding model to use (default: `text-embedding-qwen3-embedding-4b`)
 - **EMBEDDING_MAX_INPUT_TOKENS**: Maximum number of tokens sent to the embedding model in one request (default: `8192`). Longer titles/abstracts are truncated before the API call; the full text is still stored in ChromaDB. Set to `0` to disable proactive truncation.
-- **REQUESTS_PER_MINUTE**: Maximum OpenAI-compatible API requests per minute. This covers embedding and LLM (chat-completion) calls because both share the same rate-limited HTTP client and global token bucket. Requests are paced smoothly with a one-request burst so an initial burst cannot exhaust a provider’s per-minute quota. `0` disables rate limiting (default: `60`). Can be overridden per command with `--requests-per-minute`.
+- **REQUESTS_PER_MINUTE**: Maximum OpenAI-compatible API requests per minute. This covers embedding and LLM (chat-completion) calls because both share the same rate-limited HTTP client and global token bucket. Requests are paced smoothly with a one-request burst so an initial burst cannot exhaust a provider’s per-minute quota. Set this at or below the server’s global per-minute quota; with adaptive throttling enabled the effective rate is automatically reduced on sustained `429` responses and recovers afterwards. Requests waiting for a token re-check the shared cooldown, so parallel workers do not fire during a pause. `0` disables rate limiting (default: `60`). Can be overridden per command with `--requests-per-minute`.
 - **WEB_RATE_LIMIT_PER_MINUTE**: Maximum expensive web API requests per client per minute for chat, semantic search, cluster search, and topic evolution; `0` disables client rate limiting (default: `30`). The limiter is per-process; multi-worker deployments need a shared store for global enforcement.
 
 ### LLM Backend Configuration

@@ -30,6 +30,8 @@ class ModelMixin:
     connect_timeout: float
     llm_max_attempts: int
     llm_rate_limit_delay: float
+    llm_adaptive_rate_limit: bool
+    llm_adaptive_min_rpm: int
 
     @property
     def openai_client(self) -> OpenAI:
@@ -64,11 +66,20 @@ class ModelMixin:
         shared cooldown so parallel requests pause after a rate-limit response.
         """
         inner_transport: httpx2.BaseTransport = httpx2.HTTPTransport()
+        rate_limiter = None
         if self.requests_per_minute > 0:
-            inner_transport = RateLimitedTransport(inner_transport, self.requests_per_minute)
+            limited_transport = RateLimitedTransport(
+                inner_transport,
+                self.requests_per_minute,
+                adaptive=self.llm_adaptive_rate_limit,
+                min_requests_per_minute=self.llm_adaptive_min_rpm,
+            )
+            rate_limiter = limited_transport.rate_limiter
+            inner_transport = limited_transport
         transport = CooldownAwareTransport(
             inner_transport,
             rate_limit_delay=self.llm_rate_limit_delay,
+            rate_limiter=rate_limiter,
         )
         http_client = httpx2.Client(
             transport=transport,
