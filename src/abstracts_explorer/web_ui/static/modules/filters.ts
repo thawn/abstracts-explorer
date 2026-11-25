@@ -127,22 +127,6 @@ export async function loadFilterOptions(): Promise<void> {
 
         const yearSelect = document.getElementById('year-selector') as HTMLSelectElement | null;
         const conferenceSelect = document.getElementById('conference-selector') as HTMLSelectElement | null;
-        const selectedConference = getSelectedConference();
-        const selectedYears = getSelectedYears();
-
-        const filterParams = new URLSearchParams();
-        if (selectedYears.length === 1) filterParams.append('year', String(selectedYears[0]));
-        if (selectedConference) filterParams.append('conference', selectedConference);
-
-        const filtersResponse = await fetch(`${API_BASE}/api/filters?${filterParams.toString()}`);
-        const filtersData = await parseJsonResponse(filtersResponse);
-
-        if (requestId !== latestFilterRequest) return;
-
-        if (filtersData.error) {
-            console.error('Error loading filters:', filtersData.error);
-            return;
-        }
 
         const availableResponse = await fetch(`${API_BASE}/api/available-filters`);
         const availableData = await parseJsonResponse(availableResponse);
@@ -239,6 +223,23 @@ export async function loadFilterOptions(): Promise<void> {
                     dtInput.value = String(availableData.default_distance_threshold);
                 }
             }
+        }
+
+        const selectedConference = getSelectedConference();
+        const selectedYears = getSelectedYears();
+
+        const filterParams = new URLSearchParams();
+        if (selectedYears.length === 1) filterParams.append('year', String(selectedYears[0]));
+        if (selectedConference) filterParams.append('conference', selectedConference);
+
+        const filtersResponse = await fetch(`${API_BASE}/api/filters?${filterParams.toString()}`);
+        const filtersData = await parseJsonResponse(filtersResponse);
+
+        if (requestId !== latestFilterRequest) return;
+
+        if (filtersData.error) {
+            console.error('Error loading filters:', filtersData.error);
+            return;
         }
 
         const sessionSelect = document.getElementById('session-filter') as HTMLSelectElement | null;
