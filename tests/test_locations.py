@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from abstracts_explorer.embeddings.hashing import paper_content_hash
 from abstracts_explorer.plugin import LightweightPaper
-from abstracts_explorer.plugin.locations import (
-    LocationMap,
+from abstracts_explorer.plugin.locations import LocationMap
+from abstracts_explorer.plugins.neurips_downloader import (
     assign_locations,
     build_location_map,
     discover_locations,
@@ -19,6 +19,7 @@ def _paper(
     room_name: str = "",
     location: str | None = None,
     original_id: str | None = None,
+    year: int = 2026,
 ) -> LightweightPaper:
     return LightweightPaper(
         original_id=original_id or f"{title}::{session}",
@@ -27,7 +28,7 @@ def _paper(
         abstract=f"Abstract for {title}",
         session=session,
         poster_position="1",
-        year=2026,
+        year=year,
         conference="NeurIPS",
         room_name=room_name or None,
         location=location,
@@ -124,6 +125,18 @@ def test_database_location_and_hash_queries(connected_db):
         [paper_content_hash("Shared paper", "Abstract for Shared paper")]
     )
     assert grouped[paper_content_hash("Shared paper", "Abstract for Shared paper")] == ["Paris", "Sydney"]
+
+
+def test_group_papers_by_content_does_not_merge_across_years(connected_db):
+    connected_db.add_papers(
+        [
+            _paper("Recurring paper", "Sydney Poster Session 1", "Hall 1", "Sydney", year=2025),
+            _paper("Recurring paper", "Sydney Poster Session 1", "Hall 1", "Sydney", year=2026),
+        ]
+    )
+    results = connected_db.group_papers_by_content(connected_db.get_paper())
+    recurring = [paper for paper in results if paper["title"] == "Recurring paper"]
+    assert len(recurring) == 2
 
 
 def test_group_papers_by_content_merges_presentations(connected_db):

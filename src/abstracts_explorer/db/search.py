@@ -276,10 +276,11 @@ class SearchMixin(PapersMixin):
         """
         Collapse duplicate presentations of the same abstract.
 
-        Rows that share a ``content_hash`` (for example streamed orals or an
-        oral and poster for the same paper) are merged into one result.  The
-        merged result keeps the first row's fields and adds a ``locations``
-        list plus a ``presentations`` list describing each presentation.
+        Rows that share a ``content_hash`` within the same conference and year
+        (for example streamed orals or an oral and poster for the same paper)
+        are merged into one result.  The merged result keeps the first row's
+        fields and adds a ``locations`` list plus a ``presentations`` list
+        describing each presentation.
 
         Parameters
         ----------
@@ -291,10 +292,14 @@ class SearchMixin(PapersMixin):
         list of dict
             Grouped paper dictionaries in first-seen order.
         """
-        grouped: Dict[str, Dict[str, Any]] = {}
-        order: List[str] = []
+        grouped: Dict[tuple, Dict[str, Any]] = {}
+        order: List[tuple] = []
         for paper in papers:
-            key = str(paper.get("content_hash") or paper.get("uid") or "")
+            key = (
+                paper.get("conference"),
+                paper.get("year"),
+                str(paper.get("content_hash") or paper.get("uid") or ""),
+            )
             if key not in grouped:
                 entry = dict(paper)
                 entry["locations"] = []

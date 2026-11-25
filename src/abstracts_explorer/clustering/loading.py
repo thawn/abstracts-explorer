@@ -105,15 +105,17 @@ class LoadingMixin:
             content_hashes = [str(summaries[uid].get("content_hash") or uid) for uid in kept_ids]
             locations_by_hash = self.database.get_locations_by_content_hashes(content_hashes)
 
-            seen_hashes: set[str] = set()
+            seen_hashes: set[tuple] = set()
             deduped_ids: List[str] = []
             deduped_embeddings: List[Any] = []
             deduped_metadatas: List[Dict[str, Any]] = []
             for index, uid, content_hash in zip(keep_indices, kept_ids, content_hashes):
-                if content_hash in seen_hashes:
+                metadata = summaries[uid]
+                dedupe_key = (metadata.get("conference"), metadata.get("year"), content_hash)
+                if dedupe_key in seen_hashes:
                     continue
-                seen_hashes.add(content_hash)
-                metadata = dict(summaries[uid])
+                seen_hashes.add(dedupe_key)
+                metadata = dict(metadata)
                 locations = locations_by_hash.get(content_hash)
                 if not locations:
                     single = metadata.get("location")
