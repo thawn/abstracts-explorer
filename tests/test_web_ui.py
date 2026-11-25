@@ -1194,6 +1194,38 @@ class TestWebUIChatEndpointSuccess:
                     assert call_kwargs.kwargs["limit"] == 5
                     assert call_kwargs.kwargs["conferences"] is None
                     assert call_kwargs.kwargs["years"] is None
+                    assert call_kwargs.kwargs["sessions"] is None
+
+    def test_chat_forwards_sessions(self):
+        """Test that the session filter is forwarded to RAG chat."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.request_services.get_rag_chat") as mock_get_rag:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_get_config:
+                    mock_config = Mock()
+                    mock_config.max_context_papers = 3
+                    mock_get_config.return_value = mock_config
+
+                    mock_rag = Mock()
+                    mock_rag.query.return_value = {
+                        "response": "Test",
+                        "papers": [],
+                        "metadata": {},
+                    }
+                    mock_get_rag.return_value = mock_rag
+
+                    response = client.post(
+                        "/api/chat",
+                        json={
+                            "message": "Show oral papers",
+                            "sessions": ["Oral Session 1", "Spotlight Session"],
+                        },
+                    )
+
+        assert response.status_code == 200
+        call_kwargs = mock_rag.query.call_args
+        assert call_kwargs.kwargs["sessions"] == ["Oral Session 1", "Spotlight Session"]
 
     def test_chat_forwards_paper_priorities(self):
         """Test that interesting-paper ratings are forwarded to RAG chat."""

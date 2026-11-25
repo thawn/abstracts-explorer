@@ -23,8 +23,79 @@ from abstracts_explorer.mcp import (
 from abstracts_explorer.mcp.errors import ToolError
 from abstracts_explorer.mcp_tools import abbreviate_result, format_tool_result_for_llm
 from abstracts_explorer.rag.tool_context import RAGToolContext
+from abstracts_explorer.utils.conference_utils import parse_conference_year
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_conference(name: str) -> str:
+    """Return a conference name without a trailing year, case-folded."""
+    return parse_conference_year(name)[0].casefold()
+
+
+def _matches_default_scope(
+    ctx: RunContext[RAGToolContext],
+    explicit_conferences: Optional[List[str]],
+) -> bool:
+    """
+    Return whether explicit conferences stay within the UI-selected scope.
+
+    The web UI conference, year, and session selectors form one scoped bundle:
+    sessions and default years only apply to the conference they were fetched
+    for.  An explicit request for a different conference is outside that scope.
+
+    Parameters
+    ----------
+    ctx : RunContext[RAGToolContext]
+        Agent context with dependencies.
+    explicit_conferences : list of str or None
+        Conferences explicitly requested by the LLM, if any.
+
+    Returns
+    -------
+    bool
+        ``True`` when defaults may be applied, ``False`` for a different
+        conference scope.
+    """
+    if not explicit_conferences or not ctx.deps.conferences:
+        return True
+    defaults = {_normalize_conference(name) for name in ctx.deps.conferences}
+    matches = all(_normalize_conference(name) in defaults for name in explicit_conferences)
+    if not matches and (ctx.deps.years or ctx.deps.sessions):
+        logger.info(
+            "Ignoring UI year/session defaults for non-selected conference scope: %s",
+            explicit_conferences,
+        )
+    return matches
+
+
+def _resolve_years(
+    ctx: RunContext[RAGToolContext],
+    explicit_years: Optional[List[int]],
+    *,
+    matches_scope: bool,
+) -> Optional[List[int]]:
+    """Return explicit years, or UI default years when still in scope."""
+    if explicit_years is not None:
+        return list(explicit_years)
+    if matches_scope and ctx.deps.years:
+        return list(ctx.deps.years)
+    return None
+
+
+def _resolve_sessions(
+    ctx: RunContext[RAGToolContext],
+    explicit_years: Optional[List[int]],
+    *,
+    matches_scope: bool,
+) -> Optional[List[str]]:
+    """Return UI sessions only when the conference/year scope still matches."""
+    if not matches_scope or not ctx.deps.sessions:
+        return None
+    if explicit_years is not None and ctx.deps.years:
+        if set(explicit_years) != set(ctx.deps.years):
+            return None
+    return list(ctx.deps.sessions)
 
 
 def _run_rag_tool(
@@ -106,8 +177,10 @@ def _tool_search_papers(
 
     A conference must be specified. If not provided by the user, the
     currently selected conference from the web UI is used automatically.
-    The currently selected year is also applied automatically when not
-    explicitly provided.
+    The currently selected year and session filters are also applied
+    automatically when not explicitly provided.  Those defaults are scoped
+    to the UI-selected conference: for a different conference they are
+    dropped, while explicitly provided years still apply.
 
     Parameters
     ----------
@@ -119,7 +192,8 @@ def _tool_search_papers(
         Number of papers to return (default: 10, or session default).
     years : list of int, optional
         Filter by publication years (e.g. [2024, 2025]).
-        When omitted, the default year(s) from the current session are used.
+        When omitted, the default year(s) from the current session are used
+        only when searching the UI-selected conference.
     conference : str, optional
         Filter by conference name (e.g. "NeurIPS", "ICLR").
         When omitted, the default conference from the current session is used.
@@ -130,17 +204,24 @@ def _tool_search_papers(
     count = max(1, min(int(count), 50))
     kwargs: Dict[str, Any] = {"topic_keywords": topic_keywords, "limit": count}
 
-    # Determine years: explicit param > deps default
-    if years is not None:
-        kwargs["years"] = years
-    elif ctx.deps.years:
-        kwargs["years"] = ctx.deps.years
+    explicit_conferences = [conference] if conference else None
+    matches_scope = _matches_default_scope(ctx, explicit_conferences)
 
     # Determine conference: explicit param > deps default
     if conference:
         kwargs["conference"] = conference
     elif ctx.deps.conferences:
         kwargs["conference"] = ctx.deps.conferences[0]
+
+    resolved_years = _resolve_years(ctx, years, matches_scope=matches_scope)
+    if resolved_years is not None:
+        kwargs["years"] = resolved_years
+
+    # Session selection from the web UI is enforced for its conference/year
+    # scope, but never for a different conference or year requested by the LLM.
+    resolved_sessions = _resolve_sessions(ctx, years, matches_scope=matches_scope)
+    if resolved_sessions:
+        kwargs["sessions"] = resolved_sessions
 
     return _run_rag_tool(ctx, "search_papers", mcp_search_papers, kwargs)
 
@@ -157,6 +238,7 @@ def _tool_get_conference_topics(
 
     A conference must be specified. If not provided by the user, the
     currently selected conference from the web UI is used automatically.
+    The UI year default is only applied for the UI-selected conference.
 
     Parameters
     ----------
@@ -166,6 +248,9 @@ def _tool_get_conference_topics(
         Conference name (e.g. "NeurIPS").
         When omitted, the default conference from the current session is used.
     """
+    explicit_conferences = [conference] if conference else None
+    matches_scope = _matches_default_scope(ctx, explicit_conferences)
+
     # Determine conferences: explicit param > deps default
     if conference:
         conferences = [conference]
@@ -174,7 +259,7 @@ def _tool_get_conference_topics(
     else:
         conferences = None
 
-    years = ctx.deps.years if ctx.deps.years else None
+    years = _resolve_years(ctx, None, matches_scope=matches_scope)
 
     kwargs = {"conferences": conferences, "years": years}
     return _run_rag_tool(ctx, "get_conference_topics", mcp_get_conference_topics, kwargs)
@@ -242,7 +327,7 @@ def _tool_analyze_topic_relevance(
     A conference must be specified. If not provided by the user, the
     currently selected conference from the web UI is used automatically.
     The currently selected year is also applied automatically when not
-    explicitly provided.
+    explicitly provided, but only for the UI-selected conference.
 
     Parameters
     ----------
@@ -257,9 +342,13 @@ def _tool_analyze_topic_relevance(
         When omitted, the default conference from the current session is used.
     years : list of int, optional
         Filter results to specific years.
-        When omitted, the default year(s) from the current session are used.
+        When omitted, the default year(s) from the current session are used
+        only when analyzing the UI-selected conference.
     """
     kwargs: Dict[str, Any] = {"topic": topic, "distance_threshold": distance_threshold}
+
+    explicit_conferences = [conference] if conference else None
+    matches_scope = _matches_default_scope(ctx, explicit_conferences)
 
     # Determine conferences: explicit param > deps default
     if conference:
@@ -267,11 +356,9 @@ def _tool_analyze_topic_relevance(
     elif ctx.deps.conferences:
         kwargs["conferences"] = ctx.deps.conferences
 
-    # Determine years: explicit param > deps default
-    if years is not None:
-        kwargs["years"] = years
-    elif ctx.deps.years:
-        kwargs["years"] = ctx.deps.years
+    resolved_years = _resolve_years(ctx, years, matches_scope=matches_scope)
+    if resolved_years is not None:
+        kwargs["years"] = resolved_years
 
     return _run_rag_tool(ctx, "analyze_topic_relevance", mcp_analyze_topic_relevance, kwargs)
 
@@ -296,6 +383,9 @@ def _tool_get_cluster_visualization(
         Conference name to retrieve visualization for (e.g. "NeurIPS").
         When omitted, the default conference from the current session is used.
     """
+    explicit_conferences = [conference] if conference else None
+    matches_scope = _matches_default_scope(ctx, explicit_conferences)
+
     # Determine conferences: explicit param > deps default
     if conference:
         conferences = [conference]
@@ -304,7 +394,7 @@ def _tool_get_cluster_visualization(
     else:
         conferences = None
 
-    years = ctx.deps.years if ctx.deps.years else None
+    years = _resolve_years(ctx, None, matches_scope=matches_scope)
 
     kwargs = {"conferences": conferences, "years": years}
     return _run_rag_tool(ctx, "get_cluster_visualization", mcp_get_cluster_visualization, kwargs)
@@ -351,16 +441,19 @@ def _tool_get_paper_details(
     if paper_id:
         kwargs["paper_id"] = paper_id
 
+    explicit_conferences = [conference] if conference else None
+    matches_scope = _matches_default_scope(ctx, explicit_conferences)
+
     # Determine conference: explicit param > deps default
     if conference:
         kwargs["conference"] = conference
     elif ctx.deps.conferences:
         kwargs["conference"] = ctx.deps.conferences[0]
 
-    # Determine year: explicit param > deps default
+    # Determine year: explicit param > deps default (only within UI scope)
     if year is not None:
         kwargs["year"] = year
-    elif ctx.deps.years:
+    elif matches_scope and ctx.deps.years:
         kwargs["year"] = ctx.deps.years[0]
 
     return _run_rag_tool(ctx, "get_paper_details", mcp_get_paper_details, kwargs)
@@ -395,8 +488,10 @@ def _tool_summarize_interesting_papers(
             "No papers have been marked as interesting yet. " "Rate papers with the star buttons in the web UI first."
         )
 
-    conferences = [conference] if conference else (ctx.deps.conferences or None)
-    resolved_years = years if years is not None else (ctx.deps.years or None)
+    explicit_conferences = [conference] if conference else None
+    matches_scope = _matches_default_scope(ctx, explicit_conferences)
+    conferences = explicit_conferences or (ctx.deps.conferences or None)
+    resolved_years = _resolve_years(ctx, years, matches_scope=matches_scope)
 
     kwargs: Dict[str, Any] = {"priorities": priorities}
     if conferences:
@@ -439,8 +534,9 @@ def _tool_recommend_related_papers(
             "No papers have been marked as interesting yet. " "Rate papers with the star buttons in the web UI first."
         )
 
+    matches_scope = _matches_default_scope(ctx, conferences)
     resolved_conferences = conferences if conferences else (ctx.deps.conferences or None)
-    resolved_years = years if years is not None else (ctx.deps.years or None)
+    resolved_years = _resolve_years(ctx, years, matches_scope=matches_scope)
 
     kwargs: Dict[str, Any] = {"priorities": priorities, "limit": limit}
     if resolved_conferences:
@@ -485,8 +581,9 @@ def _tool_suggest_authors_to_meet(
             "No papers have been marked as interesting yet. " "Rate papers with the star buttons in the web UI first."
         )
 
+    matches_scope = _matches_default_scope(ctx, conferences)
     resolved_conferences = conferences if conferences else (ctx.deps.conferences or None)
-    resolved_years = years if years is not None else (ctx.deps.years or None)
+    resolved_years = _resolve_years(ctx, years, matches_scope=matches_scope)
 
     kwargs: Dict[str, Any] = {"priorities": priorities, "limit": limit, "paper_limit": paper_limit}
     if resolved_conferences:

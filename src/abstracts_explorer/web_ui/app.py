@@ -591,6 +591,7 @@ def chat():
         raise ApiError(f"paper_priorities must contain at most {_MAX_PRIORITY_ENTRIES} entries", 400)
 
     # Get filters
+    sessions = coerce_str_list(data.get("sessions", []), "sessions", max_items=_MAX_FILTER_ITEMS)
     years = coerce_int_list(data.get("years", []), "years", max_items=_MAX_FILTER_ITEMS)
     conferences = coerce_str_list(data.get("conferences", []), "conferences", max_items=_MAX_FILTER_ITEMS)
 
@@ -608,6 +609,7 @@ def chat():
             limit=n_papers,
             conferences=conferences if conferences else None,
             years=years if years else None,
+            sessions=sessions if sessions else None,
             available_conferences=available_conferences,
             paper_priorities=paper_priorities,
         )

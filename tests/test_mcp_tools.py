@@ -362,6 +362,12 @@ class TestNormalizeSearchPapersArgs:
         assert result["limit"] == 2
         assert "year" not in result
 
+    def test_session_singular_to_list(self):
+        """'session' as a scalar is normalized to a 'sessions' list."""
+        result = _normalize_search_papers_args({"topic_keywords": "RL", "session": "Oral Session 1"})
+        assert result["sessions"] == ["Oral Session 1"]
+        assert "session" not in result
+
     def test_n_results_alias(self):
         """'n_results' alias is normalized to 'limit'."""
         result = _normalize_search_papers_args({"topic_keywords": "RL", "n_results": 20})

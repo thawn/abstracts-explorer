@@ -242,6 +242,11 @@ class DownloaderPlugin(ABC):
     @property
     def _save_label(self) -> str:
         """Label used when logging saved papers."""
+        return self._canonical_conference_name
+
+    @property
+    def _canonical_conference_name(self) -> str:
+        """Canonical conference name assigned to every paper from this plugin."""
         return getattr(self, "conference_name", self.plugin_name)
 
     def resolve_options(self, kwargs: Dict[str, Any], **defaults: Any) -> DownloadOptions:
@@ -327,7 +332,19 @@ class DownloaderPlugin(ABC):
         list of LightweightPaper
             Papers to return to the caller.
         """
-        return cached
+        canonical = self._canonical_conference_name
+        normalized: List[LightweightPaper] = []
+        for paper in cached:
+            if paper.conference != canonical:
+                logger.info(
+                    "Normalizing cached conference %r to %r via %s",
+                    paper.conference,
+                    canonical,
+                    self.plugin_name,
+                )
+                paper = paper.model_copy(update={"conference": canonical})
+            normalized.append(paper)
+        return normalized
 
     def _download_uncached(
         self,

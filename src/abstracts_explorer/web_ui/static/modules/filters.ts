@@ -99,6 +99,86 @@ export function dismissDefaultFilterError(): void {
 }
 
 /**
+ * Populate a multi-select with session names, selecting every option.
+ *
+ * @param select - Target select element, or null to skip
+ * @param sessions - Session names to populate
+ */
+function populateSessionSelect(select: HTMLSelectElement | null, sessions: string[]): void {
+    if (!select) return;
+
+    select.innerHTML = '';
+    sessions.forEach((session) => {
+        const option = document.createElement('option');
+        option.value = session;
+        option.textContent = session;
+        option.selected = true;
+        option.hidden = false;
+        option.style.display = '';
+        select.appendChild(option);
+    });
+}
+
+/**
+ * Determine whether a session option is currently visible after filtering.
+ *
+ * @param option - Option element to inspect
+ * @returns True when the option is visible
+ */
+function isSessionOptionVisible(option: HTMLOptionElement): boolean {
+    return !option.hidden && option.style.display !== 'none';
+}
+
+/**
+ * Filter session options live based on a search query.
+ *
+ * Matching is a case-insensitive substring search over each option's value and
+ * label. Non-matching options are hidden but remain in the DOM so their
+ * selection state is preserved.
+ *
+ * @param selectId - ID of the multi-select to filter
+ * @param query - Search query entered by the user
+ */
+export function filterSessionOptions(selectId: string, query: string): void {
+    const select = document.getElementById(selectId) as HTMLSelectElement | null;
+    if (!select) return;
+
+    const normalized = query.trim().toLowerCase();
+    Array.from(select.options).forEach((option) => {
+        const matches =
+            normalized === '' ||
+            option.value.toLowerCase().includes(normalized) ||
+            (option.textContent?.toLowerCase().includes(normalized) ?? false);
+        option.hidden = !matches;
+        option.style.display = matches ? '' : 'none';
+    });
+}
+
+/**
+ * Clear the session search field and reveal all session options.
+ *
+ * @param focus - Whether to move focus back to the search input
+ */
+export function clearSessionSearch(focus = true): void {
+    const input = document.getElementById('modal-session-search') as HTMLInputElement | null;
+    if (input) {
+        input.value = '';
+        if (focus) {
+            input.focus();
+        }
+    }
+
+    filterSessionOptions('modal-session-filter', '');
+}
+
+/**
+ * Clear the session search field without stealing focus.
+ */
+function resetSessionSearch(): void {
+    clearSessionSearch(false);
+}
+
+/**
  * Load filter options from API.
  */
 export async function loadFilterOptions(): Promise<void> {
@@ -108,22 +188,6 @@ export async function loadFilterOptions(): Promise<void> {
 
         const yearSelect = document.getElementById('year-selector') as HTMLSelectElement | null;
         const conferenceSelect = document.getElementById('conference-selector') as HTMLSelectElement | null;
-        const selectedConference = getSelectedConference();
-        const selectedYears = getSelectedYears();
-
-        const filterParams = new URLSearchParams();
-        if (selectedYears.length === 1) filterParams.append('year', String(selectedYears[0]));
-        if (selectedConference) filterParams.append('conference', selectedConference);
-
-        const filtersResponse = await fetch(`${API_BASE}/api/filters?${filterParams.toString()}`);
-        const filtersData = await parseJsonResponse(filtersResponse);
-
-        if (requestId !== latestFilterRequest) return;
-
-        if (filtersData.error) {
-            console.error('Error loading filters:', filtersData.error);
-            return;
-        }
 
         const availableResponse = await fetch(`${API_BASE}/api/available-filters`);
         const availableData = await parseJsonResponse(availableResponse);
@@ -222,25 +286,30 @@ export async function loadFilterOptions(): Promise<void> {
             }
         }
 
-        const sessionSelect = document.getElementById('session-filter') as HTMLSelectElement;
-        sessionSelect.innerHTML = '';
-        filtersData.sessions.forEach((session: string) => {
-            const option = document.createElement('option');
-            option.value = session;
-            option.textContent = session;
-            option.selected = true;
-            sessionSelect.appendChild(option);
-        });
+        const selectedConference = getSelectedConference();
+        const selectedYears = getSelectedYears();
 
-        const chatSessionSelect = document.getElementById('chat-session-filter') as HTMLSelectElement;
-        chatSessionSelect.innerHTML = '';
-        filtersData.sessions.forEach((session: string) => {
-            const option = document.createElement('option');
-            option.value = session;
-            option.textContent = session;
-            option.selected = true;
-            chatSessionSelect.appendChild(option);
-        });
+        const filterParams = new URLSearchParams();
+        if (selectedYears.length === 1) filterParams.append('year', String(selectedYears[0]));
+        if (selectedConference) filterParams.append('conference', selectedConference);
+
+        const filtersResponse = await fetch(`${API_BASE}/api/filters?${filterParams.toString()}`);
+        const filtersData = await parseJsonResponse(filtersResponse);
+
+        if (requestId !== latestFilterRequest) return;
+
+        if (filtersData.error) {
+            console.error('Error loading filters:', filtersData.error);
+            return;
+        }
+
+        const sessionSelect = document.getElementById('session-filter') as HTMLSelectElement | null;
+        const chatSessionSelect = document.getElementById('chat-session-filter') as HTMLSelectElement | null;
+        const modalSessionSelect = document.getElementById('modal-session-filter') as HTMLSelectElement | null;
+
+        populateSessionSelect(sessionSelect, filtersData.sessions);
+        populateSessionSelect(chatSessionSelect, filtersData.sessions);
+        populateSessionSelect(modalSessionSelect, filtersData.sessions);
     } catch (error) {
         console.error('Error loading filter options:', error);
     }
@@ -252,17 +321,21 @@ export async function loadFilterOptions(): Promise<void> {
 export function selectAllFilter(filterId: string): void {
     const select = document.getElementById(filterId) as HTMLSelectElement;
     Array.from(select.options).forEach(option => {
-        option.selected = true;
+        option.selected = isSessionOptionVisible(option);
     });
 }
 
 /**
- * Deselect all options in a filter.
+ * Deselect all visible options in a filter.
+ *
+ * Options hidden by the session search keep their current selection state.
  */
 export function deselectAllFilter(filterId: string): void {
     const select = document.getElementById(filterId) as HTMLSelectElement;
     Array.from(select.options).forEach(option => {
-        option.selected = false;
+        if (isSessionOptionVisible(option)) {
+            option.selected = false;
+        }
     });
 }
 
@@ -271,6 +344,7 @@ export function deselectAllFilter(filterId: string): void {
  */
 export function openSearchSettings(): void {
     syncFiltersToModal('search');
+    resetSessionSearch();
 
     document.getElementById('modal-title')!.textContent = 'Search Settings';
 
@@ -289,6 +363,7 @@ export function openSearchSettings(): void {
  */
 export function openChatSettings(): void {
     syncFiltersToModal('chat');
+    resetSessionSearch();
 
     document.getElementById('modal-title')!.textContent = 'Chat Settings';
 
@@ -326,9 +401,16 @@ export function syncFiltersToModal(context: string): void {
     const sessionFilter = document.getElementById(prefix + 'session-filter') as HTMLSelectElement | null;
     const modalSessionFilter = document.getElementById('modal-session-filter') as HTMLSelectElement | null;
     if (sessionFilter && modalSessionFilter) {
-        if (modalSessionFilter.options.length === 0) {
-            modalSessionFilter.innerHTML = sessionFilter.innerHTML;
+        const sourceValues = Array.from(sessionFilter.options).map((opt) => opt.value);
+        const modalValues = Array.from(modalSessionFilter.options).map((opt) => opt.value);
+        const needsRebuild =
+            sourceValues.length !== modalValues.length ||
+            sourceValues.some((value, idx) => value !== modalValues[idx]);
+
+        if (needsRebuild) {
+            populateSessionSelect(modalSessionFilter, sourceValues);
         }
+
         Array.from(modalSessionFilter.options).forEach((opt, idx) => {
             opt.selected = sessionFilter.options[idx]?.selected || false;
         });

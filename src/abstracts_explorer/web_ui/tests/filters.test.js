@@ -10,6 +10,8 @@ import {
     loadFilterOptions, 
     selectAllFilter, 
     deselectAllFilter,
+    filterSessionOptions,
+    clearSessionSearch,
     openSearchSettings,
     openChatSettings,
     closeSettings,
@@ -42,6 +44,7 @@ describe('Filters Module', () => {
             <div id="search-settings-section"></div>
             <div id="chat-settings-section"></div>
             <select id="modal-session-filter" multiple></select>
+            <input id="modal-session-search" type="text" />
             <div id="conference-error-banner" class="hidden"></div>
             <p id="conference-error-message"></p>
             <div id="conference-error-available"></div>
@@ -57,17 +60,17 @@ describe('Filters Module', () => {
             global.fetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({
-                    sessions: ['Session 1', 'Session 2', 'Session 3']
-                })
-            }).mockResolvedValueOnce({
-                ok: true,
-                json: async () => ({
                     conferences: ['NeurIPS', 'ICLR'],
                     years: [2024, 2025],
                     conference_years: {
                         'NeurIPS': [2024, 2025],
                         'ICLR': [2024]
                     }
+                })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    sessions: ['Session 1', 'Session 2', 'Session 3']
                 })
             });
 
@@ -78,16 +81,74 @@ describe('Filters Module', () => {
             expect(sessionSelect.options.length).toBe(3);
         });
 
-        it('should populate year selector', async () => {
+        it('should fetch sessions with the default conference and year on first load', async () => {
+            document.getElementById('session-filter').innerHTML = '';
+            document.getElementById('chat-session-filter').innerHTML = '';
+            document.getElementById('modal-session-filter').innerHTML = '';
+
             global.fetch.mockResolvedValueOnce({
                 ok: true,
-                json: async () => ({ sessions: [] })
+                json: async () => ({
+                    conferences: ['AGU', 'NeurIPS'],
+                    years: [2026, 2025],
+                    conference_years: { 'AGU': [2025], 'NeurIPS': [2026] },
+                    default_conference: 'NeurIPS',
+                    default_year: 2026
+                })
             }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: ['NeurIPS Session A'] })
+            });
+
+            await loadFilterOptions();
+
+            const sessionSelect = document.getElementById('session-filter');
+            const values = Array.from(sessionSelect.options).map((o) => o.value);
+            expect(values).toEqual(['NeurIPS Session A']);
+
+            const filtersCall = global.fetch.mock.calls.find((call) => call[0].includes('/api/filters'));
+            expect(filtersCall).toBeDefined();
+            expect(filtersCall[0]).toContain('conference=NeurIPS');
+            expect(filtersCall[0]).toContain('year=2026');
+        });
+
+        it('should refresh the modal session filter when the selection changes', async () => {
+            const modalSelect = document.getElementById('modal-session-filter');
+            modalSelect.innerHTML = '<option value="Stale Session" selected>Stale Session</option>';
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: ['NeurIPS'],
+                    years: [2025],
+                    conference_years: { 'NeurIPS': [2025] },
+                    default_conference: 'NeurIPS',
+                    default_year: 2025
+                })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    sessions: ['Session 1', 'Session 2']
+                })
+            });
+
+            await loadFilterOptions();
+
+            const values = Array.from(modalSelect.options).map((o) => o.value);
+            expect(values).toEqual(['Session 1', 'Session 2']);
+            expect(Array.from(modalSelect.options).every((o) => o.selected)).toBe(true);
+        });
+
+        it('should populate year selector', async () => {
+            global.fetch.mockResolvedValueOnce({
                 ok: true,
                 json: async () => ({
                     conferences: [],
                     years: [2024, 2025]
                 })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
             });
 
             await loadFilterOptions();
@@ -102,9 +163,6 @@ describe('Filters Module', () => {
 
             global.fetch.mockResolvedValueOnce({
                 ok: true,
-                json: async () => ({ sessions: [] })
-            }).mockResolvedValueOnce({
-                ok: true,
                 json: async () => ({
                     conferences: ['NeurIPS', 'ICLR'],
                     years: [2024, 2025],
@@ -112,6 +170,9 @@ describe('Filters Module', () => {
                     default_conference: 'NeurIPS',
                     default_year: null
                 })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
             });
 
             await loadFilterOptions();
@@ -129,9 +190,6 @@ describe('Filters Module', () => {
 
             global.fetch.mockResolvedValueOnce({
                 ok: true,
-                json: async () => ({ sessions: [] })
-            }).mockResolvedValueOnce({
-                ok: true,
                 json: async () => ({
                     conferences: [],
                     years: [2024, 2025],
@@ -139,6 +197,9 @@ describe('Filters Module', () => {
                     default_conference: '',
                     default_year: 2025
                 })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
             });
 
             await loadFilterOptions();
@@ -156,9 +217,6 @@ describe('Filters Module', () => {
 
             global.fetch.mockResolvedValueOnce({
                 ok: true,
-                json: async () => ({ sessions: [] })
-            }).mockResolvedValueOnce({
-                ok: true,
                 json: async () => ({
                     conferences: ['NeurIPS'],
                     years: [2024],
@@ -166,6 +224,9 @@ describe('Filters Module', () => {
                     default_conference: '',
                     default_year: null
                 })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
             });
 
             await loadFilterOptions();
@@ -179,9 +240,6 @@ describe('Filters Module', () => {
         it('should populate conferences and years from conference_years', async () => {
             global.fetch.mockResolvedValueOnce({
                 ok: true,
-                json: async () => ({ sessions: [] })
-            }).mockResolvedValueOnce({
-                ok: true,
                 json: async () => ({
                     conferences: ['NeurIPS', 'ICLR'],
                     years: [2024, 2025],
@@ -189,6 +247,9 @@ describe('Filters Module', () => {
                     default_conference: 'NeurIPS',
                     default_year: 2025
                 })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
             });
 
             await loadFilterOptions();
@@ -202,22 +263,7 @@ describe('Filters Module', () => {
                 pending.push({ url, resolve });
             }));
 
-            const first = loadFilterOptions();
-            const second = loadFilterOptions();
-
-            expect(pending).toHaveLength(2);
-            expect(pending[0].url).toContain('/api/filters');
-            expect(pending[1].url).toContain('/api/filters');
-
-            pending[1].resolve({
-                ok: true,
-                json: async () => ({ sessions: ['New Session'] })
-            });
-            await new Promise((resolve) => setTimeout(resolve, 0));
-
-            const availableCall = pending.find((call) => call.url.includes('/api/available-filters'));
-            expect(availableCall).toBeDefined();
-            availableCall.resolve({
+            const availableData = {
                 ok: true,
                 json: async () => ({
                     conferences: ['NeurIPS'],
@@ -226,14 +272,36 @@ describe('Filters Module', () => {
                     default_conference: 'NeurIPS',
                     default_year: 2025
                 })
+            };
+
+            const first = loadFilterOptions();
+            expect(pending).toHaveLength(1);
+            expect(pending[0].url).toContain('/api/available-filters');
+            pending[0].resolve(availableData);
+            await new Promise((resolve) => setTimeout(resolve, 0));
+
+            const firstFilters = pending.find((call) => call.url.includes('/api/filters'));
+            expect(firstFilters).toBeDefined();
+
+            const second = loadFilterOptions();
+            const secondAvailable = pending[pending.length - 1];
+            expect(secondAvailable.url).toContain('/api/available-filters');
+            secondAvailable.resolve(availableData);
+            await new Promise((resolve) => setTimeout(resolve, 0));
+
+            const filtersCalls = pending.filter((call) => call.url.includes('/api/filters'));
+            expect(filtersCalls).toHaveLength(2);
+
+            filtersCalls[1].resolve({
+                ok: true,
+                json: async () => ({ sessions: ['New Session'] })
             });
-
-            await second;
-
-            pending[0].resolve({
+            filtersCalls[0].resolve({
                 ok: true,
                 json: async () => ({ sessions: ['Old Session'] })
             });
+
+            await second;
             await first;
 
             const sessionSelect = document.getElementById('session-filter');
@@ -288,6 +356,26 @@ describe('Filters Module', () => {
 
             expect(Array.from(select.options).every(opt => opt.selected)).toBe(true);
         });
+
+        it('should select only visible options and deselect hidden ones', () => {
+            const select = document.getElementById('modal-session-filter');
+            select.innerHTML = `
+                <option value="Alpha Session">Alpha Session</option>
+                <option value="Beta Session">Beta Session</option>
+                <option value="Gamma Session">Gamma Session</option>
+            `;
+            select.options[0].hidden = true;
+            select.options[0].style.display = 'none';
+            select.options[0].selected = true;
+            select.options[1].selected = false;
+            select.options[2].selected = false;
+
+            selectAllFilter('modal-session-filter');
+
+            expect(select.options[0].selected).toBe(false);
+            expect(select.options[1].selected).toBe(true);
+            expect(select.options[2].selected).toBe(true);
+        });
     });
 
     describe('deselectAllFilter', () => {
@@ -298,6 +386,77 @@ describe('Filters Module', () => {
             deselectAllFilter('session-filter');
 
             expect(Array.from(select.options).every(opt => !opt.selected)).toBe(true);
+        });
+
+        it('should deselect only visible options and preserve hidden selections', () => {
+            const select = document.getElementById('modal-session-filter');
+            select.innerHTML = `
+                <option value="Alpha Session" selected>Alpha Session</option>
+                <option value="Beta Session" selected>Beta Session</option>
+                <option value="Gamma Session" selected>Gamma Session</option>
+            `;
+            select.options[0].hidden = true;
+            select.options[0].style.display = 'none';
+
+            deselectAllFilter('modal-session-filter');
+
+            expect(select.options[0].selected).toBe(true);
+            expect(select.options[1].selected).toBe(false);
+            expect(select.options[2].selected).toBe(false);
+        });
+    });
+
+    describe('filterSessionOptions', () => {
+        beforeEach(() => {
+            const select = document.getElementById('modal-session-filter');
+            select.innerHTML = `
+                <option value="Transformers in Vision">Transformers in Vision</option>
+                <option value="Reinforcement Learning">Reinforcement Learning</option>
+                <option value="Graph Neural Networks">Graph Neural Networks</option>
+            `;
+        });
+
+        it('should hide non-matching options as the user types', () => {
+            filterSessionOptions('modal-session-filter', 'learn');
+
+            const select = document.getElementById('modal-session-filter');
+            expect(select.options[0].hidden).toBe(true);
+            expect(select.options[1].hidden).toBe(false);
+            expect(select.options[2].hidden).toBe(true);
+        });
+
+        it('should match case-insensitively and against option labels', () => {
+            filterSessionOptions('modal-session-filter', 'GRAPH');
+
+            const select = document.getElementById('modal-session-filter');
+            expect(select.options[2].hidden).toBe(false);
+            expect(select.options[2].style.display).toBe('');
+        });
+
+        it('should reveal all options for an empty query', () => {
+            filterSessionOptions('modal-session-filter', 'learn');
+            filterSessionOptions('modal-session-filter', '');
+
+            const select = document.getElementById('modal-session-filter');
+            expect(Array.from(select.options).every((opt) => !opt.hidden)).toBe(true);
+        });
+
+        it('should not throw for an unknown select', () => {
+            expect(() => filterSessionOptions('missing-filter', 'x')).not.toThrow();
+        });
+
+        it('should clear the search field, reveal all options, and focus the input', () => {
+            const input = document.getElementById('modal-session-search');
+            input.value = 'learn';
+            filterSessionOptions('modal-session-filter', 'learn');
+
+            clearSessionSearch();
+
+            const select = document.getElementById('modal-session-filter');
+            expect(input.value).toBe('');
+            expect(document.activeElement).toBe(input);
+            expect(Array.from(select.options).every((opt) => !opt.hidden)).toBe(true);
+            expect(Array.from(select.options).every((opt) => opt.style.display === '')).toBe(true);
         });
     });
 
@@ -318,6 +477,23 @@ describe('Filters Module', () => {
             const chatSection = document.getElementById('chat-settings-section');
             expect(searchSection.classList.contains('hidden')).toBe(false);
             expect(chatSection.classList.contains('hidden')).toBe(true);
+        });
+
+        it('should clear the session search and reveal all sessions', () => {
+            const input = document.getElementById('modal-session-search');
+            const modalSelect = document.getElementById('modal-session-filter');
+            modalSelect.innerHTML = `
+                <option value="Visible Session">Visible Session</option>
+                <option value="Hidden Session" hidden>Hidden Session</option>
+            `;
+            modalSelect.options[1].style.display = 'none';
+            input.value = 'visible';
+
+            openSearchSettings();
+
+            expect(input.value).toBe('');
+            expect(Array.from(modalSelect.options).every((opt) => !opt.hidden)).toBe(true);
+            expect(Array.from(modalSelect.options).every((opt) => opt.style.display === '')).toBe(true);
         });
     });
 
@@ -367,6 +543,22 @@ describe('Filters Module', () => {
 
             syncFiltersToModal('search');
 
+            expect(modalSelect.options[0].selected).toBe(true);
+            expect(modalSelect.options[1].selected).toBe(false);
+        });
+
+        it('should rebuild stale modal options from the search filters', () => {
+            const sessionSelect = document.getElementById('session-filter');
+            const modalSelect = document.getElementById('modal-session-filter');
+
+            sessionSelect.innerHTML = '<option value="A" selected>A</option><option value="B" selected>B</option>';
+            sessionSelect.options[1].selected = false;
+            modalSelect.innerHTML = '<option value="Stale" selected>Stale</option>';
+
+            syncFiltersToModal('search');
+
+            const values = Array.from(modalSelect.options).map((o) => o.value);
+            expect(values).toEqual(['A', 'B']);
             expect(modalSelect.options[0].selected).toBe(true);
             expect(modalSelect.options[1].selected).toBe(false);
         });
@@ -485,9 +677,6 @@ describe('Filters Module', () => {
 
             global.fetch.mockResolvedValueOnce({
                 ok: true,
-                json: async () => ({ sessions: [] })
-            }).mockResolvedValueOnce({
-                ok: true,
                 json: async () => ({
                     conferences: ['NeurIPS', 'ICLR'],
                     years: [2024, 2025],
@@ -495,6 +684,9 @@ describe('Filters Module', () => {
                     default_conference: 'NeurIPS',
                     default_year: 2025
                 })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
             });
 
             await loadFilterOptions();
@@ -511,9 +703,6 @@ describe('Filters Module', () => {
 
             global.fetch.mockResolvedValueOnce({
                 ok: true,
-                json: async () => ({ sessions: [] })
-            }).mockResolvedValueOnce({
-                ok: true,
                 json: async () => ({
                     conferences: ['NeurIPS'],
                     years: [2025],
@@ -521,6 +710,9 @@ describe('Filters Module', () => {
                     default_conference: 'NeurIPS',
                     default_year: 2025
                 })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
             });
 
             await loadFilterOptions();
@@ -533,9 +725,6 @@ describe('Filters Module', () => {
 
             global.fetch.mockResolvedValueOnce({
                 ok: true,
-                json: async () => ({ sessions: [] })
-            }).mockResolvedValueOnce({
-                ok: true,
                 json: async () => ({
                     conferences: ['NeurIPS'],
                     years: [2025],
@@ -543,6 +732,9 @@ describe('Filters Module', () => {
                     default_conference: 'NeurIPS',
                     default_year: 2025
                 })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
             });
 
             await loadFilterOptions();
@@ -562,14 +754,14 @@ describe('Filters Module', () => {
 
             global.fetch.mockResolvedValueOnce({
                 ok: true,
-                json: async () => ({ sessions: [] })
-            }).mockResolvedValueOnce({
-                ok: true,
                 json: async () => ({
                     conferences: ['NeurIPS'],
                     years: [2025],
                     conference_years: { 'NeurIPS': [2025] }
                 })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
             });
 
             await loadFilterOptions();
@@ -593,14 +785,14 @@ describe('Filters Module', () => {
 
             global.fetch.mockResolvedValueOnce({
                 ok: true,
-                json: async () => ({ sessions: [] })
-            }).mockResolvedValueOnce({
-                ok: true,
                 json: async () => ({
                     conferences: [],
                     years: [],
                     conference_years: {}
                 })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
             });
 
             await loadFilterOptions();
@@ -639,15 +831,15 @@ describe('Filters Module', () => {
 
             global.fetch.mockResolvedValueOnce({
                 ok: true,
-                json: async () => ({ sessions: [] })
-            }).mockResolvedValueOnce({
-                ok: true,
                 json: async () => ({
                     conferences: [],
                     years: [],
                     conference_years: {},
                     default_distance_threshold: 1.2
                 })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
             });
 
             await loadFilterOptions();
@@ -659,15 +851,15 @@ describe('Filters Module', () => {
         it('should set distance threshold from API default when localStorage is empty', async () => {
             global.fetch.mockResolvedValueOnce({
                 ok: true,
-                json: async () => ({ sessions: [] })
-            }).mockResolvedValueOnce({
-                ok: true,
                 json: async () => ({
                     conferences: [],
                     years: [],
                     conference_years: {},
                     default_distance_threshold: 1.2
                 })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: [] })
             });
 
             await loadFilterOptions();

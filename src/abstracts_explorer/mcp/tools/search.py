@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 def search_papers(
     topic_keywords: str,
     years: Optional[List[int]] = None,
+    sessions: Optional[List[str]] = None,
     limit: int = 10,
     conference: Optional[str] = None,
     where_filters: Optional[Dict[str, Any]] = None,
@@ -34,6 +35,9 @@ def search_papers(
         Keywords describing the topic (e.g., "large language models")
     years : list of int, optional
         List of specific years to filter by (e.g., [2024, 2025]). If None, searches all years.
+    sessions : list of str, optional
+        List of paper sessions to filter by (e.g., ["Oral Session 1"]).
+        Matches papers in any of the given sessions.
     limit : int, optional
         Number of papers to return (default: 10)
     conference : str, optional
@@ -72,11 +76,14 @@ def search_papers(
                 logger.info(f"Applying filters: {where_filters}")
             if years:
                 logger.info(f"Year filter: {years}")
+            if sessions:
+                logger.info(f"Session filter: {sessions}")
 
             papers, _ = db.search(
                 topic_keywords,
                 limit=limit,
                 years=years,
+                sessions=sessions,
                 conferences=[conference],
                 where_filters=where_filters,
                 embeddings_manager=em,
@@ -87,6 +94,7 @@ def search_papers(
                 "topic": topic_keywords,
                 "conference": conference,
                 "years_filter": years,
+                "sessions_filter": sessions,
                 "papers_found": len(papers),
                 "papers": papers,
             }
