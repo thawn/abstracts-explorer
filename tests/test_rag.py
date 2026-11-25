@@ -357,6 +357,20 @@ class TestRAGChatInstructions:
 
         assert "response" in result
 
+    def test_query_passes_sessions_to_tool_context(self, mock_embeddings_manager, mock_database):
+        """Sessions from the chat request are stored on the tool context."""
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        result = Mock(output="ok")
+        result.all_messages.return_value = []
+        try:
+            with patch.object(chat.agent, "run_sync", return_value=result) as run_sync:
+                chat.query("Show oral papers", sessions=["Oral Session 1"])
+        finally:
+            chat.close()
+
+        deps = run_sync.call_args.kwargs["deps"]
+        assert deps.sessions == ["Oral Session 1"]
+
     def test_query_system_prompt_overrides_conference_context(
         self, mock_embeddings_manager, mock_database, mock_search_papers
     ):
@@ -1826,6 +1840,34 @@ class TestRAGToolConferenceDefaults:
 
         call_kwargs = mock_search_papers.call_args[1]
         assert "years" not in call_kwargs
+
+    def test_search_papers_uses_deps_sessions(self, mock_search_papers):
+        """_tool_search_papers forwards ctx.deps.sessions as a filter."""
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
+
+        ctx = Mock()
+        ctx.deps = RAGToolContext()
+        ctx.deps.conferences = ["NeurIPS"]
+        ctx.deps.sessions = ["Oral Session 1", "Spotlight Session"]
+
+        _tool_search_papers(ctx, topic_keywords="transformers")
+
+        call_kwargs = mock_search_papers.call_args[1]
+        assert call_kwargs.get("sessions") == ["Oral Session 1", "Spotlight Session"]
+
+    def test_search_papers_no_sessions_when_deps_empty(self, mock_search_papers):
+        """_tool_search_papers does not filter by sessions when deps.sessions is empty."""
+        from abstracts_explorer.rag import _tool_search_papers, RAGToolContext
+
+        ctx = Mock()
+        ctx.deps = RAGToolContext()
+        ctx.deps.conferences = ["NeurIPS"]
+        ctx.deps.sessions = []
+
+        _tool_search_papers(ctx, topic_keywords="transformers")
+
+        call_kwargs = mock_search_papers.call_args[1]
+        assert "sessions" not in call_kwargs
 
     def test_search_papers_explicit_limit(self, mock_search_papers):
         """_tool_search_papers passes an explicit limit."""

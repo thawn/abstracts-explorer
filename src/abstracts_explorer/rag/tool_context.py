@@ -26,6 +26,9 @@ class RAGToolContext:
         Default conferences for MCP clustering tools (from web UI selection).
     years : list of int
         Default years for MCP clustering tools (from web UI selection).
+    sessions : list of str
+        Default paper sessions for search tools (from web UI selection).
+        This is an enforced constraint, not an LLM-facing tool argument.
     paper_priorities : dict
         Paper ratings from the web UI (``localStorage.paperPriorities``).
         Keys are paper UIDs; values are either star ratings or dicts with
@@ -42,6 +45,7 @@ class RAGToolContext:
     tool_results: List[Dict[str, Any]] = field(default_factory=list)
     conferences: List[str] = field(default_factory=list)
     years: List[int] = field(default_factory=list)
+    sessions: List[str] = field(default_factory=list)
     limit: Optional[int] = None
     paper_priorities: Dict[str, Any] = field(default_factory=dict)
     tool_cache: Dict[str, str] = field(default_factory=dict)

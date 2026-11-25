@@ -61,6 +61,7 @@ Finds the most important recent developments in a specific topic.
 - `topic_keywords` (str): Keywords describing the topic
 - `conference` (str, optional): Filter by conference name (required in practice; pass a conference)
 - `years` (list, optional): Years to consider (default: all years)
+- `sessions` (list, optional): Paper sessions to consider (default: all sessions)
 - `limit` (int): Number of papers to return (default: 10)
 - `where_filters` (dict, optional): SQL-style paper filters (e.g. `{"session": {"$in": ["Oral"]}}`)
 - `collection_name` (str, optional): Name of ChromaDB collection

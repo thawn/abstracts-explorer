@@ -239,16 +239,21 @@ If your LLM doesn't support function calling, disable MCP tools:
 chat = RAGChat(em, db, enable_mcp_tools=False)
 ```
 
-### Conference and Year Context
+### Conference, Year, and Session Context
 
 ```python
-# Query papers from a specific conference and years
+# Query papers from a specific conference, year, and set of sessions
 response = chat.query(
     "What are the main themes?",
     conferences=["NeurIPS"],
     years=[2025],
+    sessions=["Oral Session 1", "Spotlight Session"],
 )
 ```
+
+The `sessions` filter is applied automatically to `search_papers` and cannot be
+overridden by the LLM.  It is typically populated from the web UI session
+selector.
 
 ## Conversation Management
 

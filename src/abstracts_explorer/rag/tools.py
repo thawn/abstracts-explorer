@@ -106,8 +106,8 @@ def _tool_search_papers(
 
     A conference must be specified. If not provided by the user, the
     currently selected conference from the web UI is used automatically.
-    The currently selected year is also applied automatically when not
-    explicitly provided.
+    The currently selected year and session filters are also applied
+    automatically when not explicitly provided.
 
     Parameters
     ----------
@@ -141,6 +141,10 @@ def _tool_search_papers(
         kwargs["conference"] = conference
     elif ctx.deps.conferences:
         kwargs["conference"] = ctx.deps.conferences[0]
+
+    # Session selection from the web UI is enforced, never overridable by the LLM.
+    if ctx.deps.sessions:
+        kwargs["sessions"] = ctx.deps.sessions
 
     return _run_rag_tool(ctx, "search_papers", mcp_search_papers, kwargs)
 
