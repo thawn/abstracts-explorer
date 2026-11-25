@@ -24,6 +24,7 @@ from abstracts_explorer.db_models import (
 
 from abstracts_explorer.db.errors import DatabaseError
 from abstracts_explorer.db.filters import WhereFilterMixin, _filter_has_key
+from abstracts_explorer.utils.hashing import paper_content_hash
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,8 @@ class PapersMixin(WhereFilterMixin):
             award=paper.award,
             year=paper.year,
             conference=paper.conference,
+            location=paper.location,
+            content_hash=paper_content_hash(paper.title, paper.abstract),
         )
 
     def add_paper(self, paper: LightweightPaper) -> Optional[str]:
@@ -327,6 +330,7 @@ class PapersMixin(WhereFilterMixin):
         conferences: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
         sessions: Optional[List[str]] = None,
+        locations: Optional[List[str]] = None,
         where_filters: Optional[Dict[str, Any]] = None,
         field_filters: Optional[Dict[str, str]] = None,
     ) -> List[str]:
@@ -341,6 +345,8 @@ class PapersMixin(WhereFilterMixin):
             Publication years to match.
         sessions : list of str, optional
             Session names to match.
+        locations : list of str, optional
+            Presentation locations (cities/sites) to match.
         where_filters : dict, optional
             SQL-style filter dictionary.  See :meth:`_build_where_conditions`.
         field_filters : dict, optional
@@ -361,6 +367,8 @@ class PapersMixin(WhereFilterMixin):
             terms.append({"year": {"$in": [_coerce_year(year) for year in years]}})
         if sessions and not _filter_has_key(normalized_where, "session"):
             terms.append({"session": {"$in": list(sessions)}})
+        if locations and not _filter_has_key(normalized_where, "location"):
+            terms.append({"location": {"$in": list(locations)}})
         if field_filters:
             for field_name, value in field_filters.items():
                 terms.append({field_name: {"$contains": value}})
@@ -369,6 +377,116 @@ class PapersMixin(WhereFilterMixin):
             return self.get_paper_uids()
         where_clause = terms[0] if len(terms) == 1 else {"$and": terms}
         return self.get_paper_uids(where_clause)
+
+    def get_locations(self, conference: Optional[str] = None, year: Optional[int] = None) -> List[str]:
+        """
+        Return the distinct presentation locations for a conference/year.
+
+        Parameters
+        ----------
+        conference : str, optional
+            Filter by conference name.
+        year : int, optional
+            Filter by conference year.
+
+        Returns
+        -------
+        list of str
+            Sorted location names with at least one paper.
+
+        Raises
+        ------
+        DatabaseError
+            If the query fails.
+        """
+        try:
+            stmt: Any = select(Paper.location).where(Paper.location.is_not(None))
+            if conference is not None:
+                stmt = stmt.where(Paper.conference == conference)
+            if year is not None:
+                stmt = stmt.where(Paper.year == year)
+            stmt = stmt.distinct()
+            values = [str(value) for value in self.session.execute(stmt).scalars().all() if value]
+            return sorted(values)
+        except DatabaseError:
+            raise
+        except Exception as e:
+            raise self._db_error("Failed to retrieve locations", e)
+
+    def get_content_hashes(self, uids: List[str]) -> Dict[str, Optional[str]]:
+        """
+        Return stored content hashes for the given paper UIDs.
+
+        Parameters
+        ----------
+        uids : list of str
+            Paper UIDs to look up.
+
+        Returns
+        -------
+        dict
+            Mapping of UID to its stored content hash (``None`` when absent
+            for that row). UIDs that do not exist are omitted.
+
+        Raises
+        ------
+        DatabaseError
+            If the query fails.
+        """
+        if not uids:
+            return {}
+        try:
+            hashes: Dict[str, Optional[str]] = {}
+            for start in range(0, len(uids), 500):
+                batch = uids[start : start + 500]
+                stmt: Any = select(Paper.uid, Paper.content_hash).where(Paper.uid.in_(batch))
+                for row in self.session.execute(stmt):
+                    hashes[str(row.uid)] = row.content_hash
+            return hashes
+        except DatabaseError:
+            raise
+        except Exception as e:
+            raise self._db_error("Failed to retrieve content hashes", e)
+
+    def get_locations_by_content_hashes(self, content_hashes: List[str]) -> Dict[str, List[str]]:
+        """
+        Return all presentation locations for each content hash.
+
+        Parameters
+        ----------
+        content_hashes : list of str
+            Content hashes to look up.
+
+        Returns
+        -------
+        dict
+            Mapping of content hash to a sorted list of locations.
+
+        Raises
+        ------
+        DatabaseError
+            If the query fails.
+        """
+        if not content_hashes:
+            return {}
+        try:
+            grouped: Dict[str, set] = {}
+            for start in range(0, len(content_hashes), 500):
+                batch = content_hashes[start : start + 500]
+                stmt: Any = (
+                    select(Paper.content_hash, Paper.location)
+                    .where(Paper.content_hash.in_(batch), Paper.location.is_not(None))
+                    .distinct()
+                )
+                for content_hash, location in self.session.execute(stmt):
+                    if not content_hash or not location:
+                        continue
+                    grouped.setdefault(str(content_hash), set()).add(str(location))
+            return {key: sorted(values) for key, values in grouped.items()}
+        except DatabaseError:
+            raise
+        except Exception as e:
+            raise self._db_error("Failed to retrieve locations by content hash", e)
 
     def get_paper_uids(
         self,
@@ -421,7 +539,8 @@ class PapersMixin(WhereFilterMixin):
         -------
         list of dict
             Dictionaries with ``uid``, ``title``, ``abstract``, ``year``,
-            ``conference``, and ``session``.  Results follow input order.
+            ``conference``, ``session``, ``location``, and ``content_hash``.
+            Results follow input order.
 
         Raises
         ------
@@ -442,6 +561,8 @@ class PapersMixin(WhereFilterMixin):
                     Paper.year,
                     Paper.conference,
                     Paper.session,
+                    Paper.location,
+                    Paper.content_hash,
                 ).where(Paper.uid.in_(batch))
                 for row in self.session.execute(stmt):
                     summaries[str(row.uid)] = {
@@ -451,6 +572,8 @@ class PapersMixin(WhereFilterMixin):
                         "year": row.year,
                         "conference": row.conference or "",
                         "session": row.session or "",
+                        "location": row.location,
+                        "content_hash": row.content_hash,
                     }
             return [summaries[uid] for uid in uids if uid in summaries]
         except DatabaseError:
@@ -557,6 +680,8 @@ class PapersMixin(WhereFilterMixin):
             "award": paper.award,
             "year": paper.year,
             "conference": paper.conference,
+            "location": paper.location,
+            "content_hash": paper.content_hash,
             "created_at": str(paper.created_at) if paper.created_at is not None else None,
         }
 

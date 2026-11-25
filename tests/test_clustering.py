@@ -128,7 +128,7 @@ class TestConstants:
         assert DEFAULT_REDUCTION_METHOD == "umap"
         assert DEFAULT_NR_LEVELS == 10
         assert DEFAULT_CLUSTERING_PARAMS["distance_threshold"] == 0.5
-        assert DEFAULT_CLUSTERING_PARAMS["pipeline_version"] == 2
+        assert DEFAULT_CLUSTERING_PARAMS["pipeline_version"] == 3
 
     def test_clustering_params_for(self):
         llm_params = clustering_params_for(True)

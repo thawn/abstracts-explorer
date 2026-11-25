@@ -101,6 +101,12 @@ export function formatPaperCard(paper: Paper, options: PaperCardOptions = {}): s
     if (paper.session) {
         metadata += `<span class="px-2 py-1 bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 text-xs rounded-full mr-${compact ? '1' : '2'}"><i class="fas fa-calendar-alt mr-1"></i>${escapeHtml(paper.session)}</span>`;
     }
+    const paperLocations = (paper.locations && paper.locations.length > 0)
+        ? paper.locations
+        : (paper.location ? [paper.location] : []);
+    if (paperLocations.length > 0) {
+        metadata += `<span class="px-2 py-1 bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-300 text-xs rounded-full mr-${compact ? '1' : '2'}"><i class="fas fa-location-dot mr-1"></i>${escapeHtml(paperLocations.join(' · '))}</span>`;
+    }
     if (paper.poster_position) {
         metadata += `<span class="px-2 py-1 bg-yellow-100 dark:bg-yellow-900/50 text-yellow-700 dark:text-yellow-300 text-xs rounded-full mr-${compact ? '1' : '2'}"><i class="fas fa-map-pin mr-1"></i>${escapeHtml(paper.poster_position)}</span>`;
     }

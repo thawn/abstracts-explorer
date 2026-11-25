@@ -23,6 +23,7 @@ class _SearchFilterKwargs(TypedDict, total=False):
     conferences: Optional[List[str]]
     years: Optional[List[int]]
     sessions: Optional[List[str]]
+    locations: Optional[List[str]]
     where_filters: Optional[Dict[str, Any]]
     field_filters: Optional[Dict[str, str]]
 
@@ -39,16 +40,18 @@ class SearchMixin(PapersMixin):
         conferences: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
         sessions: Optional[List[str]] = None,
+        locations: Optional[List[str]] = None,
         where_filters: Optional[Dict[str, Any]] = None,
         field_filters: Optional[Dict[str, str]] = None,
     ) -> Optional[List[str]]:
         """Return candidate UIDs, or None when no filters are present."""
-        if not (conferences or years or sessions or where_filters or field_filters):
+        if not (conferences or years or sessions or locations or where_filters or field_filters):
             return None
         return self.resolve_paper_uids(
             conferences=conferences,
             years=years,
             sessions=sessions,
+            locations=locations,
             where_filters=where_filters,
             field_filters=field_filters,
         )
@@ -61,6 +64,7 @@ class SearchMixin(PapersMixin):
         conferences: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
         sessions: Optional[List[str]] = None,
+        locations: Optional[List[str]] = None,
         where_filters: Optional[Dict[str, Any]] = None,
         field_filters: Optional[Dict[str, str]] = None,
     ) -> List[Dict[str, Any]]:
@@ -83,6 +87,8 @@ class SearchMixin(PapersMixin):
             List of years to filter by (matches ANY).
         sessions : list[str], optional
             List of sessions to filter by (matches ANY).
+        locations : list[str], optional
+            List of presentation locations to filter by (matches ANY).
         where_filters : dict, optional
             Additional SQL-style filters.  Structured conference/year/session
             filters already present here are not duplicated.
@@ -125,6 +131,8 @@ class SearchMixin(PapersMixin):
                 filter_terms.append({"year": {"$in": years}})
             if sessions and not _filter_has_key(normalized_where, "session"):
                 filter_terms.append({"session": {"$in": sessions}})
+            if locations and not _filter_has_key(normalized_where, "location"):
+                filter_terms.append({"location": {"$in": locations}})
             if field_filters:
                 for field_name, value in field_filters.items():
                     filter_terms.append({field_name: {"$contains": value}})
@@ -150,6 +158,7 @@ class SearchMixin(PapersMixin):
         conferences: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
         sessions: Optional[List[str]] = None,
+        locations: Optional[List[str]] = None,
         where_filters: Optional[Dict[str, Any]] = None,
         field_filters: Optional[Dict[str, str]] = None,
         limit: Optional[int] = None,
@@ -174,6 +183,8 @@ class SearchMixin(PapersMixin):
             Restrict results to these years.
         sessions : list of str, optional
             Restrict results to these sessions.
+        locations : list of str, optional
+            Restrict results to these presentation locations.
         where_filters : dict, optional
             Additional SQL-style filters.
         field_filters : dict of str to str, optional
@@ -191,6 +202,7 @@ class SearchMixin(PapersMixin):
             conferences=conferences,
             years=years,
             sessions=sessions,
+            locations=locations,
             where_filters=where_filters,
             field_filters=field_filters,
         )
@@ -259,6 +271,51 @@ class SearchMixin(PapersMixin):
             papers.append(paper)
         return papers
 
+    @staticmethod
+    def group_papers_by_content(papers: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Collapse duplicate presentations of the same abstract.
+
+        Rows that share a ``content_hash`` (for example streamed orals or an
+        oral and poster for the same paper) are merged into one result.  The
+        merged result keeps the first row's fields and adds a ``locations``
+        list plus a ``presentations`` list describing each presentation.
+
+        Parameters
+        ----------
+        papers : sequence of dict
+            Paper dictionaries, typically from a search result.
+
+        Returns
+        -------
+        list of dict
+            Grouped paper dictionaries in first-seen order.
+        """
+        grouped: Dict[str, Dict[str, Any]] = {}
+        order: List[str] = []
+        for paper in papers:
+            key = str(paper.get("content_hash") or paper.get("uid") or "")
+            if key not in grouped:
+                entry = dict(paper)
+                entry["locations"] = []
+                entry["presentations"] = []
+                grouped[key] = entry
+                order.append(key)
+            entry = grouped[key]
+            location = paper.get("location")
+            if location and location not in entry["locations"]:
+                entry["locations"].append(location)
+            entry["presentations"].append(
+                {
+                    "uid": paper.get("uid"),
+                    "session": paper.get("session"),
+                    "room_name": paper.get("room_name"),
+                    "poster_position": paper.get("poster_position"),
+                    "location": location,
+                }
+            )
+        return [grouped[key] for key in order]
+
     def search(
         self,
         query: str,
@@ -267,6 +324,7 @@ class SearchMixin(PapersMixin):
         conferences: Optional[List[str]] = None,
         years: Optional[List[int]] = None,
         sessions: Optional[List[str]] = None,
+        locations: Optional[List[str]] = None,
         where_filters: Optional[Dict[str, Any]] = None,
         use_embeddings: bool = False,
         distance_threshold: float = 1.1,
@@ -292,6 +350,8 @@ class SearchMixin(PapersMixin):
             Filter by publication years.
         sessions : list of str, optional
             Filter by paper sessions.
+        locations : list of str, optional
+            Filter by presentation locations.
         where_filters : dict, optional
             Additional SQL-style filters.
         use_embeddings : bool, optional
@@ -326,6 +386,7 @@ class SearchMixin(PapersMixin):
             "conferences": conferences,
             "years": years,
             "sessions": sessions,
+            "locations": locations,
             "where_filters": where_filters,
             "field_filters": field_filters or None,
         }
@@ -336,11 +397,12 @@ class SearchMixin(PapersMixin):
                 limit=limit,
                 **filters,
             )
-            return papers, None
+            return self.group_papers_by_content(papers), None
 
         if field_filters and not remaining_query:
             uids = self._resolve_filter_ids(**filters) or []
-            return self.get_papers_by_uids(uids[:limit] if limit else uids), None
+            papers = self.get_papers_by_uids(uids[:limit] if limit else uids)
+            return self.group_papers_by_content(papers), None
 
         if not field_filters:
             author_filters: _SearchFilterKwargs = {
@@ -349,7 +411,7 @@ class SearchMixin(PapersMixin):
             }
             author_uids = self._resolve_filter_ids(**author_filters) or []
             if author_uids:
-                return self.get_papers_by_uids(author_uids[:limit]), None
+                return self.group_papers_by_content(self.get_papers_by_uids(author_uids[:limit])), None
 
         owns_manager = embeddings_manager is None
         em = embeddings_manager or EmbeddingsManager()
@@ -364,7 +426,7 @@ class SearchMixin(PapersMixin):
                 **filters,
             )
             total_similar = len(matches) if include_total else None
-            return self.get_result_details(matches, slice(0, limit)), total_similar
+            return self.group_papers_by_content(self.get_result_details(matches, slice(0, limit))), total_similar
         finally:
             if owns_manager:
                 em.close()

@@ -9,6 +9,8 @@ export interface Paper {
     authors?: string[];
     abstract?: string;
     conference?: string;
+    location?: string;
+    locations?: string[];
     session?: string;
     poster_position?: string;
     poster_image_url?: string;

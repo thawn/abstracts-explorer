@@ -36,6 +36,12 @@ The default tab. Type a query and press **Search** to find matching papers.
   (10 / 25 / 50 / 100) and to filter by session or track.
 - **Conference / Year filter** — use the header dropdowns to restrict results
   to a specific conference and year.
+- **Location filter** — for conference years with multiple physical sites
+  (for example NeurIPS 2025 San Diego / Mexico City or NeurIPS 2026 Sydney /
+  Paris / Atlanta) a **Location** dropdown appears next to the year. Choose a
+  site to restrict search, chat, statistics, and clustering to that location.
+  The selection is kept in the URL (`?location=Paris`) and browser storage.
+  Papers presented at multiple sites are shown once with a location badge.
 
 **Rating papers:** Click the stars on any paper card to rate it (1–5 stars).
 Rated papers are automatically saved to the *Interesting Papers* tab.

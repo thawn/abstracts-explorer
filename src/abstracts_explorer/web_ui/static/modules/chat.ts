@@ -6,7 +6,7 @@
  */
 
 import { API_BASE, PLOTLY_COLORS } from './utils/constants.js';
-import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
+import { escapeHtml, getSelectedConference, getSelectedLocation, getSelectedYears } from './utils/dom-utils.js';
 import { parseJsonResponse } from './utils/api-utils.js';
 import { renderEmptyState } from './utils/ui-utils.js';
 import { setCurrentSearchTerm, getAllPaperPriorities } from './state.js';
@@ -165,7 +165,7 @@ export async function sendChatMessage(): Promise<void> {
             requestBody.paper_priorities = paperPriorities;
         }
 
-        if (sessions.length > 0 && sessions.length < chatSessionSelect.options.length) {
+        if (sessions.length > 0 && (sessions.length < chatSessionSelect.options.length || getSelectedLocation())) {
             requestBody.sessions = sessions;
         }
 

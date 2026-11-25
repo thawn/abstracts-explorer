@@ -2405,7 +2405,16 @@ class TestPaperUidResolution:
         assert summaries[0]["uid"] == uid
         assert summaries[0]["title"] == "Test Paper"
         assert summaries[0]["abstract"] == sample_paper.abstract
-        assert set(summaries[0]) == {"uid", "title", "abstract", "year", "conference", "session"}
+        assert set(summaries[0]) == {
+            "uid",
+            "title",
+            "abstract",
+            "year",
+            "conference",
+            "session",
+            "location",
+            "content_hash",
+        }
 
     def test_find_paper_ids_within_distance_returns_matches(self, connected_db, sample_paper):
         uid = connected_db.add_paper(sample_paper)

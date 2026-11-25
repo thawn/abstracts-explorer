@@ -18,6 +18,7 @@ from bs4 import BeautifulSoup
 from pydantic import ValidationError
 
 from abstracts_explorer.plugin import DownloadOptions, LightweightPaper, sanitize_author_names
+from abstracts_explorer.plugin.locations import assign_locations, build_neurips_location_map
 from abstracts_explorer.plugin.persistence import FailureSidecar
 from abstracts_explorer.plugins.json_conference_downloader import JSONConferenceDownloaderPlugin
 
@@ -87,8 +88,33 @@ class NeurIPSDownloaderPlugin(JSONConferenceDownloaderPlugin):
             Downloaded and validated papers.
         """
         if year >= self._eventhosts_start_year:
-            return super()._download_uncached(year, output_path, options)
+            papers = super()._download_uncached(year, output_path, options)
+            return self._assign_locations(papers, year, options)
         return self._download_legacy(year, output_path, options)
+
+    def _assign_locations(
+        self,
+        papers: List[LightweightPaper],
+        year: int,
+        options: DownloadOptions,
+    ) -> List[LightweightPaper]:
+        """Derive and assign physical locations from the EventHosts site."""
+        try:
+            location_map = build_neurips_location_map(
+                year,
+                lambda url: self._request(
+                    url,
+                    options.timeout,
+                    options.verify_ssl,
+                    request_delay=options.request_delay,
+                ).text,
+            )
+            if location_map.is_multi_location:
+                assign_locations(papers, location_map)
+                logger.info("Assigned locations for NeurIPS %d: %s", year, ", ".join(location_map.locations))
+        except Exception as exc:
+            logger.warning("Could not derive NeurIPS %d locations: %s", year, exc)
+        return papers
 
     def _handle_cached(
         self,
@@ -99,7 +125,10 @@ class NeurIPSDownloaderPlugin(JSONConferenceDownloaderPlugin):
     ) -> List[LightweightPaper]:
         """Retry failed legacy pages when a cache with a failures sidecar is reused."""
         if year >= self._eventhosts_start_year:
-            return super()._handle_cached(cached, year, output_path, options)
+            cached = super()._handle_cached(cached, year, output_path, options)
+            if any(not paper.location for paper in cached):
+                cached = self._assign_locations(cached, year, options)
+            return cached
         failures = FailureSidecar(output_path, self.conference_name, year).load()
         if not failures:
             return cached

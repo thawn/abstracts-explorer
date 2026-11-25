@@ -101,9 +101,38 @@ class LoadingMixin:
                     len(chroma_ids) - len(keep_indices),
                 )
 
-            self.paper_ids = [chroma_ids[index] for index in keep_indices]
-            self.embeddings = np.array([chroma_embeddings[index] for index in keep_indices])
-            self.metadatas = [summaries[uid] for uid in self.paper_ids]
+            kept_ids = [chroma_ids[index] for index in keep_indices]
+            content_hashes = [str(summaries[uid].get("content_hash") or uid) for uid in kept_ids]
+            locations_by_hash = self.database.get_locations_by_content_hashes(content_hashes)
+
+            seen_hashes: set[str] = set()
+            deduped_ids: List[str] = []
+            deduped_embeddings: List[Any] = []
+            deduped_metadatas: List[Dict[str, Any]] = []
+            for index, uid, content_hash in zip(keep_indices, kept_ids, content_hashes):
+                if content_hash in seen_hashes:
+                    continue
+                seen_hashes.add(content_hash)
+                metadata = dict(summaries[uid])
+                locations = locations_by_hash.get(content_hash)
+                if not locations:
+                    single = metadata.get("location")
+                    locations = [single] if single else []
+                metadata["locations"] = locations
+                metadata["primary_location"] = locations[0] if locations else metadata.get("location")
+                deduped_ids.append(uid)
+                deduped_embeddings.append(chroma_embeddings[index])
+                deduped_metadatas.append(metadata)
+
+            if len(deduped_ids) != len(kept_ids):
+                logger.info(
+                    "Deduplicated %d presentation row(s) by content hash before clustering",
+                    len(kept_ids) - len(deduped_ids),
+                )
+
+            self.paper_ids = deduped_ids
+            self.embeddings = np.array(deduped_embeddings)
+            self.metadatas = deduped_metadatas
 
             logger.info(f"Loaded {len(self.paper_ids)} embeddings with dimension {self.embeddings.shape[1]}")
             return len(self.paper_ids)

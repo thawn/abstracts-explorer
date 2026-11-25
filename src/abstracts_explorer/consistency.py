@@ -174,6 +174,7 @@ def _check_embeddings(
         report.papers_checked += len(uids)
 
         summaries = {str(item["uid"]): item for item in database.get_paper_summaries_by_uids(uids)}
+        content_hashes = database.get_content_hashes(uids)
         missing = [uid for uid in uids if uid not in records]
         stale = []
         for uid in uids:
@@ -182,8 +183,11 @@ def _check_embeddings(
             summary = summaries.get(uid)
             if summary is None:
                 continue
-            text = f"{summary.get('title') or ''}\n\n{summary.get('abstract') or ''}".strip()
-            if text and records[uid] != hash_text(text):
+            expected = content_hashes.get(uid)
+            if expected is None:
+                text = f"{summary.get('title') or ''}\n\n{summary.get('abstract') or ''}".strip()
+                expected = hash_text(text) if text else None
+            if expected and records[uid] != expected:
                 stale.append(uid)
 
         if missing:

@@ -58,6 +58,8 @@ class LightweightPaper(BaseModel):
         End time
     award : str
         Award name (e.g., "Best Paper Award")
+    location : str
+        Physical location (city/site) of the presentation, if applicable.
     """
 
     # Required fields
@@ -79,6 +81,7 @@ class LightweightPaper(BaseModel):
     starttime: Optional[str] = None
     endtime: Optional[str] = None
     award: Optional[str] = None
+    location: Optional[str] = None
 
     @field_validator("title")
     @classmethod
