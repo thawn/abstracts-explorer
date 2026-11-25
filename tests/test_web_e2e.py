@@ -7,6 +7,7 @@ testing user interactions and workflows as they would happen in a real browser.
 
 import pytest
 import time
+import json
 
 import sqlite3
 import numpy as np
@@ -841,6 +842,127 @@ class TestWebUIE2E:
 
         # Check filter elements (only session filter exists in lightweight schema)
         expect(page.locator("#chat-session-filter")).to_be_attached()
+
+    def test_chat_session_filter_included_in_request(self, web_server, page: Page):
+        """
+        Test that the chat session filter is sent with the chat request.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        page : playwright.sync_api.Page
+            Playwright page
+        """
+        base_url, _ = web_server
+
+        def fulfill_chat(route):
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"response": "ok", "message": "ok"}),
+            )
+
+        page.route("**/api/chat", fulfill_chat)
+        page.goto(base_url)
+        page.locator("#tab-chat").click()
+        expect(page.locator("#chat-tab")).to_be_visible()
+
+        page.wait_for_function("() => document.querySelectorAll('#chat-session-filter option').length > 1")
+        page.locator("button[onclick='openChatSettings()']").click()
+        expect(page.locator("#settings-modal")).to_be_visible()
+
+        modal_sessions = page.locator("#modal-session-filter")
+        page.wait_for_function("() => document.querySelectorAll('#modal-session-filter option').length > 1")
+        modal_sessions.select_option(label="Oral Session 1")
+        assert modal_sessions.evaluate("el => Array.from(el.selectedOptions).map(o => o.value)") == ["Oral Session 1"]
+
+        page.locator("#settings-modal button[onclick='closeSettings()']").first.click()
+        expect(page.locator("#settings-modal")).to_be_hidden()
+
+        chat_input = page.locator("#chat-input")
+        chat_input.fill("Find papers about transformers.")
+        with page.expect_request(
+            lambda request: request.url.endswith("/api/chat") and request.method == "POST",
+            timeout=30000,
+        ) as request_info:
+            chat_input.press("Enter")
+
+        request_body = json.loads(request_info.value.post_data or "{}")
+        assert request_body.get("sessions") == ["Oral Session 1"]
+
+    @requires_lm_studio
+    def test_chat_session_filter_restricts_search_papers(self, web_server, test_embeddings, page: Page):
+        """
+        Test that the selected session filter restricts ``search_papers`` results.
+
+        The chat agent should call ``search_papers`` and every returned paper
+        must belong to the session selected in the chat settings.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        test_embeddings : tuple
+            Cached embeddings manager, path, collection name, and mock client
+        page : playwright.sync_api.Page
+            Playwright page
+        """
+        import abstracts_explorer.mcp.shared_dependencies as mcp_deps
+
+        mock_client = test_embeddings[3]
+        original_embeddings_cls = mcp_deps.EmbeddingsManager
+
+        class _MockClientEmbeddingsManager(original_embeddings_cls):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._openai_client = mock_client
+
+        mcp_deps.EmbeddingsManager = _MockClientEmbeddingsManager
+        close_mcp_resources(force=True)
+        try:
+            base_url, _ = web_server
+            page.goto(base_url)
+            page.locator("#tab-chat").click()
+            expect(page.locator("#chat-tab")).to_be_visible()
+
+            page.wait_for_function("() => document.querySelectorAll('#chat-session-filter option').length > 1")
+            page.locator("button[onclick='openChatSettings()']").click()
+            expect(page.locator("#settings-modal")).to_be_visible()
+
+            modal_sessions = page.locator("#modal-session-filter")
+            page.wait_for_function("() => document.querySelectorAll('#modal-session-filter option').length > 1")
+            modal_sessions.select_option(label="Oral Session 1")
+            page.locator("#settings-modal button[onclick='closeSettings()']").first.click()
+            expect(page.locator("#settings-modal")).to_be_hidden()
+
+            chat_input = page.locator("#chat-input")
+            chat_input.fill("Find papers about transformers.")
+
+            with page.expect_response(
+                lambda response: response.url.endswith("/api/chat") and response.request.method == "POST",
+                timeout=120000,
+            ) as response_info:
+                chat_input.press("Enter")
+
+            response = response_info.value
+            if response.status != 200:
+                pytest.skip(f"Chat backend unavailable (HTTP {response.status})")
+
+            request_body = json.loads(response.request.post_data or "{}")
+            assert request_body.get("sessions") == ["Oral Session 1"]
+            payload = response.json().get("response")
+            assert isinstance(payload, dict), "Chat response should contain structured RAG output"
+
+            tools_executed = payload.get("metadata", {}).get("tools_executed", [])
+            assert "search_papers" in tools_executed, f"Expected search_papers tool call, got {tools_executed}"
+
+            papers = [paper for paper in payload.get("papers", []) if paper.get("session")]
+            assert papers, "Expected papers from the selected session"
+            assert {paper["session"] for paper in papers} == {"Oral Session 1"}
+        finally:
+            mcp_deps.EmbeddingsManager = original_embeddings_cls
+            close_mcp_resources(force=True)
 
     def test_chat_send_message(self, web_server, page: Page):
         """
