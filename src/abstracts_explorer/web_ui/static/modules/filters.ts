@@ -156,20 +156,26 @@ export function filterSessionOptions(selectId: string, query: string): void {
 
 /**
  * Clear the session search field and reveal all session options.
+ *
+ * @param focus - Whether to move focus back to the search input
  */
-function resetSessionSearch(): void {
+export function clearSessionSearch(focus = true): void {
     const input = document.getElementById('modal-session-search') as HTMLInputElement | null;
     if (input) {
         input.value = '';
+        if (focus) {
+            input.focus();
+        }
     }
 
-    const select = document.getElementById('modal-session-filter') as HTMLSelectElement | null;
-    if (select) {
-        Array.from(select.options).forEach((option) => {
-            option.hidden = false;
-            option.style.display = '';
-        });
-    }
+    filterSessionOptions('modal-session-filter', '');
+}
+
+/**
+ * Clear the session search field without stealing focus.
+ */
+function resetSessionSearch(): void {
+    clearSessionSearch(false);
 }
 
 /**

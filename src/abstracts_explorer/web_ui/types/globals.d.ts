@@ -54,6 +54,7 @@ interface Window {
     selectAllFilter?: (...args: any[]) => any;
     deselectAllFilter?: (...args: any[]) => any;
     filterSessionOptions?: (...args: any[]) => any;
+    clearSessionSearch?: (...args: any[]) => any;
     openSearchSettings?: (...args: any[]) => any;
     openChatSettings?: (...args: any[]) => any;
     closeSettings?: (...args: any[]) => any;

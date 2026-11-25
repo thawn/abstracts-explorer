@@ -11,6 +11,7 @@ import {
     selectAllFilter, 
     deselectAllFilter,
     filterSessionOptions,
+    clearSessionSearch,
     openSearchSettings,
     openChatSettings,
     closeSettings,
@@ -442,6 +443,20 @@ describe('Filters Module', () => {
 
         it('should not throw for an unknown select', () => {
             expect(() => filterSessionOptions('missing-filter', 'x')).not.toThrow();
+        });
+
+        it('should clear the search field, reveal all options, and focus the input', () => {
+            const input = document.getElementById('modal-session-search');
+            input.value = 'learn';
+            filterSessionOptions('modal-session-filter', 'learn');
+
+            clearSessionSearch();
+
+            const select = document.getElementById('modal-session-filter');
+            expect(input.value).toBe('');
+            expect(document.activeElement).toBe(input);
+            expect(Array.from(select.options).every((opt) => !opt.hidden)).toBe(true);
+            expect(Array.from(select.options).every((opt) => opt.style.display === '')).toBe(true);
         });
     });
 
