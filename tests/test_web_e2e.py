@@ -964,6 +964,82 @@ class TestWebUIE2E:
             mcp_deps.EmbeddingsManager = original_embeddings_cls
             close_mcp_resources(force=True)
 
+    @requires_lm_studio
+    def test_chat_session_filter_dropped_for_other_conference(self, web_server, test_embeddings, page: Page):
+        """
+        Test that UI session filters do not leak into another conference search.
+
+        The UI is scoped to NeurIPS 2025 with only ``Oral Session 1`` selected.
+        Asking about ICLR 2024 must still return ICLR papers instead of being
+        filtered out by the NeurIPS session/year defaults.
+
+        Parameters
+        ----------
+        web_server : tuple
+            Web server fixture (base_url, port)
+        test_embeddings : tuple
+            Cached embeddings manager, path, collection name, and mock client
+        page : playwright.sync_api.Page
+            Playwright page
+        """
+        import abstracts_explorer.mcp.shared_dependencies as mcp_deps
+
+        mock_client = test_embeddings[3]
+        original_embeddings_cls = mcp_deps.EmbeddingsManager
+
+        class _MockClientEmbeddingsManager(original_embeddings_cls):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._openai_client = mock_client
+
+        mcp_deps.EmbeddingsManager = _MockClientEmbeddingsManager
+        close_mcp_resources(force=True)
+        try:
+            base_url, _ = web_server
+            page.goto(base_url)
+            page.locator("#tab-chat").click()
+            expect(page.locator("#chat-tab")).to_be_visible()
+
+            page.wait_for_function("() => document.querySelectorAll('#chat-session-filter option').length > 1")
+            page.locator("button[onclick='openChatSettings()']").click()
+            expect(page.locator("#settings-modal")).to_be_visible()
+
+            modal_sessions = page.locator("#modal-session-filter")
+            page.wait_for_function("() => document.querySelectorAll('#modal-session-filter option').length > 1")
+            modal_sessions.select_option(label="Oral Session 1")
+            page.locator("#settings-modal button[onclick='closeSettings()']").first.click()
+            expect(page.locator("#settings-modal")).to_be_hidden()
+
+            chat_input = page.locator("#chat-input")
+            chat_input.fill("Find papers about contrastive vision pretraining at ICLR in 2024.")
+
+            with page.expect_response(
+                lambda response: response.url.endswith("/api/chat") and response.request.method == "POST",
+                timeout=120000,
+            ) as response_info:
+                chat_input.press("Enter")
+
+            response = response_info.value
+            if response.status != 200:
+                pytest.skip(f"Chat backend unavailable (HTTP {response.status})")
+
+            request_body = json.loads(response.request.post_data or "{}")
+            assert request_body.get("sessions") == ["Oral Session 1"]
+            payload = response.json().get("response")
+            assert isinstance(payload, dict), "Chat response should contain structured RAG output"
+
+            tools_executed = payload.get("metadata", {}).get("tools_executed", [])
+            assert "search_papers" in tools_executed, f"Expected search_papers tool call, got {tools_executed}"
+
+            papers = payload.get("papers", [])
+            assert papers, "Expected ICLR search results despite UI session filter"
+            assert any(
+                paper.get("conference") == "ICLR" for paper in papers
+            ), f"Expected at least one ICLR paper, got {[paper.get('conference') for paper in papers]}"
+        finally:
+            mcp_deps.EmbeddingsManager = original_embeddings_cls
+            close_mcp_resources(force=True)
+
     def test_chat_send_message(self, web_server, page: Page):
         """
         Test sending a message in the chat interface.

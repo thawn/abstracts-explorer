@@ -25,10 +25,14 @@ class RAGToolContext:
     conferences : list of str
         Default conferences for MCP clustering tools (from web UI selection).
     years : list of int
-        Default years for MCP clustering tools (from web UI selection).
+        Default years for MCP tools (from web UI selection).  These are scoped
+        to ``conferences``: tools drop them when the LLM requests a different
+        conference.
     sessions : list of str
         Default paper sessions for search tools (from web UI selection).
-        This is an enforced constraint, not an LLM-facing tool argument.
+        This is an enforced constraint for the selected conference/year, not an
+        LLM-facing tool argument.  It is dropped when the LLM requests a
+        different conference or year.
     paper_priorities : dict
         Paper ratings from the web UI (``localStorage.paperPriorities``).
         Keys are paper UIDs; values are either star ratings or dicts with

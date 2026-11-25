@@ -253,7 +253,11 @@ response = chat.query(
 
 The `sessions` filter is applied automatically to `search_papers` and cannot be
 overridden by the LLM.  It is typically populated from the web UI session
-selector.
+selector.  The UI conference, year, and session selection forms one scoped
+bundle: when the agent searches a different conference, the UI session and
+default-year filters are dropped so the other conference is not filtered by
+session names or years that belong to the selected conference.  Years that the
+LLM explicitly passes still apply.
 
 ## Conversation Management
 

@@ -1992,6 +1992,172 @@ class TestRAGToolConferenceDefaults:
         assert "years" not in call_kwargs
 
 
+class TestRAGToolScopedFilters:
+    """UI year/session defaults apply only to the UI-selected conference."""
+
+    @staticmethod
+    def _context():
+        """Build a context scoped to NeurIPS 2025 with a partial session filter."""
+        from abstracts_explorer.rag import RAGToolContext
+
+        ctx = Mock()
+        ctx.deps = RAGToolContext()
+        ctx.deps.conferences = ["NeurIPS"]
+        ctx.deps.years = [2025]
+        ctx.deps.sessions = ["Oral Session 1"]
+        return ctx
+
+    def test_search_drops_ui_defaults_for_different_conference(self, mock_search_papers):
+        """A different conference drops the UI year and session defaults."""
+        from abstracts_explorer.rag import _tool_search_papers
+
+        ctx = self._context()
+        _tool_search_papers(ctx, topic_keywords="transformers", conference="ICLR")
+
+        call_kwargs = mock_search_papers.call_args[1]
+        assert call_kwargs["conference"] == "ICLR"
+        assert "years" not in call_kwargs
+        assert "sessions" not in call_kwargs
+
+    def test_search_keeps_explicit_years_for_different_conference(self, mock_search_papers):
+        """Explicit years still apply for a different conference."""
+        from abstracts_explorer.rag import _tool_search_papers
+
+        ctx = self._context()
+        _tool_search_papers(ctx, topic_keywords="transformers", conference="ICLR", years=[2024])
+
+        call_kwargs = mock_search_papers.call_args[1]
+        assert call_kwargs["years"] == [2024]
+        assert "sessions" not in call_kwargs
+
+    def test_search_keeps_ui_defaults_for_same_conference(self, mock_search_papers):
+        """Same conference (case/year-suffix tolerant) keeps UI defaults."""
+        from abstracts_explorer.rag import _tool_search_papers
+
+        ctx = self._context()
+        _tool_search_papers(ctx, topic_keywords="transformers", conference="neurips 2025")
+
+        call_kwargs = mock_search_papers.call_args[1]
+        assert call_kwargs["years"] == [2025]
+        assert call_kwargs["sessions"] == ["Oral Session 1"]
+
+    def test_search_drops_sessions_when_explicit_years_differ(self, mock_search_papers):
+        """A different explicit year drops the year-scoped session filter."""
+        from abstracts_explorer.rag import _tool_search_papers
+
+        ctx = self._context()
+        _tool_search_papers(ctx, topic_keywords="transformers", conference="NeurIPS", years=[2024])
+
+        call_kwargs = mock_search_papers.call_args[1]
+        assert call_kwargs["years"] == [2024]
+        assert "sessions" not in call_kwargs
+
+    def test_get_conference_topics_drops_ui_year_for_different_conference(self):
+        """Topics for another conference do not inherit the UI year."""
+        from abstracts_explorer.rag import _tool_get_conference_topics
+
+        with patch("abstracts_explorer.rag.tools.mcp_get_conference_topics") as mock_ct:
+            mock_ct.return_value = json.dumps({"topics": []})
+            ctx = self._context()
+            _tool_get_conference_topics(ctx, conference="ICLR")
+
+        call_kwargs = mock_ct.call_args[1]
+        assert call_kwargs["conferences"] == ["ICLR"]
+        assert call_kwargs["years"] is None
+
+    def test_get_conference_topics_keeps_ui_year_for_same_conference(self):
+        """Topics for the selected conference keep the UI year."""
+        from abstracts_explorer.rag import _tool_get_conference_topics
+
+        with patch("abstracts_explorer.rag.tools.mcp_get_conference_topics") as mock_ct:
+            mock_ct.return_value = json.dumps({"topics": []})
+            ctx = self._context()
+            _tool_get_conference_topics(ctx, conference="NeurIPS")
+
+        assert mock_ct.call_args[1]["years"] == [2025]
+
+    def test_analyze_topic_relevance_drops_ui_year_for_different_conference(self):
+        """Relevance analysis for another conference does not inherit the UI year."""
+        from abstracts_explorer.rag import _tool_analyze_topic_relevance
+
+        with patch("abstracts_explorer.rag.tools.mcp_analyze_topic_relevance") as mock_at:
+            mock_at.return_value = json.dumps({"topic": "x"})
+            ctx = self._context()
+            _tool_analyze_topic_relevance(ctx, topic="diffusion", conference="ICLR")
+
+        call_kwargs = mock_at.call_args[1]
+        assert call_kwargs["conferences"] == ["ICLR"]
+        assert "years" not in call_kwargs
+
+    def test_get_cluster_visualization_drops_ui_year_for_different_conference(self):
+        """Visualization for another conference does not inherit the UI year."""
+        from abstracts_explorer.rag import _tool_get_cluster_visualization
+
+        with patch("abstracts_explorer.rag.tools.mcp_get_cluster_visualization") as mock_viz:
+            mock_viz.return_value = json.dumps({"points": []})
+            ctx = self._context()
+            _tool_get_cluster_visualization(ctx, conference="ICLR")
+
+        call_kwargs = mock_viz.call_args[1]
+        assert call_kwargs["conferences"] == ["ICLR"]
+        assert call_kwargs["years"] is None
+
+    def test_get_paper_details_drops_ui_year_for_different_conference(self):
+        """Paper details for another conference do not inherit the UI year."""
+        from abstracts_explorer.rag import _tool_get_paper_details
+
+        with patch("abstracts_explorer.rag.tools.mcp_get_paper_details") as mock_gpd:
+            mock_gpd.return_value = json.dumps({"papers": []})
+            ctx = self._context()
+            _tool_get_paper_details(ctx, title="Attention", conference="ICLR")
+
+        call_kwargs = mock_gpd.call_args[1]
+        assert call_kwargs["conference"] == "ICLR"
+        assert "year" not in call_kwargs
+
+    def test_summarize_interesting_drops_ui_year_for_different_conference(self):
+        """Interesting-paper summaries for another conference drop the UI year."""
+        from abstracts_explorer.rag import _tool_summarize_interesting_papers
+
+        with patch("abstracts_explorer.rag.tools.mcp_summarize_interesting_papers") as mock_sum:
+            mock_sum.return_value = json.dumps({"papers": []})
+            ctx = self._context()
+            ctx.deps.paper_priorities = {"p1": {"priority": 5}}
+            _tool_summarize_interesting_papers(ctx, conference="ICLR")
+
+        call_kwargs = mock_sum.call_args[1]
+        assert call_kwargs["conference"] == "ICLR"
+        assert "years" not in call_kwargs
+
+    def test_recommend_related_drops_ui_year_for_different_conference(self):
+        """Recommendations for another conference drop the UI year."""
+        from abstracts_explorer.rag import _tool_recommend_related_papers
+
+        with patch("abstracts_explorer.rag.tools.mcp_recommend_related_papers") as mock_rec:
+            mock_rec.return_value = json.dumps({"papers": []})
+            ctx = self._context()
+            ctx.deps.paper_priorities = {"p1": {"priority": 5}}
+            _tool_recommend_related_papers(ctx, conferences=["ICLR"])
+
+        call_kwargs = mock_rec.call_args[1]
+        assert call_kwargs["conferences"] == ["ICLR"]
+        assert "years" not in call_kwargs
+
+    def test_suggest_authors_drops_ui_year_for_different_conference(self):
+        """Author suggestions for another conference drop the UI year."""
+        from abstracts_explorer.rag import _tool_suggest_authors_to_meet
+
+        with patch("abstracts_explorer.rag.tools.mcp_suggest_authors_to_meet") as mock_auth:
+            mock_auth.return_value = json.dumps({"authors": []})
+            ctx = self._context()
+            ctx.deps.paper_priorities = {"p1": {"priority": 5}}
+            _tool_suggest_authors_to_meet(ctx, conferences=["ICLR"])
+
+        call_kwargs = mock_auth.call_args[1]
+        assert call_kwargs["conferences"] == ["ICLR"]
+        assert "years" not in call_kwargs
+
+
 class TestRAGToolGetPaperDetails:
     """Test the _tool_get_paper_details wrapper and its conference/year defaults."""
 

@@ -331,11 +331,14 @@ class AgentMixin:
         years : list of int, optional
             Default years for MCP clustering tools.  Typically set from the
             web UI year selector.  Also included in the system prompt so the LLM
-            knows the current year context.
+            knows the current year context.  These defaults are scoped to the
+            selected conferences and are dropped for a different conference.
         sessions : list of str, optional
             Default paper sessions for search tools.  Typically set from the
             web UI session selector.  Applied automatically to ``search_papers``
-            results; the LLM cannot override this constraint.
+            results for the selected conference/year; the LLM cannot override
+            this constraint, and it is dropped for a different conference or
+            year.
         available_conferences : list of str, optional
             All conference names available in the system (from registered plugins).
             Included in the system prompt so the LLM can inform the user about
