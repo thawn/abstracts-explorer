@@ -99,6 +99,25 @@ export function dismissDefaultFilterError(): void {
 }
 
 /**
+ * Populate a multi-select with session names, selecting every option.
+ *
+ * @param select - Target select element, or null to skip
+ * @param sessions - Session names to populate
+ */
+function populateSessionSelect(select: HTMLSelectElement | null, sessions: string[]): void {
+    if (!select) return;
+
+    select.innerHTML = '';
+    sessions.forEach((session) => {
+        const option = document.createElement('option');
+        option.value = session;
+        option.textContent = session;
+        option.selected = true;
+        select.appendChild(option);
+    });
+}
+
+/**
  * Load filter options from API.
  */
 export async function loadFilterOptions(): Promise<void> {
@@ -222,25 +241,13 @@ export async function loadFilterOptions(): Promise<void> {
             }
         }
 
-        const sessionSelect = document.getElementById('session-filter') as HTMLSelectElement;
-        sessionSelect.innerHTML = '';
-        filtersData.sessions.forEach((session: string) => {
-            const option = document.createElement('option');
-            option.value = session;
-            option.textContent = session;
-            option.selected = true;
-            sessionSelect.appendChild(option);
-        });
+        const sessionSelect = document.getElementById('session-filter') as HTMLSelectElement | null;
+        const chatSessionSelect = document.getElementById('chat-session-filter') as HTMLSelectElement | null;
+        const modalSessionSelect = document.getElementById('modal-session-filter') as HTMLSelectElement | null;
 
-        const chatSessionSelect = document.getElementById('chat-session-filter') as HTMLSelectElement;
-        chatSessionSelect.innerHTML = '';
-        filtersData.sessions.forEach((session: string) => {
-            const option = document.createElement('option');
-            option.value = session;
-            option.textContent = session;
-            option.selected = true;
-            chatSessionSelect.appendChild(option);
-        });
+        populateSessionSelect(sessionSelect, filtersData.sessions);
+        populateSessionSelect(chatSessionSelect, filtersData.sessions);
+        populateSessionSelect(modalSessionSelect, filtersData.sessions);
     } catch (error) {
         console.error('Error loading filter options:', error);
     }
@@ -326,9 +333,16 @@ export function syncFiltersToModal(context: string): void {
     const sessionFilter = document.getElementById(prefix + 'session-filter') as HTMLSelectElement | null;
     const modalSessionFilter = document.getElementById('modal-session-filter') as HTMLSelectElement | null;
     if (sessionFilter && modalSessionFilter) {
-        if (modalSessionFilter.options.length === 0) {
-            modalSessionFilter.innerHTML = sessionFilter.innerHTML;
+        const sourceValues = Array.from(sessionFilter.options).map((opt) => opt.value);
+        const modalValues = Array.from(modalSessionFilter.options).map((opt) => opt.value);
+        const needsRebuild =
+            sourceValues.length !== modalValues.length ||
+            sourceValues.some((value, idx) => value !== modalValues[idx]);
+
+        if (needsRebuild) {
+            populateSessionSelect(modalSessionFilter, sourceValues);
         }
+
         Array.from(modalSessionFilter.options).forEach((opt, idx) => {
             opt.selected = sessionFilter.options[idx]?.selected || false;
         });

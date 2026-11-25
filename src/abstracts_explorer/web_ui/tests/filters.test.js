@@ -78,6 +78,33 @@ describe('Filters Module', () => {
             expect(sessionSelect.options.length).toBe(3);
         });
 
+        it('should refresh the modal session filter when the selection changes', async () => {
+            const modalSelect = document.getElementById('modal-session-filter');
+            modalSelect.innerHTML = '<option value="Stale Session" selected>Stale Session</option>';
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    sessions: ['Session 1', 'Session 2']
+                })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: ['NeurIPS'],
+                    years: [2025],
+                    conference_years: { 'NeurIPS': [2025] },
+                    default_conference: 'NeurIPS',
+                    default_year: 2025
+                })
+            });
+
+            await loadFilterOptions();
+
+            const values = Array.from(modalSelect.options).map((o) => o.value);
+            expect(values).toEqual(['Session 1', 'Session 2']);
+            expect(Array.from(modalSelect.options).every((o) => o.selected)).toBe(true);
+        });
+
         it('should populate year selector', async () => {
             global.fetch.mockResolvedValueOnce({
                 ok: true,
@@ -367,6 +394,22 @@ describe('Filters Module', () => {
 
             syncFiltersToModal('search');
 
+            expect(modalSelect.options[0].selected).toBe(true);
+            expect(modalSelect.options[1].selected).toBe(false);
+        });
+
+        it('should rebuild stale modal options from the search filters', () => {
+            const sessionSelect = document.getElementById('session-filter');
+            const modalSelect = document.getElementById('modal-session-filter');
+
+            sessionSelect.innerHTML = '<option value="A" selected>A</option><option value="B" selected>B</option>';
+            sessionSelect.options[1].selected = false;
+            modalSelect.innerHTML = '<option value="Stale" selected>Stale</option>';
+
+            syncFiltersToModal('search');
+
+            const values = Array.from(modalSelect.options).map((o) => o.value);
+            expect(values).toEqual(['A', 'B']);
             expect(modalSelect.options[0].selected).toBe(true);
             expect(modalSelect.options[1].selected).toBe(false);
         });
