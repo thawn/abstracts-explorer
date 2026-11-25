@@ -372,8 +372,8 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
     web_parser.add_argument(
         "--port",
         type=int,
-        default=5000,
-        help="Port to bind to (default: 5000)",
+        default=5001,
+        help="Port to bind to (default: 5001)",
     )
     web_parser.add_argument(
         "--dev",

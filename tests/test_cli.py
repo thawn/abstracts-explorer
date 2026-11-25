@@ -3514,6 +3514,15 @@ class TestWebUICommand:
         assert exit_code == 0
         mock_run_server.assert_called_once_with(host="127.0.0.1", port=5000, debug=False, dev=False, threads=10)
 
+    def test_web_ui_default_port_avoids_airplay(self):
+        """The web-ui default port does not collide with macOS AirPlay (5000)."""
+        from abstracts_explorer.cli.parsers import build_parser
+
+        parser, _ = build_parser(Config())
+
+        args = parser.parse_args(["web-ui"])
+        assert args.port == 5001
+
     def test_web_ui_threads_default_from_config(self):
         """The web-ui --threads default comes from the loaded config."""
         from abstracts_explorer.cli.parsers import build_parser

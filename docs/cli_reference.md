@@ -208,7 +208,7 @@ usage: abstracts-explorer web-ui [-h] [--host HOST] [--port PORT] [--dev]
 | Option | Description |
 | ------ | ----------- |
 | `--host HOST` | Host to bind to (default: `127.0.0.1`) |
-| `--port PORT` | Port to bind to (default: 5000) |
+| `--port PORT` | Port to bind to (default: 5001) |
 | `--dev` | Use the Flask development server instead of Waitress. Note: use `-vv` to enable debug mode with any server. |
 | `--threads THREADS` | Number of Waitress worker threads (default: `WEB_UI_THREADS` or 6). Must be >= 1. Ignored when `--dev` is set. |
 

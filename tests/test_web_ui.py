@@ -1822,6 +1822,75 @@ class TestWebUIRunServer:
                 assert exc_info.value.code == 0
 
 
+class TestPortConflictDetection:
+    """Test detection of an already-bound web UI port."""
+
+    def test_port_in_use_returns_true_for_bound_port(self):
+        """A listening socket on the probe host is detected as in use."""
+        import socket
+
+        from abstracts_explorer.web_ui.app import _port_in_use
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            sock.listen(1)
+            port = sock.getsockname()[1]
+            assert _port_in_use("127.0.0.1", port) is True
+
+    def test_port_in_use_returns_false_for_free_port(self):
+        """A closed port is reported as free."""
+        import socket
+
+        from abstracts_explorer.web_ui.app import _port_in_use
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        assert _port_in_use("127.0.0.1", port) is False
+
+    def test_run_server_warns_on_port_conflict(self, capsys):
+        """run_server warns with an AirPlay hint when the port is already bound."""
+        from abstracts_explorer.web_ui import run_server
+
+        with (
+            patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=True),
+            patch("abstracts_explorer.web_ui.app._port_in_use", return_value=True),
+            patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config,
+        ):
+            mock_cfg = Mock()
+            mock_cfg.database_url = "sqlite:////some/path/test.db"
+            mock_cfg.embedding_db_path = "/some/path/chroma_db"
+            mock_cfg.web_ui_threads = 6
+            mock_config.return_value = mock_cfg
+
+            with patch("waitress.serve", side_effect=KeyboardInterrupt()):
+                with pytest.raises(KeyboardInterrupt):
+                    run_server(host="127.0.0.1", port=5000)
+
+        captured = capsys.readouterr()
+        assert "already in use" in captured.err
+        assert "AirPlay" in captured.err
+
+    def test_run_server_reports_bind_failure_with_hint(self):
+        """A bind failure is converted into an actionable ValueError."""
+        from abstracts_explorer.web_ui import run_server
+
+        with (
+            patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=True),
+            patch("abstracts_explorer.web_ui.app._port_in_use", return_value=False),
+            patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config,
+        ):
+            mock_cfg = Mock()
+            mock_cfg.database_url = "sqlite:////some/path/test.db"
+            mock_cfg.embedding_db_path = "/some/path/chroma_db"
+            mock_cfg.web_ui_threads = 6
+            mock_config.return_value = mock_cfg
+
+            with patch("waitress.serve", side_effect=OSError("Address already in use")):
+                with pytest.raises(ValueError, match="already in use"):
+                    run_server(host="127.0.0.1", port=5000)
+
+
 class TestConferencePluginMapping:
     """Test conference name to plugin name mapping in download endpoint."""
 
