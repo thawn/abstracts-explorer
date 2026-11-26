@@ -116,10 +116,6 @@ Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
 - Clear descriptive commit messages; only commit when explicitly asked, otherwise suggest a commit message.
 - Do not commit `*.db`, `chroma_db/`, `_build/`, `.env`, `__pycache__/`. `uv.lock` and `package-lock.json` are tracked.
 
-## Alpha status
-
-- no backwards compatibility needed yet, but the public API is expected to stabilize in the future.
-
 ## Extra instructions
 
 - Never pipe slow commands through `tail`; it masks the exit code and breaks error handling/timeouts. Run the command on its own (`<cmd>`), or redirect and inspect separately: `<cmd> >> <log_file>; tail -20 <log_file>`. Piping fast/verbose commands is fine.
