@@ -116,8 +116,9 @@ def test_database_location_and_hash_queries(connected_db):
     }
 
     stats = connected_db.get_stats(year=2026, conference="NeurIPS")
-    assert stats["total_papers"] == 3
+    assert stats["total_papers"] == 2
     assert stats["unique_papers"] == 2
+    assert stats["presentations"] == 3
 
     hashes = connected_db.get_content_hashes([])
     assert hashes == {}

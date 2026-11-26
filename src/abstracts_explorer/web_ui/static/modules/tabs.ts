@@ -104,10 +104,7 @@ export async function loadStats(): Promise<void> {
         totalLine.textContent = `${uniquePapers.toLocaleString()} Papers`;
         const contextLine = document.createElement('div');
         contextLine.className = 'text-xs opacity-90';
-        const presentations = data.total_papers && data.total_papers !== uniquePapers
-            ? `${data.total_papers.toLocaleString()} presentations · `
-            : '';
-        contextLine.textContent = `${presentations}${displayText}`;
+        contextLine.textContent = displayText;
         statsBox.appendChild(totalLine);
         statsBox.appendChild(contextLine);
     } catch (error) {

@@ -79,7 +79,7 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         print(f"\n📊 Found {total_papers:,} papers in database")
 
         if where_filters:
-            filtered_count = db.get_paper_count(where_filters=where_filters)
+            filtered_count = db.get_total_presentation_count(where_filters=where_filters)
             print(f"📊 Filter will process {filtered_count:,} abstracts")
 
     # Initialize embeddings manager
@@ -163,9 +163,9 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
             # Determine total count for progress bar
             with DatabaseManager() as db:
                 if where_filters:
-                    total_count = db.get_paper_count(where_filters=where_filters)
+                    total_count = db.get_total_presentation_count(where_filters=where_filters)
                 else:
-                    total_count = db.get_paper_count()
+                    total_count = db.get_total_presentation_count()
 
             # Create progress bar
             with tqdm(total=total_count, desc="Embedding abstracts", unit="papers") as pbar:

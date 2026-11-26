@@ -530,10 +530,12 @@ class RegistryClient:
         paper_db_path = temp_dir / f"papers-{year}.db"
         with DatabaseManager() as db:
             db.create_tables()
-            paper_count = db.export_papers_to_sqlite(paper_db_path, conference, year)
-            paper_uids = db.get_paper_uids({"conference": conference, "year": year})
+            exported_rows = db.export_papers_to_sqlite(paper_db_path, conference, year)
+            filters = {"conference": conference, "year": year}
+            paper_count = db.get_paper_count(filters)
+            paper_uids = db.get_paper_uids(filters)
 
-        if paper_count == 0:
+        if exported_rows == 0:
             raise RegistryError(f"No papers found for {conference}/{year}. Download the conference data first.")
 
         progress(f"  Exported {paper_count} papers")
@@ -842,7 +844,8 @@ class RegistryClient:
         try:
             with DatabaseManager() as db:
                 db.create_tables()
-                paper_count = db.import_papers_from_sqlite(paper_db_file, conference, year)
+                db.import_papers_from_sqlite(paper_db_file, conference, year)
+                paper_count = db.get_paper_count({"conference": conference, "year": year})
         except Exception as db_err:
             from abstracts_explorer.database import EmbeddingModelConflictError
 

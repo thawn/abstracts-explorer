@@ -174,6 +174,7 @@ def _check_embeddings(
     records: Dict[str, Optional[str]],
     scopes: List[tuple[str, int]],
     scope_uids: Dict[tuple[str, int], List[str]],
+    paper_counts: Dict[tuple[str, int], int],
     all_paper_uids: set[str],
     progress: Optional[ProgressCallback] = None,
 ) -> None:
@@ -181,7 +182,7 @@ def _check_embeddings(
     for position, (conference, year) in enumerate(scopes, 1):
         label = _scope_label(conference, year)
         uids = scope_uids.get((conference, year), [])
-        report.papers_checked += len(uids)
+        report.papers_checked += paper_counts.get((conference, year), 0)
 
         summaries = {str(item["uid"]): item for item in database.get_paper_summaries_by_uids(uids)}
         content_hashes = database.get_content_hashes(uids)
@@ -523,8 +524,9 @@ def check_consistency(
     _emit_progress(progress, "Collecting paper scopes", 1, 1)
 
     for position, scope in enumerate(scopes, 1):
-        scope_uids[scope] = [str(uid) for uid in database.get_paper_uids({"conference": scope[0], "year": scope[1]})]
-        paper_counts[scope] = len(scope_uids[scope])
+        filters = {"conference": scope[0], "year": scope[1]}
+        scope_uids[scope] = [str(uid) for uid in database.get_paper_uids(filters)]
+        paper_counts[scope] = database.get_paper_count(filters)
         _emit_progress(progress, "Loading paper UIDs", position, len(scopes))
 
     _emit_progress(progress, "Loading embedding records", 0, 1)
@@ -533,7 +535,7 @@ def check_consistency(
     _emit_progress(progress, "Loading embedding records", 1, 1)
 
     all_paper_uids = {str(uid) for uid in database.get_paper_uids()}
-    _check_embeddings(database, report, records, scopes, scope_uids, all_paper_uids, progress)
+    _check_embeddings(database, report, records, scopes, scope_uids, paper_counts, all_paper_uids, progress)
     _emit_progress(progress, "Checking embedding model", 0, 1)
     _check_models(database, report, embedding_model)
     _emit_progress(progress, "Checking embedding model", 1, 1)

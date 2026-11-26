@@ -47,8 +47,9 @@ class CatalogMixin(PapersMixin):
         -------
         dict
             Statistics dictionary with:
-            - total_papers: int - Number of presentation rows matching filters
-            - unique_papers: int - Number of unique abstracts (by content hash)
+            - total_papers: int - Number of distinct papers matching filters
+            - unique_papers: int - Same as ``total_papers`` (kept for compatibility)
+            - presentations: int - Number of presentation rows matching filters
             - year: int or None - Filter year if provided
             - conference: str or None - Filter conference if provided
             - locations: list or None - Filter locations if provided
@@ -62,29 +63,16 @@ class CatalogMixin(PapersMixin):
             where_filters["location"] = {"$in": list(locations)}
 
         total_papers = self.get_paper_count(where_filters=where_filters or None)
-        unique_papers = self._get_unique_paper_count(where_filters or None)
+        presentations = self.get_total_presentation_count(where_filters=where_filters or None)
 
         return {
             "total_papers": total_papers,
-            "unique_papers": unique_papers,
+            "unique_papers": total_papers,
+            "presentations": presentations,
             "year": year,
             "conference": conference,
             "locations": locations,
         }
-
-    def _get_unique_paper_count(self, where_filters: Optional[Dict[str, Any]] = None) -> int:
-        """Return the number of distinct content hashes matching *where_filters*."""
-        try:
-            stmt = select(func.count(func.distinct(func.coalesce(Paper.content_hash, Paper.uid))))
-            conditions = self._build_where_conditions(where_filters)
-            if conditions:
-                stmt = stmt.where(and_(*conditions))
-            count = self.session.execute(stmt).scalar()
-            return count or 0
-        except DatabaseError:
-            raise
-        except Exception as e:
-            raise self._db_error("Failed to count unique papers", e)
 
     def get_conference_years_from_db(self) -> Dict[str, List[int]]:
         """

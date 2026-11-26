@@ -385,6 +385,45 @@ class TestDatabaseManager:
         """Test getting paper count on empty database."""
         assert connected_db.get_paper_count() == 0
 
+    def test_paper_and_presentation_counts_dedupe_presentations(self, connected_db):
+        """Duplicate presentations count once as papers but twice as presentations."""
+        connected_db.add_papers(
+            [
+                LightweightPaper(
+                    title="Shared abstract",
+                    authors=["Author"],
+                    abstract="One abstract",
+                    session="Poster Session",
+                    poster_position="P1",
+                    location="Sydney",
+                    year=2025,
+                    conference="NeurIPS",
+                    original_id="presentation-1",
+                ),
+                LightweightPaper(
+                    title="Shared abstract",
+                    authors=["Author"],
+                    abstract="One abstract",
+                    session="Oral Session",
+                    poster_position="O1",
+                    location="Paris",
+                    year=2025,
+                    conference="NeurIPS",
+                    original_id="presentation-2",
+                ),
+            ]
+        )
+
+        assert connected_db.get_paper_count() == 1
+        assert connected_db.get_total_presentation_count() == 2
+        assert connected_db.get_paper_count({"location": "Sydney"}) == 1
+        assert connected_db.get_total_presentation_count({"location": "Sydney"}) == 1
+
+        stats = connected_db.get_stats(year=2025, conference="NeurIPS")
+        assert stats["total_papers"] == 1
+        assert stats["unique_papers"] == 1
+        assert stats["presentations"] == 2
+
     def test_get_sessions_empty(self, connected_db):
         """Test getting sessions on empty database."""
         sessions = connected_db.get_sessions()
