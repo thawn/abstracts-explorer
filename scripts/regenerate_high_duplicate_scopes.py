@@ -110,15 +110,26 @@ def _state_meta(
     database_url: str,
     collection_name: str,
     embedding_model: str,
-    threshold: int,
 ) -> Dict[str, Any]:
     """Return metadata used to validate a resume state file against a run."""
     return {
         "database_url": database_url,
         "collection": collection_name,
         "embedding_model": embedding_model,
-        "threshold": threshold,
     }
+
+
+def _meta_matches(stored: Any, current: Dict[str, Any]) -> bool:
+    """
+    Return whether stored resume metadata matches the current run.
+
+    Only the database, collection, and embedding model are compared.  The
+    ``threshold`` is intentionally ignored so scopes completed under one
+    threshold stay completed when the threshold changes later.
+    """
+    if not isinstance(stored, dict):
+        return False
+    return all(stored.get(key) == value for key, value in current.items())
 
 
 def cleanup_scope_cache(
@@ -320,11 +331,11 @@ def main() -> int:
     show_progress = not args.quiet
     database_url = args.paper_db or config.database_url
     state_path = Path(args.state_file) if args.state_file else _default_state_path(config)
-    meta = _state_meta(database_url, collection_name, embedding_model, args.threshold)
+    meta = _state_meta(database_url, collection_name, embedding_model)
 
     state = load_state(state_path)
     completed: Set[str] = set()
-    if not args.no_resume and state.get("meta") == meta:
+    if not args.no_resume and _meta_matches(state.get("meta"), meta):
         completed = set(state.get("completed", []))
 
     with DatabaseManager() as db:
@@ -353,9 +364,9 @@ def main() -> int:
 
     if not scopes:
         if args.execute:
-            cleaned = cleanup_stale_cache_rows(all_scopes, embedding_model, collection_name, args.paper_db)
-            if cleaned:
-                print(f"Removed {cleaned:,} stale cache row(s).")
+            removed = cleanup_stale_cache_rows(all_scopes, embedding_model, collection_name, args.paper_db)
+            if removed:
+                print(f"Removed {removed:,} stale cache row(s).")
         print("Nothing to regenerate.")
         return 0
 
@@ -371,9 +382,9 @@ def main() -> int:
         print("Dry run only. Re-run with --execute to regenerate the selected scopes.")
         return 0
 
-    cleaned = cleanup_stale_cache_rows(all_scopes, embedding_model, collection_name, args.paper_db)
-    if cleaned:
-        print(f"Removed {cleaned:,} stale cache row(s).")
+    removed = cleanup_stale_cache_rows(all_scopes, embedding_model, collection_name, args.paper_db)
+    if removed:
+        print(f"Removed {removed:,} stale cache row(s).")
 
     failures = 0
     with EmbeddingsManager(collection_name=collection_name) as embeddings_manager:
