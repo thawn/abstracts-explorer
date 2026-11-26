@@ -439,6 +439,7 @@ class TestMCPTools:
                 "1": "Papers process language with transformer models.",
             },
             "cluster_keywords": {"0": ["neural", "deep"], "1": ["nlp", "bert"]},
+            "cluster_centers": {"0": {"x": 0.5, "y": 0.5}, "1": {"x": 2.5, "y": 2.5}},
             "hierarchy": {
                 "method": "bertopic",
                 "n_topics": 2,
@@ -451,6 +452,7 @@ class TestMCPTools:
                         "distance": 0.5,
                         "child_left_id": 0,
                         "child_right_id": 1,
+                        "center": {"x": 1.5, "y": 1.5},
                     }
                 ],
             },

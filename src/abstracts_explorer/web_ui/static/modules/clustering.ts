@@ -24,6 +24,20 @@ const Plotly: any = new Proxy({}, {
 });
 
 /**
+ * Return the median of a numeric array.
+ * @param {number[]} values
+ * @returns {number}
+ */
+function _median(values) {
+    if (!values.length) return 0;
+    const sorted = values.slice().sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2
+        ? sorted[middle]
+        : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+/**
  * Returns Plotly background and font colours matching the current colour scheme.
  * Backgrounds are always transparent so the parent card's CSS (dark:bg-gray-800)
  * handles the surface colour automatically.
@@ -445,9 +459,10 @@ function _buildLevelState() {
         let center = meta.center;
         if (!center && flatCenters[String(id)]) center = flatCenters[String(id)];
         if (!center) {
-            const sumX = clusterPoints.reduce((sum, point) => sum + point.x, 0);
-            const sumY = clusterPoints.reduce((sum, point) => sum + point.y, 0);
-            center = { x: sumX / clusterPoints.length, y: sumY / clusterPoints.length };
+            center = {
+                x: _median(clusterPoints.map(point => point.x)),
+                y: _median(clusterPoints.map(point => point.y))
+            };
         }
         const label = meta.label
             || flatLabels[String(id)]
@@ -1263,9 +1278,9 @@ function visualizeClustersWithCustomQueries() {
             legendgroup: cluster.id
         });
         
-        // Calculate center position as mean of cluster points
-        const centerX = clusterPoints.reduce((sum, p) => sum + p.x, 0) / clusterPoints.length;
-        const centerY = clusterPoints.reduce((sum, p) => sum + p.y, 0) / clusterPoints.length;
+        // Calculate robust center position as median of cluster points
+        const centerX = _median(clusterPoints.map(p => p.x));
+        const centerY = _median(clusterPoints.map(p => p.y));
         
         // Add cluster center as star marker
         traces.push({

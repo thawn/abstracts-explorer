@@ -2787,6 +2787,7 @@ class TestClusteringEndpoint:
             "cluster_labels": {"0": "A", "1": "B"},
             "cluster_descriptions": {"0": "A desc.", "1": "B desc."},
             "cluster_keywords": {"0": ["a"], "1": ["b"]},
+            "cluster_centers": {"0": {"x": 0.0, "y": 0.0}, "1": {"x": 1.0, "y": 1.0}},
             "hierarchy": {
                 "method": "bertopic",
                 "n_topics": 2,
@@ -2799,6 +2800,7 @@ class TestClusteringEndpoint:
                         "distance": 0.1,
                         "child_left_id": 0,
                         "child_right_id": 1,
+                        "center": {"x": 0.5, "y": 0.5},
                     }
                 ],
             },
@@ -2847,6 +2849,34 @@ class TestClusteringEndpoint:
 
                     assert response.status_code == 409
                     assert "outdated" in response.get_json()["error"].lower()
+
+    def test_compute_clusters_rejects_cache_without_centers(self):
+        """Cached rows without precomputed centers point at the backfill script."""
+        from abstracts_explorer.web_ui.app import app
+
+        cached_results = {
+            "points": [{"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0}],
+            "statistics": {"n_clusters": 1, "cluster_sizes": {0: 1}, "total_papers": 1},
+            "cluster_labels": {"0": "A"},
+            "hierarchy": {
+                "method": "bertopic",
+                "n_topics": 1,
+                "tree": [{"id": 10, "topics": [0], "label": "Parent", "description": "", "distance": 0.1}],
+            },
+        }
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config:
+                    mock_config.return_value = Mock(embedding_model="test-model")
+                    mock_db = Mock()
+                    mock_db.get_clustering_cache.return_value = cached_results
+                    mock_get_db.return_value = mock_db
+
+                    response = client.post("/api/clusters/compute", json={})
+
+                    assert response.status_code == 409
+                    assert "backfill_cluster_centers_median" in response.get_json()["error"]
 
     def test_compute_clusters_rejects_invalid_level_scale(self):
         """Invalid hierarchy level scale values are rejected."""
@@ -2897,6 +2927,7 @@ class TestClusteringEndpoint:
         cached_results = {
             "points": [],
             "statistics": {"n_clusters": 0, "total_papers": 0},
+            "cluster_centers": {},
             "hierarchy": {"method": "bertopic", "n_topics": 0, "tree": []},
         }
 

@@ -390,6 +390,34 @@ describe('Clustering Module', () => {
             expect(legendItem.title).toContain('Papers about domestic animals and their behaviour.');
         });
 
+        it('uses median fallback when level clusters lack centers', async () => {
+            const data = JSON.parse(JSON.stringify(hierarchyData));
+            delete data.cluster_centers;
+            data.points = [
+                { x: 0, y: 0, cluster: 0, id: '1', title: 'Paper 1', year: 2025, conference: 'NeurIPS' },
+                { x: 2, y: 0, cluster: 0, id: '2', title: 'Paper 2', year: 2025, conference: 'NeurIPS' },
+                { x: 100, y: 100, cluster: 0, id: '3', title: 'Paper 3', year: 2025, conference: 'NeurIPS' },
+                { x: 5, y: 5, cluster: 1, id: '4', title: 'Paper 4', year: 2025, conference: 'NeurIPS' }
+            ];
+            data.statistics = { total_papers: 4, n_clusters: 2, n_noise: 0, cluster_sizes: { 0: 3, 1: 1 } };
+            data.hierarchy.levels = [{
+                level: 0,
+                max_distance: 0.1,
+                clusters: [
+                    { id: 0, label: 'Cat', description: '', size: 3, keywords: [] },
+                    { id: 1, label: 'Dog', description: '', size: 1, keywords: [] }
+                ],
+                mapping: { 0: 0, 1: 1 }
+            }];
+
+            global.fetch.mockResolvedValueOnce({ ok: true, json: async () => data });
+            await loadClusters();
+
+            const stars = global.Plotly.newPlot.mock.calls[0][1][1];
+            expect(stars.x).toEqual([2, 5]);
+            expect(stars.y).toEqual([0, 5]);
+        });
+
         it('updates colors and stars when the slider changes', async () => {
             await loadHierarchy();
             global.Plotly.newPlot.mockClear();
@@ -641,6 +669,44 @@ describe('Clustering Module', () => {
                     body: expect.stringContaining('test query')
                 })
             );
+        });
+
+        it('places custom-topic stars at the median cluster position', async () => {
+            const mockClusterData = {
+                points: [
+                    { x: 0, y: 0, cluster: 0, id: '1', uid: '1', title: 'Paper 1', year: 2025, conference: 'NeurIPS' },
+                    { x: 2, y: 0, cluster: 0, id: '2', uid: '2', title: 'Paper 2', year: 2025, conference: 'NeurIPS' },
+                    { x: 100, y: 100, cluster: 0, id: '3', uid: '3', title: 'Paper 3', year: 2025, conference: 'NeurIPS' }
+                ],
+                cluster_labels: { 0: 'Cluster 0' },
+                cluster_centers: { 0: { x: 2, y: 0 } }
+            };
+            global.fetch.mockResolvedValueOnce({ ok: true, json: async () => mockClusterData });
+            await loadClusters();
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    query: 'test query',
+                    distance: 0.5,
+                    papers: [
+                        { uid: '1', title: 'Paper 1', distance: 0.1 },
+                        { uid: '2', title: 'Paper 2', distance: 0.1 },
+                        { uid: '3', title: 'Paper 3', distance: 0.1 }
+                    ],
+                    count: 3,
+                    query_embedding: [0.1, 0.2]
+                })
+            });
+
+            await searchCustomCluster();
+            await Promise.resolve();
+            await Promise.resolve();
+
+            const traces = global.Plotly.react.mock.calls.at(-1)[1];
+            const star = traces.find(trace => trace.mode === 'markers+text' && trace.x.length === 1);
+            expect(star.x).toEqual([2]);
+            expect(star.y).toEqual([0]);
         });
 
         it('should include filters in search request', async () => {

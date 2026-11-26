@@ -51,9 +51,13 @@ of the clustering cache key. The web API and MCP tools derive levels from the
 cached tree, so changing the level count or scale does not require
 re-clustering.
 
-Clustering caches must contain `hierarchy.tree`. Caches without a tree are
-considered outdated and are rejected by the web API and MCP tools; regenerate
-them with `abstracts-explorer clustering pre-generate --force`.
+Clustering caches must contain `hierarchy.tree` with precomputed per-node
+`center` values (per-axis median) and flat `cluster_centers`. The web API and
+MCP tools read these centers directly instead of recomputing them per request.
+Caches without a tree or centers are considered outdated and rejected; run
+`python scripts/backfill_cluster_centers_median.py` to add median centers to
+existing rows, or regenerate them with
+`abstracts-explorer clustering pre-generate --force`.
 
 ## API Reference
 

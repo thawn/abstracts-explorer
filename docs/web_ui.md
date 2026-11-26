@@ -143,7 +143,9 @@ automatically identified topic cluster.
 - **Click** a dot to view full paper details below the plot.
 - **Hierarchy level slider** — switch between BERTopic hierarchy levels. Every
   paper dot keeps its hover card; only the cluster colors and star centers
-  change. The view starts at the coarsest level (fewest clusters). Zooming into
+  change. Star positions use the per-axis median of their member papers, so
+  outliers do not pull a cluster marker away from the main cluster mass. The
+  view starts at the coarsest level (fewest clusters). Zooming into
   the plot automatically moves to finer levels, and zooming back out returns to
   the coarser overview; panning alone never changes the level.
 - **Click** a cluster name in the legend to highlight that cluster.

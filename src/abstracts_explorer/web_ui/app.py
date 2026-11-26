@@ -26,6 +26,7 @@ from abstracts_explorer.clustering import (
     DEFAULT_N_COMPONENTS,
     DEFAULT_NR_LEVELS,
     DEFAULT_REDUCTION_METHOD,
+    build_cluster_centers_from_points,
     derive_hierarchy_levels,
 )
 from abstracts_explorer.embeddings import QueryEmbedding
@@ -323,14 +324,7 @@ def _filter_cluster_results_by_locations(cached: dict, locations: List[str]) -> 
     )
     cached["statistics"] = statistics
 
-    centers = {}
-    for cluster_id in cluster_sizes:
-        cluster_points = [point for point in points if point.get("cluster") == cluster_id]
-        if cluster_points:
-            centers[cluster_id] = {
-                "x": sum(point.get("x", 0.0) for point in cluster_points) / len(cluster_points),
-                "y": sum(point.get("y", 0.0) for point in cluster_points) / len(cluster_points),
-            }
+    centers = build_cluster_centers_from_points(points)
     cached["cluster_centers"] = centers
     return cached
 
@@ -777,18 +771,30 @@ def compute_clusters():
     )
 
     if cached:
-        if "tree" not in (cached.get("hierarchy") or {}):
+        hierarchy = cached.get("hierarchy") or {}
+        if "tree" not in hierarchy:
             raise ApiError(
                 "Cached clustering data is outdated. Regenerate it with "
                 "'abstracts-explorer clustering pre-generate --force'.",
                 409,
             )
+        if not locations:
+            tree = hierarchy.get("tree") or []
+            centers = cached.get("cluster_centers")
+            has_centers = isinstance(centers, dict) and all(node.get("center") for node in tree)
+            if not has_centers:
+                raise ApiError(
+                    "Cached clustering data is missing precomputed centers. "
+                    "Run 'python scripts/backfill_cluster_centers_median.py'.",
+                    409,
+                )
         if locations:
             cached = _filter_cluster_results_by_locations(cached, locations)
         cached["hierarchy"] = derive_hierarchy_levels(
             cached,
             nr_levels=hierarchy_levels,
             level_scale=level_scale,
+            recompute_centers=bool(locations),
         )
         return jsonify(cached)
 
