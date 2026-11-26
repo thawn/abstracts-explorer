@@ -994,11 +994,13 @@ function createLevelLegend(state) {
     selectAllBtn.className = 'px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors';
     selectAllBtn.textContent = 'All';
     selectAllBtn.addEventListener('click', () => {
+        const visibleIds = [];
         itemsContainer.querySelectorAll('[data-cluster-id]').forEach((item: HTMLElement) => {
             if (item.style.display !== 'none') {
-                selectedClusters.add(String(item.dataset.clusterId));
+                visibleIds.push(String(item.dataset.clusterId));
             }
         });
+        selectedClusters = new Set(visibleIds);
         applySelectionToPlot();
     });
 
@@ -1006,11 +1008,13 @@ function createLevelLegend(state) {
     clearAllBtn.className = 'px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors';
     clearAllBtn.textContent = 'None';
     clearAllBtn.addEventListener('click', () => {
+        const hiddenIds = [];
         itemsContainer.querySelectorAll('[data-cluster-id]').forEach((item: HTMLElement) => {
-            if (item.style.display !== 'none') {
-                selectedClusters.delete(String(item.dataset.clusterId));
+            if (item.style.display === 'none') {
+                hiddenIds.push(String(item.dataset.clusterId));
             }
         });
+        selectedClusters = new Set(hiddenIds);
         applySelectionToPlot();
     });
 

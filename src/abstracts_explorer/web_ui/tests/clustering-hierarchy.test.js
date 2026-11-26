@@ -494,10 +494,13 @@ describe('Hierarchy slider', () => {
         input.dispatchEvent(new Event('input'));
         clickLegendButton('All');
         expect(getLegendItem('0').style.opacity).toBe('1');
-        expect(getLegendItem('1').style.opacity).toBe('1');
+        expect(getLegendItem('1').style.opacity).toBe('0.4');
 
         input.value = '';
         input.dispatchEvent(new Event('input'));
+        expect(getLegendItem('0').style.opacity).toBe('1');
+        expect(getLegendItem('1').style.opacity).toBe('0.4');
+
         clickLegendButton('None');
         expect(getLegendItem('0').style.opacity).toBe('0.4');
         expect(getLegendItem('1').style.opacity).toBe('0.4');
@@ -507,6 +510,29 @@ describe('Hierarchy slider', () => {
         clickLegendButton('All');
         expect(getLegendItem('0').style.opacity).toBe('0.4');
         expect(getLegendItem('1').style.opacity).toBe('1');
+    });
+
+    it('None shows clusters for hidden legend items while searching', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildData([flatLevel, mergedLevel]) });
+
+        await loadClusters();
+        setHierarchyLevel(0);
+        await flushPromises();
+        primePlotData(2);
+
+        clickLegendButton('None');
+        expect(getLegendItem('0').style.opacity).toBe('0.4');
+        expect(getLegendItem('1').style.opacity).toBe('0.4');
+
+        const input = document.getElementById('cluster-legend-search');
+        input.value = 'cat';
+        input.dispatchEvent(new Event('input'));
+        expect(getLegendItem('1').style.display).toBe('none');
+
+        clickLegendButton('None');
+        expect(getLegendItem('0').style.opacity).toBe('0.4');
+        expect(getLegendItem('1').style.opacity).toBe('1');
+        expect(getSelectionRestyleCall(1)[1].ids[0]).toEqual(['1']);
     });
 
     it('live-filters legend items and persists the query across level changes', async () => {
