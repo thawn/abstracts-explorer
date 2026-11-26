@@ -18,7 +18,7 @@ The `EmbeddingsManager` class handles:
    :members:
    :undoc-members:
    :show-inheritance:
-   :special-members: __init__
+   :exclude-members: ReadOnlyError
 ```
 
 ## Usage Examples
