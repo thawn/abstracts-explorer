@@ -73,6 +73,15 @@ let selectedClusters = new Set();
 let currentLevelIndex = 4;
 let currentLevelState = null;
 
+// Zoom-driven hierarchy state
+const ZOOM_LEVEL_MIN = 1;
+const ZOOM_LEVEL_MAX = 10;
+const MIN_ZOOM_DELTA = 0.01;
+let baselineRanges = null;
+let lastAutoZoom = 1;
+let suppressZoomSync = false;
+let resetViewOnNextRender = true;
+
 // Custom topic clustering state
 let customQueryClusters = [];  // Array of custom topic cluster objects
 let customClusterMode = false;  // Whether custom topic mode is active
@@ -111,6 +120,10 @@ export function resetClusters() {
     selectedClusters.clear();
     currentLevelIndex = DEFAULT_HIERARCHY_LEVEL;
     currentLevelState = null;
+    baselineRanges = null;
+    lastAutoZoom = 1;
+    suppressZoomSync = false;
+    resetViewOnNextRender = true;
     // Reset topic evolution state
     topicEvolutionTraces = [];
     topicEvolutionColorIdx = 0;
@@ -155,8 +168,11 @@ export async function loadClusters() {
         }
 
         const levels = _getHierarchyLevels();
-        currentLevelIndex = levels.length ? Math.min(DEFAULT_HIERARCHY_LEVEL, levels.length - 1) : 0;
+        currentLevelIndex = levels.length ? levels.length - 1 : 0;
         selectedClusters.clear();
+        baselineRanges = null;
+        lastAutoZoom = 1;
+        resetViewOnNextRender = true;
         _bindHierarchySlider();
         renderCurrentLevel();
     } catch (error) {
@@ -182,6 +198,88 @@ function _getActiveLevel() {
     if (!levels.length) return null;
     const index = Math.min(Math.max(currentLevelIndex, 0), levels.length - 1);
     return levels[index];
+}
+
+/**
+ * Read the current x/y axis ranges from a Plotly plot.
+ * @param {HTMLElement} plotDiv
+ * @returns {{x: number[], y: number[]}|null}
+ */
+function _capturePlotRanges(plotDiv) {
+    if (!plotDiv) return null;
+    const fullLayout = plotDiv._fullLayout || {};
+    const layout = plotDiv.layout || {};
+    const fullX = fullLayout.xaxis && fullLayout.xaxis.range;
+    const fullY = fullLayout.yaxis && fullLayout.yaxis.range;
+    const layoutX = layout.xaxis && layout.xaxis.range;
+    const layoutY = layout.yaxis && layout.yaxis.range;
+    const xRange = Array.isArray(fullX) ? fullX : (Array.isArray(layoutX) ? layoutX : null);
+    const yRange = Array.isArray(fullY) ? fullY : (Array.isArray(layoutY) ? layoutY : null);
+    if (!xRange || !yRange) return null;
+    const x = xRange.map(Number);
+    const y = yRange.map(Number);
+    if (!x.every(Number.isFinite) || !y.every(Number.isFinite)) return null;
+    return { x, y };
+}
+
+/**
+ * Compute the current zoom factor relative to the initial full view.
+ * @param {HTMLElement} plotDiv
+ * @returns {number}
+ */
+function _getZoomFactor(plotDiv) {
+    if (!baselineRanges) return 1;
+    const current = _capturePlotRanges(plotDiv);
+    if (!current) return 1;
+    const baseX = Math.abs(baselineRanges.x[1] - baselineRanges.x[0]);
+    const baseY = Math.abs(baselineRanges.y[1] - baselineRanges.y[0]);
+    const curX = Math.abs(current.x[1] - current.x[0]);
+    const curY = Math.abs(current.y[1] - current.y[0]);
+    if (!(baseX > 0) || !(baseY > 0) || !(curX > 0) || !(curY > 0)) return 1;
+    const zoom = Math.sqrt((baseX / curX) * (baseY / curY));
+    return Number.isFinite(zoom) ? Math.max(1, zoom) : 1;
+}
+
+/**
+ * Map a zoom factor to a hierarchy level index.
+ * @param {number} zoom
+ * @returns {number}
+ */
+function _levelForZoom(zoom) {
+    const levels = _getHierarchyLevels();
+    if (!levels.length) return 0;
+    const maxIndex = levels.length - 1;
+    const span = ZOOM_LEVEL_MAX - ZOOM_LEVEL_MIN;
+    const t = Math.min(Math.max((zoom - ZOOM_LEVEL_MIN) / span, 0), 1);
+    return Math.round(maxIndex * (1 - t));
+}
+
+/**
+ * Adjust the hierarchy level to match the current zoom factor.
+ * @param {HTMLElement} plotDiv
+ */
+function _syncLevelToZoom(plotDiv) {
+    if (customClusterMode || suppressZoomSync) return;
+    if (!_getHierarchyLevels().length || !baselineRanges) return;
+    const zoom = _getZoomFactor(plotDiv);
+    if (Math.abs(zoom - lastAutoZoom) <= MIN_ZOOM_DELTA) return;
+    lastAutoZoom = zoom;
+    const level = _levelForZoom(zoom);
+    if (level !== currentLevelIndex) setHierarchyLevel(level);
+}
+
+/**
+ * Keep the hierarchy level in sync with Plotly zoom changes.
+ * @param {HTMLElement} plotDiv
+ */
+function _bindZoomSyncHandler(plotDiv) {
+    if (!plotDiv || typeof plotDiv.on !== 'function') return;
+    if (typeof plotDiv.removeAllListeners === 'function') {
+        plotDiv.removeAllListeners('plotly_relayout');
+    }
+    plotDiv.on('plotly_relayout', function () {
+        _syncLevelToZoom(plotDiv);
+    });
 }
 
 /**
@@ -420,6 +518,13 @@ export function renderCurrentLevel(preserveSelection = false) {
         selectedClusters = new Set(state.entries.map(entry => String(entry.id)));
     }
 
+    const shouldResetView = resetViewOnNextRender;
+    resetViewOnNextRender = false;
+    if (shouldResetView) {
+        baselineRanges = null;
+        lastAutoZoom = 1;
+    }
+
     const plotColors = getPlotColors();
     const layout = {
         title: '',
@@ -513,39 +618,70 @@ export function renderCurrentLevel(preserveSelection = false) {
     const plotElement = document.getElementById('cluster-plot');
     if (!plotElement) return;
 
-    const canRestyle = plotElement.data
+    const previousRanges = shouldResetView ? null : _capturePlotRanges(plotElement);
+
+    const canRestyle = !shouldResetView
+        && plotElement.data
         && plotElement.data.length === 2
         && plotElement.data[0].x
         && plotElement.data[0].x.length === state.xs.length;
 
     if (canRestyle) {
-        Plotly.restyle(plotElement, {
-            'marker.color': [state.colors],
-            customdata: [state.customdata]
-        }, [0]);
-        Plotly.restyle(plotElement, {
-            x: [state.starX],
-            y: [state.starY],
-            text: [state.starText],
-            customdata: [state.starCustomdata],
-            hovertemplate: [state.starHoverTemplate],
-            'marker.color': [state.starColors]
-        }, [1]);
-        _bindClusterClickHandler(plotElement);
-        createLevelLegend(state);
-        _updateHierarchyControls(state);
-        applySelectionToPlot();
+        suppressZoomSync = true;
+        try {
+            Plotly.restyle(plotElement, {
+                'marker.color': [state.colors],
+                customdata: [state.customdata]
+            }, [0]);
+            Plotly.restyle(plotElement, {
+                x: [state.starX],
+                y: [state.starY],
+                text: [state.starText],
+                customdata: [state.starCustomdata],
+                hovertemplate: [state.starHoverTemplate],
+                'marker.color': [state.starColors]
+            }, [1]);
+            if (!baselineRanges) {
+                baselineRanges = _capturePlotRanges(plotElement);
+            }
+            lastAutoZoom = _getZoomFactor(plotElement);
+            _bindClusterClickHandler(plotElement);
+            _bindZoomSyncHandler(plotElement);
+            createLevelLegend(state);
+            _updateHierarchyControls(state);
+            applySelectionToPlot();
+        } finally {
+            suppressZoomSync = false;
+        }
         return;
     }
 
+    if (previousRanges) {
+        layout.xaxis.range = previousRanges.x.slice();
+        layout.yaxis.range = previousRanges.y.slice();
+    }
+
+    suppressZoomSync = true;
     plotElement.innerHTML = '';
     Plotly.newPlot(plotElement, [documentTrace, starTrace], layout, config).then(function () {
-        Plotly.relayout(plotElement, {
-            'xaxis.fixedrange': false,
-            'yaxis.fixedrange': false
-        });
-        _bindClusterClickHandler(plotElement);
-        applySelectionToPlot();
+        try {
+            Plotly.relayout(plotElement, {
+                'xaxis.fixedrange': false,
+                'yaxis.fixedrange': false
+            });
+            if (!baselineRanges) {
+                baselineRanges = _capturePlotRanges(plotElement);
+            }
+            lastAutoZoom = _getZoomFactor(plotElement);
+            _bindClusterClickHandler(plotElement);
+            _bindZoomSyncHandler(plotElement);
+            applySelectionToPlot();
+        } finally {
+            suppressZoomSync = false;
+        }
+    }).catch(function (error) {
+        suppressZoomSync = false;
+        console.error('Error rendering cluster plot:', error);
     });
 
     createLevelLegend(state);
@@ -1153,6 +1289,7 @@ function visualizeClustersWithCustomQueries() {
         displayModeBar: true,
         modeBarButtonsToRemove: ['lasso2d', 'select2d'],
         displaylogo: false,
+        scrollZoom: true,
         toImageButtonOptions: {
             format: 'png',
             filename: 'custom_cluster_plot',
