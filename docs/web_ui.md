@@ -179,7 +179,12 @@ abstracts-explorer web-ui [OPTIONS]
 | `--host TEXT` | Bind address (default: `127.0.0.1`) |
 | `--port INTEGER` | Port number (default: `5001`) |
 | `--dev` | Use Flask development server instead of Waitress |
+| `--read-only` | Disable database/embedding writes; write APIs return HTTP 403 |
 | `-v` / `-vv` | Increase log verbosity |
+
+Set `READ_ONLY=true` (or pass `--read-only`) to run multiple read-only web
+instances against the same data. See
+[Read-Only Mode](configuration.md#read-only-mode) for details.
 
 ### Docker / Podman
 

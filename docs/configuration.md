@@ -142,13 +142,47 @@ The configuration automatically detects the type based on the format:
     the process using it. Do **not** run multiple `create-embeddings`,
     clustering, web UI, or MCP processes against the same local store
     simultaneously: each process persists its own copy of the HNSW index, and
-    concurrent writers can corrupt the store. A second process now fails fast
-    with an "Another process is using the local ChromaDB" error. For concurrent
-    access, use an HTTP ChromaDB server (`EMBEDDING_DB=http://...`).
+    concurrent writers can corrupt the store. A second process fails fast with
+    an "Another process is using the local ChromaDB" error. Multiple
+    **read-only** processes are supported through a shared read lock (see
+    [Read-Only Mode](#read-only-mode)). For concurrent readers and writers, use
+    an HTTP ChromaDB server (`EMBEDDING_DB=http://...`).
 
     If a local store was corrupted by concurrent writers, stop all processes,
     move the store aside, and rebuild it with `create-embeddings` (the paper
     database is unaffected).
+
+### Read-Only Mode
+
+- **READ_ONLY**: Set to `true` to disable all writes to the paper database and
+  the embedding store (default: `false`). The CLI also accepts a global
+  `--read-only` flag, which overrides the environment variable.
+
+In read-only mode:
+
+- SQLite connections are opened with `PRAGMA query_only=ON`; PostgreSQL
+  connections use a read-only transaction. The database file must already
+  exist, and schema creation is skipped.
+- Every database write method (imports, donations, evaluations, cache updates,
+  deletes, and embedding-model metadata) raises `ReadOnlyError`.
+- Embedding writes (ingestion, imports, deletes, and collection creation)
+  raise `ReadOnlyError`; the existing ChromaDB collection is opened without
+  being created.
+- Write-capable CLI commands (`download`, `create-embeddings`, `pre-process`,
+  `delete-data`, clustering `run`/`pre-generate`/`clear-cache`, evaluation
+  writes, feedback `clear`, registry install/delete, and
+  `check-consistency --fix`) exit with an error before doing any work.
+- Web API write endpoints return HTTP `403`.
+
+Multiple read-only instances may run concurrently against the same data. A
+local ChromaDB store uses a shared read lock: readers may overlap, but a writer
+cannot start while readers are active (and vice versa). For concurrent readers
+and writers, use an HTTP ChromaDB server (`EMBEDDING_DB=http://...`).
+
+```bash
+READ_ONLY=true abstracts-explorer web-ui --host 0.0.0.0 --port 5000
+abstracts-explorer search "graph neural networks" --read-only
+```
 
 ### RAG Settings
 

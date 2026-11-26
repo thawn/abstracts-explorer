@@ -67,6 +67,14 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         help="Increase verbosity (can be repeated: -v for INFO, -vv for DEBUG)",
     )
 
+    # Add read-only flag
+    parser.add_argument(
+        "--read-only",
+        action="store_true",
+        default=None,
+        help=("Refuse database and embedding writes and allow multiple read-only " "instances (env: READ_ONLY)."),
+    )
+
     # Add version flag
     parser.add_argument(
         "--version",

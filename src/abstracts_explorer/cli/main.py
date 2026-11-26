@@ -19,7 +19,7 @@ import argcomplete
 from abstracts_explorer.config import get_config
 
 
-from abstracts_explorer.cli._common import setup_logging
+from abstracts_explorer.cli._common import _command_writes_storage, setup_logging
 from abstracts_explorer.cli.parsers import build_parser
 
 try:
@@ -62,11 +62,24 @@ def main() -> int:
     argcomplete.autocomplete(parser)
     args = parser.parse_args()
 
+    # CLI flag overrides the READ_ONLY configuration value.
+    if getattr(args, "read_only", None):
+        config.read_only = True
+
     # Setup logging based on verbosity
     setup_logging(args.verbose)
 
     if not args.command:
         parser.print_help()
+        return 1
+
+    if config.read_only and _command_writes_storage(args):
+        print(
+            "\n❌ This command writes to the paper database or embedding store "
+            "and is unavailable in read-only mode.",
+            file=sys.stderr,
+        )
+        print("   Unset READ_ONLY or remove --read-only to allow writes.\n", file=sys.stderr)
         return 1
 
     if args.command == "download":

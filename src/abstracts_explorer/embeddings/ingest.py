@@ -11,6 +11,7 @@ from abstracts_explorer.embeddings.errors import translate_errors
 from abstracts_explorer.embeddings.hashing import hash_text
 from abstracts_explorer.utils.disk_utils import ensure_free_space
 from abstracts_explorer.utils.http_utils import is_llm_rate_limit_error
+from abstracts_explorer.utils.read_only import require_writable
 
 logger = logging.getLogger(__name__)
 
@@ -61,15 +62,18 @@ class IngestMixin:
             raise ValueError(f"Cannot create embedding text for paper {paper['uid']}: no abstract and no title")
         return embedding_text
 
+    @require_writable()
     def _store_embeddings(self, ids: list[str], documents: list[str], embeddings: list[list[float]]) -> None:
         """Create or replace records in the collection (upsert semantics)."""
         self.collection.upsert(ids=ids, embeddings=embeddings, documents=documents)
 
+    @require_writable()
     def _embed_and_upsert(self, uid: str, text: str) -> None:
         """Embed *text* and upsert it for *uid* with its content hash."""
         embedding = self.generate_embedding(text)
         self._store_embeddings(ids=[uid], documents=[hash_text(text)], embeddings=[embedding])
 
+    @require_writable()
     def add_paper(self, paper: dict) -> None:
         """
         Add a paper to the vector database.
@@ -97,6 +101,7 @@ class IngestMixin:
             self._embed_and_upsert(paper["uid"], embedding_text)
             logger.debug("Added paper %s to collection", paper["uid"])
 
+    @require_writable()
     def embed_from_database(
         self,
         where_filters: Optional[dict[str, Any]] = None,

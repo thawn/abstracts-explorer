@@ -119,9 +119,11 @@ class EmbeddingsManager(GenerationMixin, QueryMixin, IngestMixin, ArtifactsMixin
 
         self.embedding_db = config.embedding_db
         self.collection_name = collection_name or config.collection_name
+        self.read_only = bool(config.read_only)
         self._client: Optional[object] = None
         self._collection: Optional[object] = None
         self._chroma_lock_path: Optional[str] = None
+        self._chroma_lock_mode: Optional[str] = None
         self._init_lock = threading.RLock()
         self.min_free_disk_mb = config.min_free_disk_mb
 

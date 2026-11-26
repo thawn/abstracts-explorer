@@ -9,7 +9,7 @@ from pathlib import Path
 
 import httpx2
 import pytest
-from filelock import FileLock
+from filelock import ReadWriteLock
 from unittest.mock import Mock
 
 from abstracts_explorer.embeddings import (
@@ -1641,11 +1641,11 @@ class TestLocalChromaLock:
     """Tests for the exclusive process-lifetime lock on local ChromaDB."""
 
     @staticmethod
-    def _foreign_lock(manager) -> FileLock:
+    def _foreign_lock(manager) -> ReadWriteLock:
         lock_path = Path(manager.embedding_db) / ".chroma.lock"
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        lock = FileLock(str(lock_path), thread_local=False)
-        lock.acquire(timeout=0)
+        lock = ReadWriteLock(str(lock_path), timeout=0, blocking=False, is_singleton=False)
+        lock.acquire_write(timeout=0)
         return lock
 
     def test_foreign_holder_is_rejected(self, embeddings_manager):

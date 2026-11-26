@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 from typing import Any, Optional
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import OperationalError, ProgrammingError, IntegrityError
@@ -22,6 +22,7 @@ from abstracts_explorer.metadata_cache import MetadataCache
 
 
 from abstracts_explorer.db.errors import DatabaseError
+from abstracts_explorer.utils.read_only import ReadOnlyError
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,12 @@ def reset_metadata_cache() -> None:
     _METADATA_CACHE.clear()
 
 
+def _raise_read_only_flush(session: Any, flush_context: Any, instances: Any) -> None:
+    """Reject pending ORM writes on a read-only session."""
+    if session.new or session.dirty or session.deleted:
+        raise ReadOnlyError("Cannot write to the database in read-only mode")
+
+
 class SessionMixin:
     """Connection, session, schema, and metadata-cache management."""
 
@@ -104,6 +111,7 @@ class SessionMixin:
 
         config = get_config()
         self.database_url = config.database_url
+        self.read_only = bool(config.read_only)
 
         self.engine: Optional[Engine] = None
         self.SessionLocal: Optional[sessionmaker] = None
@@ -133,7 +141,10 @@ class SessionMixin:
             if self._session is None:
                 self.connect()
             if not self._schema_ready:
-                self.create_tables()
+                if self.read_only:
+                    self._schema_ready = True
+                else:
+                    self.create_tables()
             assert self._session is not None
             return self._session
 
@@ -153,15 +164,25 @@ class SessionMixin:
             if self._session is not None:
                 return
             try:
-                # Create parent directories for SQLite
-                if self.database_url.startswith("sqlite:///"):
+                is_sqlite = self.database_url.startswith("sqlite")
+                file_sqlite = self.database_url.startswith("sqlite:///")
+                memory_sqlite = ":memory:" in self.database_url
+
+                # Create parent directories for SQLite (writers only)
+                if file_sqlite and not self.read_only:
                     db_path_str = self.database_url.replace("sqlite:///", "")
                     db_path = Path(db_path_str)
                     db_path.parent.mkdir(parents=True, exist_ok=True)
 
+                # In read-only mode the database must already exist.
+                if file_sqlite and self.read_only and not memory_sqlite:
+                    db_path = Path(self.database_url.replace("sqlite:///", ""))
+                    if not db_path.exists():
+                        raise DatabaseError(f"Database not found in read-only mode: {db_path}")
+
                 # Create engine with appropriate settings
                 connect_args = {}
-                if self.database_url.startswith("sqlite"):
+                if is_sqlite:
                     # SQLite-specific settings. ``timeout`` is the busy timeout used
                     # while another connection holds a write lock.
                     connect_args = {"check_same_thread": False, "timeout": 30}
@@ -172,17 +193,32 @@ class SessionMixin:
                     echo=False,  # Set to True for SQL debugging
                 )
 
-                if self.database_url.startswith("sqlite"):
+                if is_sqlite:
 
                     @event.listens_for(self.engine, "connect")
                     def _set_sqlite_pragmas(dbapi_connection: Any, connection_record: Any) -> None:
                         cursor = dbapi_connection.cursor()
                         try:
-                            # WAL allows reads while a write transaction is active;
-                            # busy_timeout makes writers wait instead of failing
-                            # immediately with "database is locked".
-                            cursor.execute("PRAGMA journal_mode=WAL")
+                            if self.read_only:
+                                # Reject writes at the SQLite level while still
+                                # allowing the WAL machinery to be read.
+                                cursor.execute("PRAGMA query_only=ON")
+                            else:
+                                # WAL allows reads while a write transaction is active;
+                                # busy_timeout makes writers wait instead of failing
+                                # immediately with "database is locked".
+                                cursor.execute("PRAGMA journal_mode=WAL")
                             cursor.execute("PRAGMA busy_timeout=30000")
+                        finally:
+                            cursor.close()
+
+                elif self.read_only and self.database_url.startswith("postgresql"):
+
+                    @event.listens_for(self.engine, "connect")
+                    def _set_postgres_read_only(dbapi_connection: Any, connection_record: Any) -> None:
+                        cursor = dbapi_connection.cursor()
+                        try:
+                            cursor.execute("SET default_transaction_read_only = on")
                         finally:
                             cursor.close()
 
@@ -195,6 +231,8 @@ class SessionMixin:
 
                 # Create a session
                 self._session = self.SessionLocal()
+                if self.read_only:
+                    event.listen(self._session, "before_flush", _raise_read_only_flush)
 
                 logger.debug(f"Connected to database: {self._mask_url(self.database_url)}")
             except Exception as e:
@@ -289,6 +327,17 @@ class SessionMixin:
             if self.engine is None:
                 self.connect()
             assert self.engine is not None
+
+            if self.read_only:
+                # Verify the existing schema without creating it.
+                schema_inspector = inspect(self.engine)
+                missing = [
+                    table_name for table_name in Base.metadata.tables if not schema_inspector.has_table(table_name)
+                ]
+                if missing:
+                    raise DatabaseError("Database schema is missing in read-only mode: " + ", ".join(sorted(missing)))
+                self._schema_ready = True
+                return
 
             with _SCHEMA_CREATE_LOCK:
                 if not force and self._schema_cache_applies():

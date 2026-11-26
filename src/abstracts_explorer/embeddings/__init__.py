@@ -13,10 +13,12 @@ from abstracts_explorer.embeddings.errors import EmbeddingsError
 from abstracts_explorer.embeddings.hashing import HASH_PREFIX, hash_text, is_content_hash
 from abstracts_explorer.embeddings.manager import EmbeddingsManager
 from abstracts_explorer.embeddings.query import PaperMatch, QueryEmbedding
+from abstracts_explorer.utils.read_only import ReadOnlyError
 
 __all__ = [
     "EmbeddingsManager",
     "EmbeddingsError",
+    "ReadOnlyError",
     "PaperMatch",
     "QueryEmbedding",
     "HASH_PREFIX",

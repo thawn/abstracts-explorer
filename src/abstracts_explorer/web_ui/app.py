@@ -1269,6 +1269,9 @@ def run_server(host="127.0.0.1", port=5001, debug=False, dev=False, threads=None
     # Print embeddings configuration
     print(f"Embeddings: {config.embedding_db}")
 
+    if config.read_only:
+        print("Mode: read-only (database and embedding writes are disabled)")
+
     if _port_in_use(host, port):
         print(f"\n⚠️  {_port_conflict_message(host, port)}", file=sys.stderr)
 

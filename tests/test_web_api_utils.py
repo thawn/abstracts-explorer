@@ -6,6 +6,7 @@ import httpx2
 import pytest
 from flask import Flask, jsonify, request
 
+from abstracts_explorer.utils.read_only import ReadOnlyError
 from abstracts_explorer.web_ui.api_utils import (
     ApiError,
     api_error_handler,
@@ -38,6 +39,11 @@ def app():
     @api_error_handler
     def boom():
         raise RuntimeError("kaboom")
+
+    @test_app.route("/read-only")
+    @api_error_handler
+    def read_only_route():
+        raise ReadOnlyError("Cannot write in read-only mode")
 
     @test_app.route("/timeout")
     @api_error_handler
@@ -149,6 +155,11 @@ class TestApiErrorHandler:
         response = client.get("/controlled-server")
         assert response.status_code == 500
         assert response.get_json() == {"error": "storage unavailable"}
+
+    def test_read_only_error_returns_403(self, client):
+        response = client.get("/read-only")
+        assert response.status_code == 403
+        assert response.get_json() == {"error": "Cannot write in read-only mode"}
 
     def test_unexpected_exception_returns_500(self, client):
         response = client.get("/boom")

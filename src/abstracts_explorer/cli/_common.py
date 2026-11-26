@@ -53,6 +53,36 @@ class _HttpRequestLogFilter(logging.Filter):
         return self.allow_info or record.levelno > logging.INFO
 
 
+def _command_writes_storage(args: Any) -> bool:
+    """
+    Return whether the selected command may write to the paper or embedding store.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command-line arguments.
+
+    Returns
+    -------
+    bool
+        ``True`` when the command is known to perform database/embedding writes.
+    """
+    command = getattr(args, "command", None)
+    if command in {"download", "create-embeddings", "pre-process", "delete-data"}:
+        return True
+    if command == "clustering":
+        return getattr(args, "clustering_command", None) in {"run", "pre-generate", "clear-cache"}
+    if command == "eval":
+        return getattr(args, "eval_command", None) in {"generate", "verify", "run", "clear"}
+    if command == "registry":
+        return getattr(args, "registry_command", None) in {"download", "delete"}
+    if command == "feedback":
+        return getattr(args, "feedback_command", None) == "clear"
+    if command == "check-consistency":
+        return bool(getattr(args, "fix", False))
+    return False
+
+
 def setup_logging(verbosity: int) -> None:
     """
     Configure logging based on verbosity level and LOG_LEVEL environment variable.
