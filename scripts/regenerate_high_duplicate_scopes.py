@@ -17,6 +17,10 @@ Usage
     python scripts/regenerate_high_duplicate_scopes.py --threshold 200
     python scripts/regenerate_high_duplicate_scopes.py --execute
     python scripts/regenerate_high_duplicate_scopes.py --conference ICML --year 2022 --execute
+    python scripts/regenerate_high_duplicate_scopes.py --execute --quiet
+
+Clustering progress (BERTopic/LLM output) is shown by default; pass ``--quiet``
+to suppress it.
 
 Completed scopes are recorded in a resume state file, so an interrupted run can
 be restarted without recomputing scopes that already finished.  Pass
@@ -198,7 +202,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Use c-TF-IDF labels instead of LLM labels (not compatible with the web cache).",
     )
-    parser.add_argument("--show-progress", action="store_true", help="Show BERTopic/LLM progress output.")
+    parser.add_argument("--quiet", action="store_true", help="Suppress BERTopic/LLM progress output.")
     parser.add_argument(
         "--state-file",
         help=("Resume state file (default: " f"<DATA_DIR>/{STATE_FILENAME})."),
@@ -276,6 +280,7 @@ def main() -> int:
     config = get_config()
     collection_name = args.collection or config.collection_name
     embedding_model = config.embedding_model
+    show_progress = not args.quiet
     database_url = args.paper_db or config.database_url
     state_path = Path(args.state_file) if args.state_file else _default_state_path(config)
     meta = _state_meta(database_url, collection_name, embedding_model, args.threshold)
@@ -341,7 +346,7 @@ def main() -> int:
                         conferences=[scope_conference],
                         years=[scope_year],
                         use_llm_labels=not args.no_llm_labels,
-                        show_progress=args.show_progress,
+                        show_progress=show_progress,
                         backfill_missing_labels=True,
                     )
                     cleanup_scope_cache(db, scope_conference, scope_year, embedding_model, collection_name)

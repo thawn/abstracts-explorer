@@ -89,7 +89,7 @@ def _args(state_file: Path, **overrides: Any) -> argparse.Namespace:
         "max_scopes": None,
         "execute": True,
         "no_llm_labels": False,
-        "show_progress": False,
+        "quiet": False,
         "state_file": str(state_file),
         "no_resume": False,
     }
@@ -249,3 +249,26 @@ def test_main_failure_is_not_recorded(tmp_path, connected_db, monkeypatch):
 
     assert regen.main() == 1
     assert not state_path.exists()
+
+
+def test_main_shows_progress_by_default_and_quiet(tmp_path, connected_db, monkeypatch):
+    connected_db.add_papers(_duplicate_papers())
+    state_path = tmp_path / "state.json"
+    progress: List[bool] = []
+
+    def fake_compute(**kwargs: Any) -> Dict[str, Any]:
+        progress.append(kwargs["show_progress"])
+        return {"statistics": {"total_papers": 1, "n_clusters": 1}}
+
+    monkeypatch.setattr(regen, "EmbeddingsManager", _DummyEmbeddingsManager)
+    monkeypatch.setattr(regen, "compute_clusters_with_cache", fake_compute)
+
+    monkeypatch.setattr(regen, "parse_args", lambda: _args(state_path))
+    assert regen.main() == 0
+    assert progress and all(progress)
+
+    state_path.unlink()
+    progress.clear()
+    monkeypatch.setattr(regen, "parse_args", lambda: _args(state_path, quiet=True))
+    assert regen.main() == 0
+    assert progress and not any(progress)
