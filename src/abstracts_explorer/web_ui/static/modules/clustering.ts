@@ -8,7 +8,7 @@
 import { API_BASE, PLOTLY_COLORS } from './utils/constants.js';
 import { showLoading, showErrorInElement } from './utils/ui-utils.js';
 import { parseJsonResponse } from './utils/api-utils.js';
-import { getSelectedConference, getSelectedLocation, getSelectedYears, escapeHtml } from './utils/dom-utils.js';
+import { getSelectedConference, getSelectedLocation, getSelectedYears, escapeHtml, escapeAttr } from './utils/dom-utils.js';
 import { formatPaperCard } from './paper-card.js';
 import { renderInlineMarkdownWithLatex } from './utils/markdown-utils.js';
 import { ensurePlotly, getPlotly } from './plotly-loader.js';
@@ -86,6 +86,8 @@ let currentClusterConfig = {
 let selectedClusters = new Set();
 let currentLevelIndex = 4;
 let currentLevelState = null;
+// Persisted search query for the cluster legend (survives re-renders)
+let legendSearchQuery = '';
 
 // Zoom-driven hierarchy state
 const ZOOM_LEVEL_MIN = 1;
@@ -137,6 +139,7 @@ export function resetClusters() {
     customClusterMode = false;
     customClusterVisibility = {};
     selectedClusters.clear();
+    legendSearchQuery = '';
     currentLevelIndex = DEFAULT_HIERARCHY_LEVEL;
     currentLevelState = null;
     _cancelZoomSync();
@@ -873,6 +876,68 @@ function formatClusterStats(statistics, labels) {
 }
 
 /**
+ * Filter legend elements live based on a search query.
+ *
+ * Matching is a case-insensitive substring search over each element's
+ * `data-search-text`. Non-matching elements are hidden but kept in the DOM so
+ * their selection state is preserved.
+ *
+ * @param {HTMLElement} container - Container holding the legend elements
+ * @param {string} selector - Selector identifying the filterable elements
+ * @param {string} query - Search query entered by the user
+ */
+function applyLegendSearch(container, selector, query) {
+    if (!container) return;
+    const normalized = (query || '').trim().toLowerCase();
+    container.querySelectorAll(selector).forEach(element => {
+        const haystack = (element.dataset.searchText || element.textContent || '').toLowerCase();
+        const matches = normalized === '' || haystack.includes(normalized);
+        element.style.display = matches ? '' : 'none';
+    });
+}
+
+/**
+ * Create the search input used to live-filter the legend.
+ *
+ * @param {Function} onInput - Callback invoked with the current query on input
+ * @returns {HTMLDivElement} Wrapper element containing the input and clear button
+ */
+function createLegendSearchField(onInput) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'relative mb-2';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'cluster-legend-search';
+    input.placeholder = 'Search clusters...';
+    input.value = legendSearchQuery;
+    input.className = 'w-full pr-10 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-600 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500';
+    input.addEventListener('input', () => {
+        legendSearchQuery = input.value;
+        onInput(input.value);
+    });
+
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.setAttribute('aria-label', 'Clear cluster search');
+    clearBtn.title = 'Clear search';
+    clearBtn.className = 'absolute right-2 top-1/2 -translate-y-1/2 px-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200';
+    const clearIcon = document.createElement('i');
+    clearIcon.className = 'fas fa-times';
+    clearBtn.appendChild(clearIcon);
+    clearBtn.addEventListener('click', () => {
+        legendSearchQuery = '';
+        input.value = '';
+        onInput('');
+        input.focus();
+    });
+
+    wrapper.appendChild(input);
+    wrapper.appendChild(clearBtn);
+    return wrapper;
+}
+
+/**
  * Create the custom legend for the active level.
  * @param {Object} state
  */
@@ -917,17 +982,23 @@ function createLevelLegend(state) {
     buttonContainer.appendChild(selectAllBtn);
     buttonContainer.appendChild(clearAllBtn);
     header.appendChild(buttonContainer);
-    legendContainer.appendChild(header);
 
     const itemsContainer = document.createElement('div');
     itemsContainer.className = 'space-y-1 overflow-y-auto pr-2 flex-1';
     itemsContainer.style.minHeight = '0';
     itemsContainer.style.maxHeight = '100%';
 
+    header.appendChild(createLegendSearchField(query => {
+        applyLegendSearch(itemsContainer, '[data-cluster-id]', query);
+    }));
+
+    legendContainer.appendChild(header);
+
     state.entries.forEach(entry => {
         const item = document.createElement('div');
         item.className = 'flex items-center gap-2 p-2 rounded cursor-pointer transition-all';
         item.dataset.clusterId = String(entry.id);
+        item.dataset.searchText = `${entry.label} ${entry.description || ''}`;
         item.title = entry.description
             ? `${entry.label} (${entry.size} papers)\n${entry.description}`
             : `${entry.label} (${entry.size} papers)`;
@@ -959,6 +1030,7 @@ function createLevelLegend(state) {
     });
 
     legendContainer.appendChild(itemsContainer);
+    applyLegendSearch(itemsContainer, '[data-cluster-id]', legendSearchQuery);
     _updateLegendSelectionStyles();
 }
 
@@ -1382,27 +1454,45 @@ function visualizeClustersWithCustomQueries() {
  */
 function updateCustomQueryLegend() {
     const legendDiv = document.getElementById('cluster-legend');
-    
+    if (!legendDiv) return;
+
     if (customQueryClusters.length === 0) {
         legendDiv.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-sm">No custom topics</p>';
         return;
     }
-    
-    let html = '<div class="space-y-3">';
-    html += '<h4 class="text-md font-bold text-gray-700 dark:text-gray-300 mb-3">Custom Topics</h4>';
-    
+
+    legendDiv.innerHTML = '';
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'space-y-3';
+
+    const title = document.createElement('h4');
+    title.className = 'text-md font-bold text-gray-700 dark:text-gray-300 mb-3';
+    title.textContent = 'Custom Topics';
+    wrapper.appendChild(title);
+
+    const itemsContainer = document.createElement('div');
+    itemsContainer.className = 'space-y-3';
+
+    wrapper.appendChild(createLegendSearchField(query => {
+        applyLegendSearch(itemsContainer, '[data-custom-topic]', query);
+    }));
+
+    let html = '';
     customQueryClusters.forEach((cluster, idx) => {
         // Skip blue (first color) - start from index 1 to avoid confusion with background
         const colorIndex = (idx + 1) % PLOTLY_COLORS.length;
         const clusterColor = PLOTLY_COLORS[colorIndex];
         const escapedQuery = escapeHtml(cluster.query);
-        
+        const searchText = escapeAttr(cluster.query);
+
         // Check if this cluster is visible (default: true)
         const isVisible = customClusterVisibility[cluster.id] !== false;
         const opacityClass = isVisible ? 'opacity-100' : 'opacity-50';
-        
+
         html += `
-            <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+            <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                data-custom-topic data-search-text="${searchText}">
                 <div class="flex items-center gap-3 flex-1 cursor-pointer ${opacityClass}" onclick="toggleCustomClusterVisibility('${cluster.id}')">
                     <div class="w-4 h-4 rounded-full" style="background-color: ${clusterColor}"></div>
                     <div class="flex-1">
@@ -1417,9 +1507,12 @@ function updateCustomQueryLegend() {
             </div>
         `;
     });
-    
-    html += '</div>';
-    legendDiv.innerHTML = html;
+
+    itemsContainer.innerHTML = html;
+    wrapper.appendChild(itemsContainer);
+    legendDiv.appendChild(wrapper);
+
+    applyLegendSearch(itemsContainer, '[data-custom-topic]', legendSearchQuery);
 }
 
 /**

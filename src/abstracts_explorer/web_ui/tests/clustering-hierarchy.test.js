@@ -435,6 +435,33 @@ describe('Hierarchy slider', () => {
         expect(getSelectionRestyleCall(1)[1].ids[0]).toEqual(['100']);
         expect(getSelectionRestyleCall(0)[1].ids[0]).toEqual(['p0', 'p1']);
     });
+
+    it('live-filters legend items and persists the query across level changes', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildData([flatLevel, mergedLevel]) });
+
+        await loadClusters();
+        setHierarchyLevel(0);
+        await flushPromises();
+
+        const input = document.getElementById('cluster-legend-search');
+        expect(input).toBeTruthy();
+
+        input.value = 'cat';
+        input.dispatchEvent(new Event('input'));
+
+        expect(getLegendItem('0').style.display).toBe('');
+        expect(getLegendItem('1').style.display).toBe('none');
+
+        setHierarchyLevel(1);
+
+        const persistedInput = document.getElementById('cluster-legend-search');
+        expect(persistedInput.value).toBe('cat');
+        expect(getLegendItem('100').style.display).toBe('none');
+
+        persistedInput.value = '';
+        persistedInput.dispatchEvent(new Event('input'));
+        expect(getLegendItem('100').style.display).toBe('');
+    });
 });
 
 async function flushPromises() {

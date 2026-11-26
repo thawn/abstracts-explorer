@@ -1033,6 +1033,51 @@ describe('Clustering Module', () => {
             expect(legendDiv.innerHTML).toContain('ML Cluster');
         });
 
+        it('live-filters custom topic legend entries', async () => {
+            const mockClusterData = {
+                points: [{ x: 1, y: 1, cluster: 0, id: '1', uid: '1', title: 'Paper 1' }],
+                cluster_labels: { 0: 'Cluster 0' },
+                cluster_centers: { 0: { x: 1, y: 1 } }
+            };
+
+            global.fetch.mockResolvedValueOnce({ ok: true, json: async () => mockClusterData });
+            await loadClusters();
+
+            const runCustomSearch = async (query) => {
+                document.getElementById('custom-query-input').value = query;
+                global.fetch.mockResolvedValueOnce({
+                    ok: true,
+                    json: async () => ({
+                        query,
+                        distance: 0.5,
+                        papers: [{ uid: '1', title: 'Paper 1' }],
+                        count: 1,
+                        query_embedding: [0.1]
+                    })
+                });
+                await searchCustomCluster();
+            };
+
+            await runCustomSearch('alpha topic');
+            await runCustomSearch('beta topic');
+
+            const rows = document.querySelectorAll('#cluster-legend [data-custom-topic]');
+            expect(rows).toHaveLength(2);
+
+            const input = document.getElementById('cluster-legend-search');
+            expect(input).toBeTruthy();
+
+            input.value = 'alpha';
+            input.dispatchEvent(new Event('input'));
+
+            expect(rows[0].style.display).toBe('');
+            expect(rows[1].style.display).toBe('none');
+
+            input.value = '';
+            input.dispatchEvent(new Event('input'));
+            expect(rows[1].style.display).toBe('');
+        });
+
         it('should handle cluster statistics with noise', async () => {
             const mockClusterData = {
                 points: [
