@@ -237,6 +237,44 @@ describe('Filters Module', () => {
             delete window.loadStats;
         });
 
+        it('should load stats for the implicitly selected first options when the default is invalid', async () => {
+            const mockLoadStats = jest.fn();
+            window.loadStats = mockLoadStats;
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    conferences: ['NeurIPS'],
+                    years: [2026],
+                    conference_years: { 'NeurIPS': [2026] },
+                    default_conference: null,
+                    default_year: null,
+                    default_conference_error: {
+                        message: 'Configured default year 2025 has no data.'
+                    }
+                })
+            }).mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ sessions: ['NeurIPS Session A'] })
+            });
+
+            await loadFilterOptions();
+
+            expect(mockLoadStats).toHaveBeenCalled();
+
+            const conferenceSelect = document.getElementById('conference-selector');
+            const yearSelect = document.getElementById('year-selector');
+            expect(conferenceSelect.value).toBe('NeurIPS');
+            expect(yearSelect.value).toBe('2026');
+
+            const filtersCall = global.fetch.mock.calls.find((call) => call[0].includes('/api/filters'));
+            expect(filtersCall).toBeDefined();
+            expect(filtersCall[0]).toContain('conference=NeurIPS');
+            expect(filtersCall[0]).toContain('year=2026');
+
+            delete window.loadStats;
+        });
+
         it('should populate conferences and years from conference_years', async () => {
             global.fetch.mockResolvedValueOnce({
                 ok: true,

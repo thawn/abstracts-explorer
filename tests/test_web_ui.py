@@ -1791,6 +1791,7 @@ class TestWebUIRunServer:
                 with (
                     patch("waitress.serve") as mock_serve,
                     patch("abstracts_explorer.web_ui.app.services.start_chat_history_cleanup") as mock_cleanup,
+                    patch("abstracts_explorer.web_ui.app.warm_up") as mock_warm_up,
                 ):
                     mock_serve.side_effect = KeyboardInterrupt()  # Simulate server stop
 
@@ -1798,6 +1799,7 @@ class TestWebUIRunServer:
                         run_server(host="127.0.0.1", port=5000, debug=False)
 
                     mock_cleanup.assert_called_once()
+                    mock_warm_up.assert_called_once()
                     # Verify Waitress serve was called with correct parameters
                     mock_serve.assert_called_once()
                     call_args = mock_serve.call_args
@@ -1817,7 +1819,10 @@ class TestWebUIRunServer:
                 mock_config.return_value = mock_cfg
 
                 # Mock Waitress serve with timeout (debug mode now works with Waitress)
-                with patch("waitress.serve") as mock_serve:
+                with (
+                    patch("waitress.serve") as mock_serve,
+                    patch("abstracts_explorer.web_ui.app.warm_up"),
+                ):
                     mock_serve.side_effect = KeyboardInterrupt()  # Simulate server stop
 
                     with pytest.raises(KeyboardInterrupt):
@@ -1874,7 +1879,10 @@ class TestWebUIRunServer:
                         sigterm_handler = handler
 
                 with patch("abstracts_explorer.web_ui.app.signal.signal", side_effect=capture_signal):
-                    with patch("waitress.serve") as mock_serve:
+                    with (
+                        patch("waitress.serve") as mock_serve,
+                        patch("abstracts_explorer.web_ui.app.warm_up"),
+                    ):
                         mock_serve.side_effect = KeyboardInterrupt()
 
                         with pytest.raises(KeyboardInterrupt):

@@ -52,6 +52,7 @@ from abstracts_explorer.web_ui.api_utils import (
     get_json_object,
 )
 from abstracts_explorer.web_ui.rate_limit import enforce_client_rate_limit
+from abstracts_explorer.web_ui.warmup import warm_up
 
 # Import version
 try:
@@ -1272,6 +1273,10 @@ def run_server(host="127.0.0.1", port=5001, debug=False, dev=False, threads=None
             print("  abstracts-explorer create-embeddings", file=sys.stderr)
             raise FileNotFoundError(f"Database not found: {db_path}")
     # For PostgreSQL, we can't check file existence - connection will be validated at runtime
+
+    # Prime the database connection, schema cache, and metadata queries so the
+    # first page load does not pay the cold-start cost.
+    warm_up()
 
     print("Starting Abstracts Explorer Web Interface...")
     print(f"Database: {config.masked_database_url}")
