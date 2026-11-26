@@ -254,7 +254,8 @@ class TestNeurIPSLegacyDownload:
 
         assert len(papers) == 1
         assert papers[0].title == "Modern Paper"
-        assert "neurips-2025-orals-posters.json" in mock_get.call_args.args[0]
+        requested_urls = [call.args[0] for call in mock_get.call_args_list]
+        assert any("neurips-2025-orals-posters.json" in url for url in requested_urls)
 
 
 class TestNeurIPSPluginRegistration:

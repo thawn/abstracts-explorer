@@ -128,7 +128,7 @@ class TestConstants:
         assert DEFAULT_REDUCTION_METHOD == "umap"
         assert DEFAULT_NR_LEVELS == 10
         assert DEFAULT_CLUSTERING_PARAMS["distance_threshold"] == 0.5
-        assert DEFAULT_CLUSTERING_PARAMS["pipeline_version"] == 2
+        assert DEFAULT_CLUSTERING_PARAMS["pipeline_version"] == 3
 
     def test_clustering_params_for(self):
         llm_params = clustering_params_for(True)
@@ -1284,3 +1284,174 @@ class TestPipeline:
 
         with pytest.raises(ClusteringError, match="boom"):
             perform_clustering()
+
+
+_HASH_A = "sha256:" + "a" * 64
+_HASH_B = "sha256:" + "b" * 64
+
+
+def _summary(
+    uid: str,
+    *,
+    conference: str = "NeurIPS",
+    year: int = 2026,
+    content_hash: str | None = _HASH_A,
+    location: str | None = None,
+) -> dict:
+    """Build a minimal paper summary dictionary."""
+    return {
+        "uid": uid,
+        "title": f"Title {uid}",
+        "abstract": f"Abstract {uid}",
+        "year": year,
+        "conference": conference,
+        "session": "Poster Session",
+        "location": location,
+        "content_hash": content_hash,
+    }
+
+
+class TestLoadEmbeddings:
+    """Unit tests for the modularized embedding loading helpers."""
+
+    def _manager(self, mocker):
+        embeddings_manager = mocker.Mock()
+        embeddings_manager.collection = mocker.Mock()
+        database = mocker.Mock()
+        return ClusteringManager(embeddings_manager, database), embeddings_manager, database
+
+    def test_unfiltered_load_with_limit(self, mocker):
+        manager, em, db = self._manager(mocker)
+        em.collection.get.return_value = {
+            "ids": ["u1", "u2"],
+            "embeddings": [[0.1, 0.2], [0.3, 0.4]],
+        }
+        db.get_paper_summaries_by_uids.return_value = [_summary("u1"), _summary("u2", content_hash=_HASH_B)]
+        db.get_locations_by_content_hashes.return_value = {}
+
+        loaded = manager.load_embeddings(limit=5)
+
+        assert loaded == 2
+        em.collection.get.assert_called_once_with(include=["embeddings"], limit=5)
+        db.resolve_paper_uids.assert_not_called()
+        assert manager.paper_ids == ["u1", "u2"]
+        assert manager.embeddings.shape == (2, 2)
+
+    def test_filtered_load_uses_batches_and_stops_at_limit(self, mocker):
+        manager, em, db = self._manager(mocker)
+        db.resolve_paper_uids.return_value = ["u1", "u2"]
+        em.collection.get.return_value = {"ids": ["u1"], "embeddings": [[0.1, 0.2]]}
+        db.get_paper_summaries_by_uids.return_value = [_summary("u1")]
+        db.get_locations_by_content_hashes.return_value = {}
+
+        loaded = manager.load_embeddings(limit=1, conferences=["A"], years=[2024])
+
+        assert loaded == 1
+        db.resolve_paper_uids.assert_called_once_with(conferences=["A"], years=[2024])
+        em.collection.get.assert_called_once_with(
+            include=["embeddings"],
+            ids=["u1", "u2"],
+            limit=1,
+        )
+
+    def test_filters_resolve_to_no_ids(self, mocker):
+        manager, em, db = self._manager(mocker)
+        db.resolve_paper_uids.return_value = []
+
+        with pytest.raises(ClusteringError, match="No embeddings found in collection"):
+            manager.load_embeddings(conferences=["A"])
+
+        em.collection.get.assert_not_called()
+
+    def test_empty_chroma_result_raises(self, mocker):
+        manager, em, db = self._manager(mocker)
+        em.collection.get.return_value = {"ids": [], "embeddings": []}
+
+        with pytest.raises(ClusteringError, match="No embeddings found in collection"):
+            manager.load_embeddings()
+
+    def test_missing_paper_rows_are_dropped_with_warning(self, mocker, caplog):
+        manager, em, db = self._manager(mocker)
+        em.collection.get.return_value = {
+            "ids": ["u1", "missing"],
+            "embeddings": [[0.1, 0.2], [0.3, 0.4]],
+        }
+        db.get_paper_summaries_by_uids.return_value = [_summary("u1")]
+        db.get_locations_by_content_hashes.return_value = {}
+
+        with caplog.at_level(logging.WARNING):
+            loaded = manager.load_embeddings()
+
+        assert loaded == 1
+        assert manager.paper_ids == ["u1"]
+        assert "have no matching paper row" in caplog.text
+
+    def test_no_matching_summaries_raises(self, mocker):
+        manager, em, db = self._manager(mocker)
+        em.collection.get.return_value = {"ids": ["u1"], "embeddings": [[0.1, 0.2]]}
+        db.get_paper_summaries_by_uids.return_value = []
+
+        with pytest.raises(ClusteringError, match="No matching papers found in the database"):
+            manager.load_embeddings()
+
+    def test_dedupe_merges_same_hash_within_scope_and_attaches_locations(self, mocker):
+        manager, em, db = self._manager(mocker)
+        em.collection.get.return_value = {
+            "ids": ["u1", "u2"],
+            "embeddings": [[0.1, 0.2], [0.9, 0.9]],
+        }
+        db.get_paper_summaries_by_uids.return_value = [
+            _summary("u1", location="Sydney"),
+            _summary("u2", location="Paris"),
+        ]
+        db.get_locations_by_content_hashes.return_value = {_HASH_A: ["Paris", "Sydney"]}
+
+        loaded = manager.load_embeddings()
+
+        assert loaded == 1
+        assert manager.paper_ids == ["u1"]
+        assert manager.metadatas[0]["locations"] == ["Paris", "Sydney"]
+        assert manager.metadatas[0]["primary_location"] == "Paris"
+
+    def test_dedupe_does_not_merge_same_hash_across_years(self, mocker):
+        manager, em, db = self._manager(mocker)
+        em.collection.get.return_value = {
+            "ids": ["u1", "u2"],
+            "embeddings": [[0.1, 0.2], [0.3, 0.4]],
+        }
+        db.get_paper_summaries_by_uids.return_value = [
+            _summary("u1", year=2025),
+            _summary("u2", year=2026),
+        ]
+        db.get_locations_by_content_hashes.return_value = {}
+
+        loaded = manager.load_embeddings()
+
+        assert loaded == 2
+        assert manager.paper_ids == ["u1", "u2"]
+
+    def test_uid_fallback_and_single_location_fallback(self, mocker):
+        manager, em, db = self._manager(mocker)
+        em.collection.get.return_value = {
+            "ids": ["u1", "u2"],
+            "embeddings": [[0.1, 0.2], [0.3, 0.4]],
+        }
+        db.get_paper_summaries_by_uids.return_value = [
+            _summary("u1", content_hash=None, location="Sydney"),
+            _summary("u2", content_hash=None, location="Sydney"),
+        ]
+        db.get_locations_by_content_hashes.return_value = {}
+
+        loaded = manager.load_embeddings()
+
+        assert loaded == 2
+        assert manager.metadatas[0]["locations"] == ["Sydney"]
+        assert manager.metadatas[0]["primary_location"] == "Sydney"
+        db.get_locations_by_content_hashes.assert_called_once_with(["u1", "u2"])
+
+    def test_unexpected_errors_are_wrapped(self, mocker):
+        manager, em, db = self._manager(mocker)
+        em.collection.get.side_effect = RuntimeError("boom")
+
+        with pytest.raises(ClusteringError, match="Failed to load embeddings: boom"):
+            manager.load_embeddings()

@@ -13,6 +13,7 @@ import sys
 import logging
 import json
 from pathlib import Path
+from typing import List
 from flask import Flask, Response, render_template, request, jsonify, send_file, abort
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -280,6 +281,56 @@ def health():
         return jsonify({"status": "unhealthy", "error": "Service unavailable"}), 503
 
 
+def _filter_cluster_results_by_locations(cached: dict, locations: List[str]) -> dict:
+    """
+    Filter cached clustering points to the selected presentation locations.
+
+    Recomputes cluster statistics and centers for the visible subset. Cluster
+    labels and hierarchy are kept because they describe the full clustering.
+    """
+    selected = set(locations)
+    points = []
+    for point in cached.get("points", []):
+        point_locations = point.get("locations")
+        if not point_locations:
+            single = point.get("location")
+            point_locations = [single] if single else []
+        if selected & set(point_locations):
+            points.append(point)
+
+    cached["points"] = points
+    counts: dict = {}
+    for point in points:
+        cluster_id = point.get("cluster")
+        if cluster_id is None:
+            continue
+        counts[cluster_id] = counts.get(cluster_id, 0) + 1
+
+    cluster_sizes = {int(key): int(value) for key, value in counts.items() if int(key) >= 0}
+    n_noise = sum(1 for point in points if point.get("cluster") == -1)
+    statistics = dict(cached.get("statistics") or {})
+    statistics.update(
+        {
+            "cluster_sizes": cluster_sizes,
+            "n_clusters": len(cluster_sizes),
+            "n_noise": n_noise,
+            "total_papers": len(points),
+        }
+    )
+    cached["statistics"] = statistics
+
+    centers = {}
+    for cluster_id in cluster_sizes:
+        cluster_points = [point for point in points if point.get("cluster") == cluster_id]
+        if cluster_points:
+            centers[cluster_id] = {
+                "x": sum(point.get("x", 0.0) for point in cluster_points) / len(cluster_points),
+                "y": sum(point.get("y", 0.0) for point in cluster_points) / len(cluster_points),
+            }
+    cached["cluster_centers"] = centers
+    return cached
+
+
 @app.route("/api/stats")
 @api_error_handler
 def stats():
@@ -296,9 +347,14 @@ def stats():
         Statistics including paper count, year, and conference
     """
     conference, year = get_conference_year_params(request)
+    location = request.args.get("location")
 
     database = services.get_database()
-    stats_data = database.get_stats(year=year, conference=conference)
+    stats_data = database.get_stats(
+        year=year,
+        conference=conference,
+        locations=[location] if location else None,
+    )
 
     return jsonify(stats_data)
 
@@ -369,9 +425,10 @@ def get_filters():
         Dictionary with sessions list filtered by the given conference/year
     """
     conference, year = get_conference_year_params(request)
+    location = request.args.get("location")
 
     database = services.get_database()
-    sessions = database.get_sessions(conference=conference, year=year)
+    sessions = database.get_sessions(conference=conference, year=year, location=location)
     return jsonify({"sessions": sessions})
 
 
@@ -398,6 +455,7 @@ def get_available_filters_endpoint() -> Response:
     database = services.get_database()
 
     db_conference_years = database.get_conference_years_from_db()
+    conference_year_locations = database.get_conference_year_locations()
 
     conferences = sorted(db_conference_years.keys())
     all_years: set[int] = set()
@@ -414,6 +472,7 @@ def get_available_filters_endpoint() -> Response:
             "conferences": conferences,
             "years": years_sorted,
             "conference_years": db_conference_years,
+            "conference_year_locations": conference_year_locations,
             "default_conference": default_result["conference"],
             "default_year": default_result["year"],
             "default_conference_error": default_result["error"],
@@ -448,6 +507,7 @@ def search():
     sessions = coerce_str_list(data.get("sessions", []), "sessions", max_items=_MAX_FILTER_ITEMS)
     years = coerce_int_list(data.get("years", []), "years", max_items=_MAX_FILTER_ITEMS)
     conferences = coerce_str_list(data.get("conferences", []), "conferences", max_items=_MAX_FILTER_ITEMS)
+    locations = coerce_str_list(data.get("locations", []), "locations", max_items=_MAX_FILTER_ITEMS)
     distance_threshold = coerce_number(
         data.get("distance_threshold"),
         "distance_threshold",
@@ -470,6 +530,7 @@ def search():
         sessions=sessions,
         years=years,
         conferences=conferences,
+        locations=locations,
         use_embeddings=use_embeddings,
         distance_threshold=distance_threshold,
         embeddings_manager=embeddings_manager,
@@ -665,6 +726,7 @@ def compute_clusters():
 
     conferences = coerce_str_list(data.get("conferences"), "conferences", max_items=_MAX_FILTER_ITEMS) or None
     years = coerce_int_list(data.get("years"), "years", max_items=_MAX_FILTER_ITEMS) or None
+    locations = coerce_str_list(data.get("locations"), "locations", max_items=_MAX_FILTER_ITEMS) or None
     hierarchy_levels = coerce_limit(
         data.get("hierarchy_levels"),
         default=DEFAULT_NR_LEVELS,
@@ -717,6 +779,8 @@ def compute_clusters():
                 "'abstracts-explorer clustering pre-generate --force'.",
                 409,
             )
+        if locations:
+            cached = _filter_cluster_results_by_locations(cached, locations)
         cached["hierarchy"] = derive_hierarchy_levels(
             cached,
             nr_levels=hierarchy_levels,
@@ -779,6 +843,7 @@ def search_custom_cluster():
     )
     conferences = coerce_str_list(data.get("conferences"), "conferences", max_items=_MAX_FILTER_ITEMS) or None
     years = coerce_int_list(data.get("years"), "years", max_items=_MAX_FILTER_ITEMS) or None
+    locations = coerce_str_list(data.get("locations"), "locations", max_items=_MAX_FILTER_ITEMS) or None
 
     # Get embeddings manager and database
     enforce_client_rate_limit(_client_id())
@@ -791,8 +856,9 @@ def search_custom_cluster():
         distance_threshold,
         conferences=conferences,
         years=years,
+        locations=locations,
     )
-    papers = database.get_result_details(matches, slice(0, _MAX_CLUSTER_RESULTS))
+    papers = database.group_papers_by_content(database.get_result_details(matches, slice(0, _MAX_CLUSTER_RESULTS)))
     return jsonify(
         {
             "query": query,

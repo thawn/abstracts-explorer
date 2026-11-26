@@ -203,4 +203,16 @@ class IngestMixin:
             return uids
 
         stored = dict(zip(existing.get("ids", []), existing.get("documents", [])))
-        return [uid for uid in uids if stored.get(uid) != hash_text(texts[uid])]
+        try:
+            with DatabaseManager() as db_manager:
+                content_hashes = db_manager.get_content_hashes(uids)
+        except Exception as e:
+            logger.warning("Error reading stored content hashes: %s", e)
+            content_hashes = {}
+
+        needing: list[str] = []
+        for uid in uids:
+            expected = content_hashes.get(uid) or hash_text(texts[uid])
+            if stored.get(uid) != expected:
+                needing.append(uid)
+        return needing

@@ -97,6 +97,8 @@ def build_points(
         point["year"] = metadata.get("year", "")
         point["conference"] = metadata.get("conference", "")
         point["session"] = metadata.get("session", "")
+        point["location"] = metadata.get("primary_location") or metadata.get("location") or ""
+        point["locations"] = list(metadata.get("locations") or [])
         points.append(point)
     return points
 

@@ -42,6 +42,7 @@ import {
     closeSettings,
     handleYearChange,
     handleConferenceChange,
+    handleLocationChange,
     dismissConferenceError,
     dismissDefaultFilterError
 } from './modules/filters.js';
@@ -207,6 +208,7 @@ function attachToWindow(): void {
     window.closeSettings = closeSettings;
     window.handleYearChange = handleYearChange;
     window.handleConferenceChange = handleConferenceChange;
+    window.handleLocationChange = handleLocationChange;
     window.dismissConferenceError = dismissConferenceError;
     window.dismissDefaultFilterError = dismissDefaultFilterError;
 

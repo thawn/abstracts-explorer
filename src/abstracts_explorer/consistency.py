@@ -9,7 +9,7 @@ before exporting or serving data.
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from abstracts_explorer.db.errors import normalize_model_name
 from abstracts_explorer.embeddings.hashing import hash_text
@@ -19,6 +19,15 @@ logger = logging.getLogger(__name__)
 ERROR = "error"
 WARNING = "warning"
 INFO = "info"
+
+ProgressCallback = Callable[[str, int, int], None]
+"""Callback signature ``(stage, completed, total)`` for progress reporting."""
+
+
+def _emit_progress(progress: Optional[ProgressCallback], stage: str, completed: int, total: int) -> None:
+    """Invoke *progress* when set, ignoring a ``None`` callback."""
+    if progress is not None:
+        progress(stage, completed, total)
 
 
 @dataclass
@@ -166,14 +175,16 @@ def _check_embeddings(
     scopes: List[tuple[str, int]],
     scope_uids: Dict[tuple[str, int], List[str]],
     all_paper_uids: set[str],
+    progress: Optional[ProgressCallback] = None,
 ) -> None:
     """Compare paper rows with stored embedding records."""
-    for conference, year in scopes:
+    for position, (conference, year) in enumerate(scopes, 1):
         label = _scope_label(conference, year)
         uids = scope_uids.get((conference, year), [])
         report.papers_checked += len(uids)
 
         summaries = {str(item["uid"]): item for item in database.get_paper_summaries_by_uids(uids)}
+        content_hashes = database.get_content_hashes(uids)
         missing = [uid for uid in uids if uid not in records]
         stale = []
         for uid in uids:
@@ -182,8 +193,11 @@ def _check_embeddings(
             summary = summaries.get(uid)
             if summary is None:
                 continue
-            text = f"{summary.get('title') or ''}\n\n{summary.get('abstract') or ''}".strip()
-            if text and records[uid] != hash_text(text):
+            expected = content_hashes.get(uid)
+            if expected is None:
+                text = f"{summary.get('title') or ''}\n\n{summary.get('abstract') or ''}".strip()
+                expected = hash_text(text) if text else None
+            if expected and records[uid] != expected:
                 stale.append(uid)
 
         if missing:
@@ -208,6 +222,8 @@ def _check_embeddings(
                     fix="abstracts-explorer create-embeddings --conference " f"{conference} --year {year}",
                 )
             )
+
+        _emit_progress(progress, "Checking embeddings", position, len(scopes))
 
     orphans = [uid for uid in records if uid not in all_paper_uids]
     if orphans:
@@ -258,6 +274,7 @@ def _check_cache(
     paper_counts: Dict[tuple[str, int], int],
     collection_name: Optional[str],
     embedding_model: str,
+    progress: Optional[ProgressCallback] = None,
 ) -> None:
     """Validate clustering cache coverage, duplication, and payloads."""
     entries_by_scope: Dict[tuple[str, int], List[Dict[str, Any]]] = {}
@@ -268,6 +285,9 @@ def _check_cache(
             continue
         scope = (str(entry_conference), int(entry_year))
         entries_by_scope.setdefault(scope, []).append(entry)
+
+    total_steps = len(scopes) + len(entries_by_scope)
+    completed = 0
 
     for scope in scopes:
         if scope not in entries_by_scope:
@@ -281,6 +301,8 @@ def _check_cache(
                     fix="abstracts-explorer clustering pre-generate " f"--conference {conference} --year {year}",
                 )
             )
+        completed += 1
+        _emit_progress(progress, "Checking clustering cache", completed, total_steps)
 
     for scope, scope_entries in entries_by_scope.items():
         label = _scope_label(*scope)
@@ -314,6 +336,8 @@ def _check_cache(
                     fix="abstracts-explorer check-consistency --fix",
                 )
             )
+            completed += 1
+            _emit_progress(progress, "Checking clustering cache", completed, total_steps)
             continue
 
         actual_papers = paper_counts.get(scope, 0)
@@ -405,6 +429,9 @@ def _check_cache(
                     )
                 )
 
+        completed += 1
+        _emit_progress(progress, "Checking clustering cache", completed, total_steps)
+
 
 def _check_collections(
     embeddings_manager: Any,
@@ -445,6 +472,7 @@ def check_consistency(
     collection_name: Optional[str] = None,
     conference: Optional[str] = None,
     year: Optional[int] = None,
+    progress: Optional[ProgressCallback] = None,
 ) -> ConsistencyReport:
     """
     Compare papers, embeddings, and clustering cache for consistency.
@@ -464,6 +492,9 @@ def check_consistency(
         Restrict the check to one conference.
     year : int, optional
         Restrict the check to one year.
+    progress : callable, optional
+        Callback ``(stage, completed, total)`` invoked as the check advances so
+        callers can render a progress bar.
 
     Returns
     -------
@@ -475,6 +506,7 @@ def check_consistency(
 
     report = ConsistencyReport()
 
+    _emit_progress(progress, "Collecting paper scopes", 0, 1)
     paper_scopes: set[tuple[str, int]] = set()
     paper_counts: Dict[tuple[str, int], int] = {}
     scope_uids: Dict[tuple[str, int], List[str]] = {}
@@ -488,23 +520,31 @@ def check_consistency(
     if year is not None:
         scopes = [scope for scope in scopes if scope[1] == year]
     report.scopes_checked = len(scopes)
+    _emit_progress(progress, "Collecting paper scopes", 1, 1)
 
-    for scope in scopes:
+    for position, scope in enumerate(scopes, 1):
         scope_uids[scope] = [str(uid) for uid in database.get_paper_uids({"conference": scope[0], "year": scope[1]})]
         paper_counts[scope] = len(scope_uids[scope])
+        _emit_progress(progress, "Loading paper UIDs", position, len(scopes))
 
+    _emit_progress(progress, "Loading embedding records", 0, 1)
     records = _load_embedding_records(embeddings_manager.collection)
     report.embeddings_checked = len(records)
+    _emit_progress(progress, "Loading embedding records", 1, 1)
 
     all_paper_uids = {str(uid) for uid in database.get_paper_uids()}
-    _check_embeddings(database, report, records, scopes, scope_uids, all_paper_uids)
+    _check_embeddings(database, report, records, scopes, scope_uids, all_paper_uids, progress)
+    _emit_progress(progress, "Checking embedding model", 0, 1)
     _check_models(database, report, embedding_model)
+    _emit_progress(progress, "Checking embedding model", 1, 1)
 
+    _emit_progress(progress, "Loading clustering cache", 0, 1)
     entries = database.list_clustering_cache_entries()
     if conference is not None:
         entries = [entry for entry in entries if entry.get("conference") == conference]
     if year is not None:
         entries = [entry for entry in entries if entry.get("year") == year]
+    _emit_progress(progress, "Loading clustering cache", 1, 1)
     _check_cache(
         database,
         report,
@@ -514,8 +554,11 @@ def check_consistency(
         paper_counts,
         collection_name,
         embedding_model,
+        progress,
     )
+    _emit_progress(progress, "Checking collections", 0, 1)
     _check_collections(embeddings_manager, report, collection_name)
+    _emit_progress(progress, "Checking collections", 1, 1)
 
     return report
 

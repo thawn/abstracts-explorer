@@ -6,7 +6,7 @@
  */
 
 import { API_BASE } from './utils/constants.js';
-import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
+import { escapeHtml, getSelectedConference, getSelectedLocation, getSelectedYears } from './utils/dom-utils.js';
 import { parseJsonResponse } from './utils/api-utils.js';
 import { showError, renderEmptyState } from './utils/ui-utils.js';
 import { setCurrentSearchTerm } from './state.js';
@@ -74,6 +74,11 @@ export async function searchPapers(): Promise<void> {
 
         if (selectedConference) {
             requestBody.conferences = [selectedConference];
+        }
+
+        const selectedLocation = getSelectedLocation();
+        if (selectedLocation) {
+            requestBody.locations = [selectedLocation];
         }
 
         const response = await fetch(`${API_BASE}/api/search`, {

@@ -182,6 +182,7 @@ class TestWebInterface:
 
         mock_db = MagicMock()
         mock_db.get_conference_years_from_db.return_value = conferences_with_years
+        mock_db.get_conference_year_locations.return_value = {}
         mock_db.get_conferences.return_value = sorted(conferences_with_years.keys())
         mock_db.get_years.side_effect = lambda conference=None: (
             conferences_with_years.get(conference, [])
@@ -2923,6 +2924,7 @@ class TestClusteringEndpoint:
                     ]
                     mock_db.find_paper_ids_within_distance.return_value = [("paper1", 0.5), ("paper2", 1.0)]
                     mock_db.get_result_details.return_value = cluster_papers
+                    mock_db.group_papers_by_content.side_effect = lambda papers: papers
 
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
@@ -2972,6 +2974,7 @@ class TestClusteringEndpoint:
                     # Mock find_paper_ids_within_distance to return no matches
                     mock_db.find_paper_ids_within_distance.return_value = []
                     mock_db.get_result_details.return_value = []
+                    mock_db.group_papers_by_content.side_effect = lambda papers: papers
 
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
@@ -3804,6 +3807,7 @@ class TestWebInputHardeningAndRateLimits:
         mock_db = MagicMock()
         mock_db.find_paper_ids_within_distance.return_value = []
         mock_db.get_result_details.return_value = []
+        mock_db.group_papers_by_content.side_effect = lambda papers: papers
         mock_config = Mock(web_rate_limit_per_minute=2)
 
         with patch("abstracts_explorer.web_ui.rate_limit.get_config", return_value=mock_config):
@@ -3824,6 +3828,7 @@ class TestWebInputHardeningAndRateLimits:
         mock_db = MagicMock()
         mock_db.find_paper_ids_within_distance.return_value = []
         mock_db.get_result_details.return_value = []
+        mock_db.group_papers_by_content.side_effect = lambda papers: papers
         mock_config = Mock(web_rate_limit_per_minute=0)
 
         with patch("abstracts_explorer.web_ui.rate_limit.get_config", return_value=mock_config):

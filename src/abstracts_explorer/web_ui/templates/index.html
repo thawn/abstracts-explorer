@@ -343,6 +343,14 @@
                             onchange="handleYearChange()">
                         </select>
                     </div>
+                    <!-- Location Selector (shown for multi-site conference years) -->
+                    <div id="location-selector-container" class="hidden items-center space-x-2">
+                        <label for="location-selector" class="text-sm font-medium">Location:</label>
+                        <select id="location-selector"
+                            class="px-3 py-2 bg-white/20 text-white rounded-lg border border-white/30 focus:ring-2 focus:ring-white/50 focus:border-transparent backdrop-blur-sm"
+                            onchange="handleLocationChange()">
+                        </select>
+                    </div>
                     <!-- Stats -->
                     <div id="stats">
                         <div class="text-sm opacity-90">Loading stats...</div>

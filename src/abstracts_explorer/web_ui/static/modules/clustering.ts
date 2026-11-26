@@ -8,7 +8,7 @@
 import { API_BASE, PLOTLY_COLORS } from './utils/constants.js';
 import { showLoading, showErrorInElement } from './utils/ui-utils.js';
 import { parseJsonResponse } from './utils/api-utils.js';
-import { getSelectedConference, getSelectedYears, escapeHtml } from './utils/dom-utils.js';
+import { getSelectedConference, getSelectedLocation, getSelectedYears, escapeHtml } from './utils/dom-utils.js';
 import { formatPaperCard } from './paper-card.js';
 import { renderInlineMarkdownWithLatex } from './utils/markdown-utils.js';
 import { ensurePlotly, getPlotly } from './plotly-loader.js';
@@ -137,6 +137,8 @@ export async function loadClusters() {
         const selectedYears = getSelectedYears();
         if (selectedConference) computeBody.conferences = [selectedConference];
         if (selectedYears.length > 0) computeBody.years = selectedYears;
+        const selectedLocation = getSelectedLocation();
+        if (selectedLocation) computeBody.locations = [selectedLocation];
 
         // Fetch pre-computed clustering data
         const response = await fetch(`${API_BASE}/api/clusters/compute`, {
@@ -911,6 +913,11 @@ export async function searchCustomCluster() {
         // Add conference filter if selected
         if (selectedConference) {
             requestBody.conferences = [selectedConference];
+        }
+
+        const selectedLocation = getSelectedLocation();
+        if (selectedLocation) {
+            requestBody.locations = [selectedLocation];
         }
         
         const response = await fetch(`${API_BASE}/api/clusters/search`, {

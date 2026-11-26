@@ -6,10 +6,49 @@
 
 import { API_BASE } from './utils/constants.js';
 import { parseJsonResponse } from './utils/api-utils.js';
-import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
+import { escapeHtml, getSelectedConference, getSelectedLocation, getSelectedYears } from './utils/dom-utils.js';
 import { cancelPendingSearch } from './search.js';
 
 let latestFilterRequest = 0;
+let conferenceYearLocations: Record<string, Record<string, string[]>> = {};
+
+/**
+ * Update the location selector for the active conference/year.
+ *
+ * The selector is only shown when the selected conference-year has more than
+ * one presentation location.
+ */
+export function updateLocationsForConferenceYear(): void {
+    const container = document.getElementById('location-selector-container');
+    const select = document.getElementById('location-selector') as HTMLSelectElement | null;
+    if (!container || !select) return;
+
+    const conference = getSelectedConference();
+    const years = getSelectedYears();
+    const year = years.length === 1 ? String(years[0]) : '';
+    const locations = (conferenceYearLocations[conference] || {})[year] || [];
+
+    if (locations.length <= 1) {
+        container.classList.add('hidden');
+        container.classList.remove('flex');
+        select.innerHTML = '<option value="">All locations</option>';
+        return;
+    }
+
+    const previous = select.value;
+    select.innerHTML = '<option value="">All locations</option>';
+    locations.forEach((location) => {
+        const option = document.createElement('option');
+        option.value = location;
+        option.textContent = location;
+        select.appendChild(option);
+    });
+    if (previous && locations.includes(previous)) {
+        select.value = previous;
+    }
+    container.classList.remove('hidden');
+    container.classList.add('flex');
+}
 
 /**
  * Show the conference URL error banner if window.urlConferenceError is set.
@@ -202,6 +241,7 @@ export async function loadFilterOptions(): Promise<void> {
 
             window.conferenceYearsMap = availableData.conference_years || {};
             window.allYears = availableData.years || [];
+            conferenceYearLocations = availableData.conference_year_locations || {};
 
             let yearsJustPopulated = false;
             if (yearSelect && yearSelect.options.length === 0) {
@@ -271,6 +311,8 @@ export async function loadFilterOptions(): Promise<void> {
                 }
             }
 
+            updateLocationsForConferenceYear();
+
             if (defaultApplied && window.loadStats) {
                 window.loadStats();
             }
@@ -292,6 +334,8 @@ export async function loadFilterOptions(): Promise<void> {
         const filterParams = new URLSearchParams();
         if (selectedYears.length === 1) filterParams.append('year', String(selectedYears[0]));
         if (selectedConference) filterParams.append('conference', selectedConference);
+        const selectedLocation = getSelectedLocation();
+        if (selectedLocation) filterParams.append('location', selectedLocation);
 
         const filtersResponse = await fetch(`${API_BASE}/api/filters?${filterParams.toString()}`);
         const filtersData = await parseJsonResponse(filtersResponse);
@@ -518,6 +562,42 @@ export function handleConferenceChange(): void {
 }
 
 /**
+ * Handle location selector change.
+ */
+export function handleLocationChange(): void {
+    cancelPendingSearch();
+
+    if (window.loadStats) window.loadStats();
+
+    loadFilterOptions();
+
+    const currentTab = currentActiveTab();
+    if (currentTab === 'interesting') {
+        if (window.loadInterestingPapers) window.loadInterestingPapers();
+    } else if (window.updateInterestingPapersCount) {
+        window.updateInterestingPapersCount();
+    }
+
+    const resultsDiv = document.getElementById('search-results');
+    if (resultsDiv) {
+        resultsDiv.innerHTML = `
+            <div class="text-center text-gray-500 py-12">
+                <i class="fas fa-search text-6xl mb-4 opacity-20"></i>
+                <p class="text-lg">Enter a search query to find abstracts</p>
+                <p class="text-sm">Try "transformer architecture" or "reinforcement learning"</p>
+            </div>
+        `;
+    }
+
+    if (window.resetClusters) {
+        window.resetClusters();
+        if (currentTab === 'clusters' && window.loadClusters) {
+            window.loadClusters();
+        }
+    }
+}
+
+/**
  * Update years dropdown based on selected conference.
  */
 export function updateYearsForConference(): void {
@@ -558,4 +638,6 @@ export function updateYearsForConference(): void {
     } else if (availableYears.length > 0) {
         yearSelect.value = availableYears[0];
     }
+
+    updateLocationsForConferenceYear();
 }

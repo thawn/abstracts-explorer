@@ -8,22 +8,182 @@ Years 2020 and later use the EventHosts virtual-site JSON API. Older years are
 scraped from the official NeurIPS proceedings at ``papers.nips.cc``.
 """
 
+import html
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 from pydantic import ValidationError
 
 from abstracts_explorer.plugin import DownloadOptions, LightweightPaper, sanitize_author_names
+from abstracts_explorer.plugin.locations import LocationMap
 from abstracts_explorer.plugin.persistence import FailureSidecar
 from abstracts_explorer.plugins.json_conference_downloader import JSONConferenceDownloaderPlugin
 
 logger = logging.getLogger(__name__)
 
 _HASH_RE = re.compile(r"/hash/([0-9a-f]+)-Abstract")
+
+_LOCATION_TAB_RE = re.compile(r'<li class="nav-item" role="presentation">')
+_LOCATION_NAME_RE = re.compile(r'alt="([^"]+) graphic"')
+_LOCATION_SLUG_RE = re.compile(r"/media/Locations/[^\"']*?-([a-z0-9\-]+)\.svg")
+_SESSION_TITLE_TMPL = r'/virtual/%d/session/\d+">\s*([^<\n]+)'
+_ROOM_OPTION_RE = re.compile(r'<option class="filter-select" value="([^"]+)"')
+
+FetchText = Callable[[str], str]
+
+
+def discover_locations(year: int, base_url: str, fetch_text: FetchText) -> List[Tuple[str, str]]:
+    """
+    Parse the NeurIPS virtual landing page for location tabs.
+
+    Parameters
+    ----------
+    year : int
+        Conference year.
+    base_url : str
+        Site base URL (e.g. ``https://neurips.cc``).
+    fetch_text : callable
+        Function fetching a URL and returning its text.
+
+    Returns
+    -------
+    list of tuple
+        ``(display_name, slug)`` pairs in tab order. The first entry is the
+        main site.
+    """
+    page = fetch_text(f"{base_url}/virtual/{year}/index.html")
+    locations: List[Tuple[str, str]] = []
+    seen: set[str] = set()
+    for block in _LOCATION_TAB_RE.split(page):
+        name_match = _LOCATION_NAME_RE.search(block)
+        slug_match = _LOCATION_SLUG_RE.search(block)
+        if not name_match or not slug_match:
+            continue
+        name = html.unescape(name_match.group(1)).strip()
+        slug = slug_match.group(1)
+        if slug in seen:
+            continue
+        seen.add(slug)
+        locations.append((name, slug))
+    return locations
+
+
+def parse_location_calendar(year: int, slug: str, base_url: str, fetch_text: FetchText) -> Tuple[set, set]:
+    """
+    Parse a NeurIPS location calendar for session titles and room names.
+
+    Parameters
+    ----------
+    year : int
+        Conference year.
+    slug : str
+        Location slug.
+    base_url : str
+        Site base URL.
+    fetch_text : callable
+        Function fetching a URL and returning its text.
+
+    Returns
+    -------
+    tuple of set
+        ``(session_titles, room_names)``.
+    """
+    page = fetch_text(f"{base_url}/virtual/{year}/loc/{slug}/calendar")
+    title_re = re.compile(_SESSION_TITLE_TMPL % year)
+    sessions = {html.unescape(value.strip()) for value in title_re.findall(page)}
+    rooms = {html.unescape(value.strip()) for value in _ROOM_OPTION_RE.findall(page)}
+    return sessions, rooms
+
+
+def build_location_map(year: int, base_url: str, fetch_text: FetchText) -> LocationMap:
+    """
+    Build a session/room to location mapping for a NeurIPS year.
+
+    Parameters
+    ----------
+    year : int
+        Conference year.
+    base_url : str
+        Site base URL (e.g. ``https://neurips.cc``).
+    fetch_text : callable
+        Function fetching a URL and returning its text.
+
+    Returns
+    -------
+    LocationMap
+        Mapping populated from the per-location calendars.
+
+    Raises
+    ------
+    RuntimeError
+        If no locations can be discovered.
+    """
+    discovered = discover_locations(year, base_url, fetch_text)
+    if not discovered:
+        raise RuntimeError(f"No NeurIPS locations found for {year} at {base_url}")
+
+    result = LocationMap(locations=[name for name, _ in discovered])
+    for name, slug in discovered:
+        sessions, rooms = parse_location_calendar(year, slug, base_url, fetch_text)
+        for session in sessions:
+            result.session_locations[session].add(name)
+        for room in rooms:
+            result.room_locations[room].add(name)
+    return result
+
+
+def assign_locations(papers: Sequence[Any], location_map: LocationMap) -> None:
+    """
+    Assign a location to each lightweight paper in place.
+
+    Parameters
+    ----------
+    papers : sequence
+        Objects or dictionaries with ``session``, ``room_name``, and
+        ``event_type``/``location`` attributes.
+    location_map : LocationMap
+        Mapping built by :func:`build_location_map`.
+    """
+    for paper in papers:
+        if isinstance(paper, dict):
+            session = paper.get("session")
+            room = paper.get("room_name")
+            event_type = paper.get("event_type")
+            paper["location"] = location_map.assign(session, room, event_type)
+        else:
+            session = getattr(paper, "session", None)
+            room = getattr(paper, "room_name", None)
+            event_type = getattr(paper, "event_type", None)
+            paper.location = location_map.assign(session, room, event_type)
+
+
+def build_neurips_location_map(
+    year: int,
+    fetch_text: FetchText,
+    base_url: str = "https://neurips.cc",
+) -> LocationMap:
+    """
+    Build a location map for NeurIPS.
+
+    Parameters
+    ----------
+    year : int
+        Conference year.
+    fetch_text : callable
+        Function fetching a URL and returning its text.
+    base_url : str, optional
+        NeurIPS base URL.
+
+    Returns
+    -------
+    LocationMap
+        Session/room to location mapping.
+    """
+    return build_location_map(year, base_url, fetch_text)
 
 
 class NeurIPSDownloaderPlugin(JSONConferenceDownloaderPlugin):
@@ -87,8 +247,33 @@ class NeurIPSDownloaderPlugin(JSONConferenceDownloaderPlugin):
             Downloaded and validated papers.
         """
         if year >= self._eventhosts_start_year:
-            return super()._download_uncached(year, output_path, options)
+            papers = super()._download_uncached(year, output_path, options)
+            return self._assign_locations(papers, year, options)
         return self._download_legacy(year, output_path, options)
+
+    def _assign_locations(
+        self,
+        papers: List[LightweightPaper],
+        year: int,
+        options: DownloadOptions,
+    ) -> List[LightweightPaper]:
+        """Derive and assign physical locations from the EventHosts site."""
+        try:
+            location_map = build_neurips_location_map(
+                year,
+                lambda url: self._request(
+                    url,
+                    options.timeout,
+                    options.verify_ssl,
+                    request_delay=options.request_delay,
+                ).text,
+            )
+            if location_map.is_multi_location:
+                assign_locations(papers, location_map)
+                logger.info("Assigned locations for NeurIPS %d: %s", year, ", ".join(location_map.locations))
+        except Exception as exc:
+            logger.warning("Could not derive NeurIPS %d locations: %s", year, exc)
+        return papers
 
     def _handle_cached(
         self,
@@ -99,7 +284,10 @@ class NeurIPSDownloaderPlugin(JSONConferenceDownloaderPlugin):
     ) -> List[LightweightPaper]:
         """Retry failed legacy pages when a cache with a failures sidecar is reused."""
         if year >= self._eventhosts_start_year:
-            return super()._handle_cached(cached, year, output_path, options)
+            cached = super()._handle_cached(cached, year, output_path, options)
+            if any(not paper.location for paper in cached):
+                cached = self._assign_locations(cached, year, options)
+            return cached
         failures = FailureSidecar(output_path, self.conference_name, year).load()
         if not failures:
             return cached

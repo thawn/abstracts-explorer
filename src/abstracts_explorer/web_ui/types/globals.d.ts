@@ -60,6 +60,7 @@ interface Window {
     closeSettings?: (...args: any[]) => any;
     handleYearChange?: (...args: any[]) => any;
     handleConferenceChange?: (...args: any[]) => any;
+    handleLocationChange?: (...args: any[]) => any;
     dismissConferenceError?: (...args: any[]) => any;
     dismissDefaultFilterError?: (...args: any[]) => any;
 

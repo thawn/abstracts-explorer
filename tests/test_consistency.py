@@ -126,6 +126,17 @@ class TestConsistentData:
         assert report.scopes_checked == 1
         assert report.embeddings_checked == 1
 
+    def test_progress_callback_reports_stages(self, setup):
+        db, em, *_ = setup
+        events: list[tuple[str, int, int]] = []
+
+        check_consistency(db, em, embedding_model="test-model", progress=lambda *a: events.append(a))
+
+        stages = {stage for stage, _, _ in events}
+        assert "Checking embeddings" in stages
+        assert "Checking clustering cache" in stages
+        assert all(0 <= completed <= total for _, completed, total in events)
+
 
 class TestEmbeddingChecks:
     def test_missing_embedding_is_an_error(self, setup):

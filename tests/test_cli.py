@@ -26,6 +26,7 @@ from abstracts_explorer.cli import (
     create_embeddings_command,
     _download_single,
 )
+from abstracts_explorer.cli._common import _HttpRequestLogFilter
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.plugin import LightweightPaper, get_failed_downloads_path
 from tests.conftest import set_test_db
@@ -4576,6 +4577,82 @@ class TestLogging:
 
         # Effective level of package logger should match root (INFO)
         assert logging.getLogger("abstracts_explorer").getEffectiveLevel() == logging.INFO
+
+    @staticmethod
+    def _clear_http_filter() -> None:
+        httpx_logger = logging.getLogger("httpx2")
+        for existing in list(httpx_logger.filters):
+            if isinstance(existing, _HttpRequestLogFilter):
+                httpx_logger.removeFilter(existing)
+
+    def test_setup_logging_filters_httpx_info_at_info(self, monkeypatch):
+        """HTTP request logs are dropped at INFO verbosity."""
+        from tests.conftest import get_env_test_path
+
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+        get_config(reload=True, env_path=get_env_test_path())
+        self._clear_http_filter()
+        try:
+            setup_logging(1)
+
+            httpx_logger = logging.getLogger("httpx2")
+            request_record = logging.LogRecord("httpx2", logging.INFO, __file__, 1, "HTTP Request", (), None)
+            warning_record = logging.LogRecord("httpx2", logging.WARNING, __file__, 1, "warning", (), None)
+            http_filter = next(f for f in httpx_logger.filters if isinstance(f, _HttpRequestLogFilter))
+
+            assert http_filter.filter(request_record) is False
+            assert http_filter.filter(warning_record) is True
+        finally:
+            self._clear_http_filter()
+
+    def test_setup_logging_allows_httpx_info_at_debug(self, monkeypatch):
+        """HTTP request logs are shown at DEBUG verbosity."""
+        from tests.conftest import get_env_test_path
+
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+        get_config(reload=True, env_path=get_env_test_path())
+        self._clear_http_filter()
+        try:
+            setup_logging(2)
+
+            httpx_logger = logging.getLogger("httpx2")
+            request_record = logging.LogRecord("httpx2", logging.INFO, __file__, 1, "HTTP Request", (), None)
+            http_filter = next(f for f in httpx_logger.filters if isinstance(f, _HttpRequestLogFilter))
+
+            assert http_filter.filter(request_record) is True
+        finally:
+            self._clear_http_filter()
+
+    def test_setup_logging_never_sets_httpx_level(self, monkeypatch):
+        """The httpx2 logger level is left untouched (never raised to WARNING)."""
+        from tests.conftest import get_env_test_path
+
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+        get_config(reload=True, env_path=get_env_test_path())
+        self._clear_http_filter()
+        try:
+            setup_logging(1)
+            assert logging.getLogger("httpx2").level == logging.NOTSET
+        finally:
+            self._clear_http_filter()
+
+    def test_setup_logging_http_filter_idempotent(self, monkeypatch):
+        """Repeated setup_logging calls leave a single request-log filter."""
+        from tests.conftest import get_env_test_path
+
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+        get_config(reload=True, env_path=get_env_test_path())
+        self._clear_http_filter()
+        try:
+            setup_logging(1)
+            setup_logging(2)
+            setup_logging(1)
+
+            httpx_logger = logging.getLogger("httpx2")
+            filters = [f for f in httpx_logger.filters if isinstance(f, _HttpRequestLogFilter)]
+            assert len(filters) == 1
+        finally:
+            self._clear_http_filter()
 
 
 class TestPackageLogging:
