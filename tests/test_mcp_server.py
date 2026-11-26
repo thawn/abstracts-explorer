@@ -864,6 +864,35 @@ class TestTopicEvolutionAndRelevance:
         assert result["topic"] == "deep learning"
         assert mock_db.search.call_args.kwargs["where_filters"] == filters
 
+    @patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager")
+    @patch("abstracts_explorer.mcp.shared_dependencies.get_config")
+    def test_search_papers_forwards_sessions(self, mock_config, mock_db_class, mock_em_class):
+        mock_config.return_value = Mock(collection_name="papers")
+        mock_em_class.return_value = Mock()
+        mock_db = Mock()
+        mock_db_class.return_value = mock_db
+        mock_db.search.return_value = ([{"uid": "p1", "title": "Paper 1"}], None)
+
+        from abstracts_explorer.mcp_server import search_papers
+
+        sessions = ["Oral Session 1", "Spotlight Session"]
+        result = json.loads(
+            search_papers(
+                topic_keywords="llm",
+                conference="NeurIPS",
+                sessions=sessions,
+                years=[2024, 2025],
+            )
+        )
+
+        assert result["papers_found"] == 1
+        assert result["sessions_filter"] == sessions
+        call_kwargs = mock_db.search.call_args.kwargs
+        assert call_kwargs["sessions"] == sessions
+        assert call_kwargs["conferences"] == ["NeurIPS"]
+        assert call_kwargs["years"] == [2024, 2025]
+
     @patch("abstracts_explorer.mcp.tools.visualization.derive_hierarchy_levels")
     @patch("abstracts_explorer.mcp.resources._get_shared_database")
     @patch("abstracts_explorer.mcp.shared_dependencies.get_config")

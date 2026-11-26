@@ -8,6 +8,8 @@ This module tests all plugin-related functionality including:
 - Year/conference field handling
 """
 
+import json
+
 import pytest
 import requests
 import tempfile
@@ -1118,6 +1120,37 @@ class TestICMLPluginYearConference:
         # Verify new fields were added
         assert paper.year == 2025
         assert paper.conference == "ICML"
+
+
+class TestCachedConferenceNormalization:
+    """Cached papers must be re-stamped with the plugin's canonical conference."""
+
+    def test_cached_legacy_conference_is_normalized(self, tmp_path):
+        """A legacy cache label is replaced by the plugin conference name."""
+        plugin = ML4PSDownloaderPlugin()
+        cache_path = tmp_path / "ml4ps_2024.json"
+        cache_path.write_text(
+            json.dumps(
+                [
+                    {
+                        "title": "Cached Paper",
+                        "authors": ["Alice"],
+                        "abstract": "Abstract",
+                        "session": "Session",
+                        "poster_position": "1",
+                        "year": 2024,
+                        "conference": "ML4PS@Neurips",
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        papers = plugin.download(year=2024, output_path=str(cache_path))
+
+        assert len(papers) == 1
+        assert papers[0].conference == "ML4PS"
+        assert papers[0].year == 2024
 
 
 class TestML4PSPluginYearConference:

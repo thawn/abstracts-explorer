@@ -9,6 +9,7 @@ from flask import Request, jsonify, request
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge, UnsupportedMediaType
 
 from abstracts_explorer.utils.http_utils import is_llm_connection_error, is_llm_timeout
+from abstracts_explorer.utils.read_only import ReadOnlyError
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,9 @@ def api_error_handler(func: Optional[Callable[P, R]] = None, *, error_message: O
                 for header, value in exc.headers.items():
                     response.headers[header] = value
                 return response
+            except ReadOnlyError as exc:
+                logger.info("Write blocked in read-only mode in %s: %s", request.endpoint, exc)
+                return jsonify({"error": str(exc)}), 403
             except BadRequest as exc:
                 logger.warning("Invalid request body in %s: %s", request.endpoint, exc)
                 return jsonify({"error": "Invalid JSON request body"}), 400

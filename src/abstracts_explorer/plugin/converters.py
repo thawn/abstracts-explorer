@@ -127,6 +127,9 @@ def convert_to_lightweight_schema(papers: List[Dict[str, Any]]) -> List[Dict[str
         if paper.get("room_name"):
             lightweight_paper["room_name"] = paper["room_name"]
 
+        if paper.get("location"):
+            lightweight_paper["location"] = paper["location"]
+
         keywords = paper.get("keywords")
         if keywords:
             if isinstance(keywords, str):

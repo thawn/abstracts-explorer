@@ -6,10 +6,49 @@
 
 import { API_BASE } from './utils/constants.js';
 import { parseJsonResponse } from './utils/api-utils.js';
-import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
+import { escapeHtml, getSelectedConference, getSelectedLocation, getSelectedYears } from './utils/dom-utils.js';
 import { cancelPendingSearch } from './search.js';
 
 let latestFilterRequest = 0;
+let conferenceYearLocations: Record<string, Record<string, string[]>> = {};
+
+/**
+ * Update the location selector for the active conference/year.
+ *
+ * The selector is only shown when the selected conference-year has more than
+ * one presentation location.
+ */
+export function updateLocationsForConferenceYear(): void {
+    const container = document.getElementById('location-selector-container');
+    const select = document.getElementById('location-selector') as HTMLSelectElement | null;
+    if (!container || !select) return;
+
+    const conference = getSelectedConference();
+    const years = getSelectedYears();
+    const year = years.length === 1 ? String(years[0]) : '';
+    const locations = (conferenceYearLocations[conference] || {})[year] || [];
+
+    if (locations.length <= 1) {
+        container.classList.add('hidden');
+        container.classList.remove('flex');
+        select.innerHTML = '<option value="">All locations</option>';
+        return;
+    }
+
+    const previous = select.value;
+    select.innerHTML = '<option value="">All locations</option>';
+    locations.forEach((location) => {
+        const option = document.createElement('option');
+        option.value = location;
+        option.textContent = location;
+        select.appendChild(option);
+    });
+    if (previous && locations.includes(previous)) {
+        select.value = previous;
+    }
+    container.classList.remove('hidden');
+    container.classList.add('flex');
+}
 
 /**
  * Show the conference URL error banner if window.urlConferenceError is set.
@@ -99,6 +138,86 @@ export function dismissDefaultFilterError(): void {
 }
 
 /**
+ * Populate a multi-select with session names, selecting every option.
+ *
+ * @param select - Target select element, or null to skip
+ * @param sessions - Session names to populate
+ */
+function populateSessionSelect(select: HTMLSelectElement | null, sessions: string[]): void {
+    if (!select) return;
+
+    select.innerHTML = '';
+    sessions.forEach((session) => {
+        const option = document.createElement('option');
+        option.value = session;
+        option.textContent = session;
+        option.selected = true;
+        option.hidden = false;
+        option.style.display = '';
+        select.appendChild(option);
+    });
+}
+
+/**
+ * Determine whether a session option is currently visible after filtering.
+ *
+ * @param option - Option element to inspect
+ * @returns True when the option is visible
+ */
+function isSessionOptionVisible(option: HTMLOptionElement): boolean {
+    return !option.hidden && option.style.display !== 'none';
+}
+
+/**
+ * Filter session options live based on a search query.
+ *
+ * Matching is a case-insensitive substring search over each option's value and
+ * label. Non-matching options are hidden but remain in the DOM so their
+ * selection state is preserved.
+ *
+ * @param selectId - ID of the multi-select to filter
+ * @param query - Search query entered by the user
+ */
+export function filterSessionOptions(selectId: string, query: string): void {
+    const select = document.getElementById(selectId) as HTMLSelectElement | null;
+    if (!select) return;
+
+    const normalized = query.trim().toLowerCase();
+    Array.from(select.options).forEach((option) => {
+        const matches =
+            normalized === '' ||
+            option.value.toLowerCase().includes(normalized) ||
+            (option.textContent?.toLowerCase().includes(normalized) ?? false);
+        option.hidden = !matches;
+        option.style.display = matches ? '' : 'none';
+    });
+}
+
+/**
+ * Clear the session search field and reveal all session options.
+ *
+ * @param focus - Whether to move focus back to the search input
+ */
+export function clearSessionSearch(focus = true): void {
+    const input = document.getElementById('modal-session-search') as HTMLInputElement | null;
+    if (input) {
+        input.value = '';
+        if (focus) {
+            input.focus();
+        }
+    }
+
+    filterSessionOptions('modal-session-filter', '');
+}
+
+/**
+ * Clear the session search field without stealing focus.
+ */
+function resetSessionSearch(): void {
+    clearSessionSearch(false);
+}
+
+/**
  * Load filter options from API.
  */
 export async function loadFilterOptions(): Promise<void> {
@@ -108,22 +227,6 @@ export async function loadFilterOptions(): Promise<void> {
 
         const yearSelect = document.getElementById('year-selector') as HTMLSelectElement | null;
         const conferenceSelect = document.getElementById('conference-selector') as HTMLSelectElement | null;
-        const selectedConference = getSelectedConference();
-        const selectedYears = getSelectedYears();
-
-        const filterParams = new URLSearchParams();
-        if (selectedYears.length === 1) filterParams.append('year', String(selectedYears[0]));
-        if (selectedConference) filterParams.append('conference', selectedConference);
-
-        const filtersResponse = await fetch(`${API_BASE}/api/filters?${filterParams.toString()}`);
-        const filtersData = await parseJsonResponse(filtersResponse);
-
-        if (requestId !== latestFilterRequest) return;
-
-        if (filtersData.error) {
-            console.error('Error loading filters:', filtersData.error);
-            return;
-        }
 
         const availableResponse = await fetch(`${API_BASE}/api/available-filters`);
         const availableData = await parseJsonResponse(availableResponse);
@@ -138,6 +241,7 @@ export async function loadFilterOptions(): Promise<void> {
 
             window.conferenceYearsMap = availableData.conference_years || {};
             window.allYears = availableData.years || [];
+            conferenceYearLocations = availableData.conference_year_locations || {};
 
             let yearsJustPopulated = false;
             if (yearSelect && yearSelect.options.length === 0) {
@@ -207,6 +311,8 @@ export async function loadFilterOptions(): Promise<void> {
                 }
             }
 
+            updateLocationsForConferenceYear();
+
             if (defaultApplied && window.loadStats) {
                 window.loadStats();
             }
@@ -222,25 +328,32 @@ export async function loadFilterOptions(): Promise<void> {
             }
         }
 
-        const sessionSelect = document.getElementById('session-filter') as HTMLSelectElement;
-        sessionSelect.innerHTML = '';
-        filtersData.sessions.forEach((session: string) => {
-            const option = document.createElement('option');
-            option.value = session;
-            option.textContent = session;
-            option.selected = true;
-            sessionSelect.appendChild(option);
-        });
+        const selectedConference = getSelectedConference();
+        const selectedYears = getSelectedYears();
 
-        const chatSessionSelect = document.getElementById('chat-session-filter') as HTMLSelectElement;
-        chatSessionSelect.innerHTML = '';
-        filtersData.sessions.forEach((session: string) => {
-            const option = document.createElement('option');
-            option.value = session;
-            option.textContent = session;
-            option.selected = true;
-            chatSessionSelect.appendChild(option);
-        });
+        const filterParams = new URLSearchParams();
+        if (selectedYears.length === 1) filterParams.append('year', String(selectedYears[0]));
+        if (selectedConference) filterParams.append('conference', selectedConference);
+        const selectedLocation = getSelectedLocation();
+        if (selectedLocation) filterParams.append('location', selectedLocation);
+
+        const filtersResponse = await fetch(`${API_BASE}/api/filters?${filterParams.toString()}`);
+        const filtersData = await parseJsonResponse(filtersResponse);
+
+        if (requestId !== latestFilterRequest) return;
+
+        if (filtersData.error) {
+            console.error('Error loading filters:', filtersData.error);
+            return;
+        }
+
+        const sessionSelect = document.getElementById('session-filter') as HTMLSelectElement | null;
+        const chatSessionSelect = document.getElementById('chat-session-filter') as HTMLSelectElement | null;
+        const modalSessionSelect = document.getElementById('modal-session-filter') as HTMLSelectElement | null;
+
+        populateSessionSelect(sessionSelect, filtersData.sessions);
+        populateSessionSelect(chatSessionSelect, filtersData.sessions);
+        populateSessionSelect(modalSessionSelect, filtersData.sessions);
     } catch (error) {
         console.error('Error loading filter options:', error);
     }
@@ -252,17 +365,21 @@ export async function loadFilterOptions(): Promise<void> {
 export function selectAllFilter(filterId: string): void {
     const select = document.getElementById(filterId) as HTMLSelectElement;
     Array.from(select.options).forEach(option => {
-        option.selected = true;
+        option.selected = isSessionOptionVisible(option);
     });
 }
 
 /**
- * Deselect all options in a filter.
+ * Deselect all visible options in a filter.
+ *
+ * Options hidden by the session search keep their current selection state.
  */
 export function deselectAllFilter(filterId: string): void {
     const select = document.getElementById(filterId) as HTMLSelectElement;
     Array.from(select.options).forEach(option => {
-        option.selected = false;
+        if (isSessionOptionVisible(option)) {
+            option.selected = false;
+        }
     });
 }
 
@@ -271,6 +388,7 @@ export function deselectAllFilter(filterId: string): void {
  */
 export function openSearchSettings(): void {
     syncFiltersToModal('search');
+    resetSessionSearch();
 
     document.getElementById('modal-title')!.textContent = 'Search Settings';
 
@@ -289,6 +407,7 @@ export function openSearchSettings(): void {
  */
 export function openChatSettings(): void {
     syncFiltersToModal('chat');
+    resetSessionSearch();
 
     document.getElementById('modal-title')!.textContent = 'Chat Settings';
 
@@ -326,9 +445,16 @@ export function syncFiltersToModal(context: string): void {
     const sessionFilter = document.getElementById(prefix + 'session-filter') as HTMLSelectElement | null;
     const modalSessionFilter = document.getElementById('modal-session-filter') as HTMLSelectElement | null;
     if (sessionFilter && modalSessionFilter) {
-        if (modalSessionFilter.options.length === 0) {
-            modalSessionFilter.innerHTML = sessionFilter.innerHTML;
+        const sourceValues = Array.from(sessionFilter.options).map((opt) => opt.value);
+        const modalValues = Array.from(modalSessionFilter.options).map((opt) => opt.value);
+        const needsRebuild =
+            sourceValues.length !== modalValues.length ||
+            sourceValues.some((value, idx) => value !== modalValues[idx]);
+
+        if (needsRebuild) {
+            populateSessionSelect(modalSessionFilter, sourceValues);
         }
+
         Array.from(modalSessionFilter.options).forEach((opt, idx) => {
             opt.selected = sessionFilter.options[idx]?.selected || false;
         });
@@ -436,6 +562,42 @@ export function handleConferenceChange(): void {
 }
 
 /**
+ * Handle location selector change.
+ */
+export function handleLocationChange(): void {
+    cancelPendingSearch();
+
+    if (window.loadStats) window.loadStats();
+
+    loadFilterOptions();
+
+    const currentTab = currentActiveTab();
+    if (currentTab === 'interesting') {
+        if (window.loadInterestingPapers) window.loadInterestingPapers();
+    } else if (window.updateInterestingPapersCount) {
+        window.updateInterestingPapersCount();
+    }
+
+    const resultsDiv = document.getElementById('search-results');
+    if (resultsDiv) {
+        resultsDiv.innerHTML = `
+            <div class="text-center text-gray-500 py-12">
+                <i class="fas fa-search text-6xl mb-4 opacity-20"></i>
+                <p class="text-lg">Enter a search query to find abstracts</p>
+                <p class="text-sm">Try "transformer architecture" or "reinforcement learning"</p>
+            </div>
+        `;
+    }
+
+    if (window.resetClusters) {
+        window.resetClusters();
+        if (currentTab === 'clusters' && window.loadClusters) {
+            window.loadClusters();
+        }
+    }
+}
+
+/**
  * Update years dropdown based on selected conference.
  */
 export function updateYearsForConference(): void {
@@ -476,4 +638,6 @@ export function updateYearsForConference(): void {
     } else if (availableYears.length > 0) {
         yearSelect.value = availableYears[0];
     }
+
+    updateLocationsForConferenceYear();
 }

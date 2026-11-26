@@ -30,6 +30,8 @@ from abstracts_explorer.db.errors import (
 )
 from abstracts_explorer.db.session import SessionMixin
 
+from abstracts_explorer.utils.read_only import require_writable
+
 logger = logging.getLogger(__name__)
 
 
@@ -130,6 +132,7 @@ class TransferMixin(SessionMixin):
             if temp_path.exists():
                 temp_path.unlink(missing_ok=True)
 
+    @require_writable()
     def import_papers_from_sqlite(
         self,
         sqlite_path: "Path",
@@ -294,6 +297,7 @@ class TransferMixin(SessionMixin):
         except Exception as e:
             raise DatabaseError(f"Failed to export clustering cache: {str(e)}") from e
 
+    @require_writable()
     def import_clustering_cache_from_json(
         self,
         data: Dict[str, Any],

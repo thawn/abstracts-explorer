@@ -525,6 +525,55 @@ class TestApplicationStartup:
 
 
 # ---------------------------------------------------------------------------
+# 1a. Deployment write mode
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.staging
+@pytest.mark.slow
+class TestStagingWriteMode:
+    """Guard that a staging/production deployment is not accidentally read-only."""
+
+    def test_staging_deployment_is_writable(self, staging_url, staging_page):
+        """
+        Fail when the deployment is read-only; skip when it is writable.
+
+        Production and staging deployments must accept writes so that
+        donation, chat feedback, and data-refresh workflows keep working. A
+        read-only deployment disables those features and cannot be validated
+        by the write-dependent staging checks.
+
+        The test intentionally performs no writes. It only reads
+        ``window.readOnly`` and skips writable deployments so the shared
+        staging database is not contaminated with test data.
+
+        Parameters
+        ----------
+        staging_url : str
+            Base URL of the staging deployment.
+        staging_page : Page
+            Playwright page instance.
+        """
+        staging_page.goto(staging_url)
+        read_only = staging_page.evaluate("window.readOnly === true")
+
+        if read_only:
+            pytest.fail(
+                "This staging deployment is running in read-only mode "
+                "(window.readOnly === true). Donation and chat-feedback flows are "
+                "disabled, and write-dependent staging validation cannot run. "
+                "Staging and production deployments must be writable: unset READ_ONLY "
+                "or set READ_ONLY=false on the deployment and redeploy. Use a separate "
+                "read-only instance only for read-only UI checks."
+            )
+
+        pytest.skip(
+            "The staging deployment is writable; skipping the write probe to avoid "
+            "contaminating its database with test data."
+        )
+
+
+# ---------------------------------------------------------------------------
 # 2. Core search functionality
 # ---------------------------------------------------------------------------
 

@@ -343,6 +343,14 @@
                             onchange="handleYearChange()">
                         </select>
                     </div>
+                    <!-- Location Selector (shown for multi-site conference years) -->
+                    <div id="location-selector-container" class="hidden items-center space-x-2">
+                        <label for="location-selector" class="text-sm font-medium">Location:</label>
+                        <select id="location-selector"
+                            class="px-3 py-2 bg-white/20 text-white rounded-lg border border-white/30 focus:ring-2 focus:ring-white/50 focus:border-transparent backdrop-blur-sm"
+                            onchange="handleLocationChange()">
+                        </select>
+                    </div>
                     <!-- Stats -->
                     <div id="stats">
                         <div class="text-sm opacity-90">Loading stats...</div>
@@ -597,11 +605,13 @@
                         </div>
                         <div class="flex items-center space-x-4">
                             <div id="interesting-controls-actions" class="flex items-center space-x-4 hidden">
+                                {% if not read_only %}
                                 <button id="donate-data-btn" onclick="donateInterestingPapersData()"
                                     class="px-4 py-2 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-lg hover:from-yellow-600 hover:to-orange-600 focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2 shadow-md transition-all"
                                     title="Donate your ratings to help improve the service (fully anonymized)">
                                     <i class="fas fa-heart mr-2"></i>Donate Data
                                 </button>
+                                {% endif %}
                                 <button onclick="saveInterestingPapersAsJSON()"
                                     class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 dark:focus:ring-offset-gray-800"
                                     title="Save rated papers as JSON file">
@@ -946,6 +956,16 @@
                         <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                             Sessions (Ctrl/Cmd+Click for multiple)
                         </label>
+                        <div class="relative mb-2">
+                            <input type="text" id="modal-session-search" placeholder="Search sessions..."
+                                oninput="filterSessionOptions('modal-session-filter', this.value)"
+                                class="w-full pr-10 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-600 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500">
+                            <button type="button" id="modal-session-search-clear" onclick="clearSessionSearch()"
+                                aria-label="Clear session search" title="Clear search"
+                                class="absolute right-2 top-1/2 -translate-y-1/2 px-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
                         <select id="modal-session-filter" multiple size="8"
                             class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100">
                         </select>
@@ -999,6 +1019,9 @@
     </div>
 
     <!-- JavaScript -->
+    <script>
+        window.readOnly = {{ read_only|tojson }};
+    </script>
     {% if url_conference or url_conference_error %}
     <script>
         {% if url_conference %}

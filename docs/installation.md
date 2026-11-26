@@ -267,7 +267,7 @@ Test the web UI:
 abstracts-explorer web-ui
 ```
 
-The web interface should start at <http://127.0.0.1:5000>.
+The web interface should start at <http://127.0.0.1:5001>.
 
 ## Troubleshooting
 

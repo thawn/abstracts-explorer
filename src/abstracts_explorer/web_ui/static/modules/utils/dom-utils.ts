@@ -56,6 +56,19 @@ export function getSelectedConference(): string {
 }
 
 /**
+ * Get the currently selected presentation location from the header selector.
+ * Returns an empty string for "All locations" or when the selector is hidden.
+ *
+ * @returns Selected location name, or '' for all locations
+ */
+export function getSelectedLocation(): string {
+    const container = document.getElementById('location-selector-container');
+    if (!container || container.classList.contains('hidden')) return '';
+    const select = document.getElementById('location-selector') as HTMLSelectElement | null;
+    return select ? select.value : '';
+}
+
+/**
  * Get the currently selected year from the header dropdown.
  * Returns an empty array when no year is selected (empty dropdown).
  *

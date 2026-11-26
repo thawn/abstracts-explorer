@@ -126,6 +126,17 @@ class TestConsistentData:
         assert report.scopes_checked == 1
         assert report.embeddings_checked == 1
 
+    def test_progress_callback_reports_stages(self, setup):
+        db, em, *_ = setup
+        events: list[tuple[str, int, int]] = []
+
+        check_consistency(db, em, embedding_model="test-model", progress=lambda *a: events.append(a))
+
+        stages = {stage for stage, _, _ in events}
+        assert "Checking embeddings" in stages
+        assert "Checking clustering cache" in stages
+        assert all(0 <= completed <= total for _, completed, total in events)
+
 
 class TestEmbeddingChecks:
     def test_missing_embedding_is_an_error(self, setup):
@@ -223,6 +234,45 @@ class TestCacheIntegrity:
         report = check_consistency(db, em, embedding_model="test-model")
 
         assert any(issue.category == "cache-integrity" for issue in report.errors)
+
+    def test_duplicate_presentations_do_not_break_cache_integrity(self, connected_db):
+        connected_db.add_papers(
+            [
+                LightweightPaper(
+                    title="Shared abstract",
+                    authors=["Author"],
+                    abstract="Same abstract",
+                    session="Poster Session",
+                    poster_position="P1",
+                    location="Sydney",
+                    year=2025,
+                    conference="NeurIPS",
+                    original_id="presentation-1",
+                ),
+                LightweightPaper(
+                    title="Shared abstract",
+                    authors=["Author"],
+                    abstract="Same abstract",
+                    session="Oral Session",
+                    poster_position="O1",
+                    location="Paris",
+                    year=2025,
+                    conference="NeurIPS",
+                    original_id="presentation-2",
+                ),
+            ]
+        )
+        connected_db.set_embedding_model("test-model")
+        uids = [paper["uid"] for paper in connected_db.get_paper()]
+        doc = hash_text("Shared abstract\n\nSame abstract")
+        em = FakeEmbeddingsManager({uid: doc for uid in uids})
+        connected_db.clear_clustering_cache()
+        _cache(connected_db, "NeurIPS", 2025, [_point(uids[0])])
+
+        report = check_consistency(connected_db, em, embedding_model="test-model")
+
+        assert not any(issue.category == "cache-integrity" for issue in report.errors)
+        assert report.papers_checked == 1
 
     def test_collection_mismatch_is_a_warning(self, setup):
         db, em, uid, _ = setup

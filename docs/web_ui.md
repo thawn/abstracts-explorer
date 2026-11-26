@@ -36,6 +36,12 @@ The default tab. Type a query and press **Search** to find matching papers.
   (10 / 25 / 50 / 100) and to filter by session or track.
 - **Conference / Year filter** — use the header dropdowns to restrict results
   to a specific conference and year.
+- **Location filter** — for conference years with multiple physical sites
+  (for example NeurIPS 2025 San Diego / Mexico City or NeurIPS 2026 Sydney /
+  Paris / Atlanta) a **Location** dropdown appears next to the year. Choose a
+  site to restrict search, chat, statistics, and clustering to that location.
+  The selection is kept in the URL (`?location=Paris`) and browser storage.
+  Papers presented at multiple sites are shown once with a location badge.
 
 **Rating papers:** Click the stars on any paper card to rate it (1–5 stars).
 Rated papers are automatically saved to the *Interesting Papers* tab.
@@ -154,7 +160,13 @@ automatically identified topic cluster.
 abstracts-explorer web-ui
 ```
 
-**2. Open your browser** at <http://127.0.0.1:5000>.
+**2. Open your browser** at <http://127.0.0.1:5001>.
+
+> **macOS note:** Port 5000 is often occupied by AirPlay Receiver
+> (ControlCenter), which answers with HTTP 403 Forbidden. The web UI therefore
+> defaults to port 5001. If a different port is already in use, choose another
+> with `--port` or disable AirPlay Receiver in
+> System Settings > General > AirDrop & Handoff.
 
 ### Command-line options
 
@@ -165,9 +177,31 @@ abstracts-explorer web-ui [OPTIONS]
 | Option | Description |
 |--------|-------------|
 | `--host TEXT` | Bind address (default: `127.0.0.1`) |
-| `--port INTEGER` | Port number (default: `5000`) |
+| `--port INTEGER` | Port number (default: `5001`) |
 | `--dev` | Use Flask development server instead of Waitress |
+| `--read-only` | Disable database/embedding writes; write APIs return HTTP 403 |
 | `-v` / `-vv` | Increase log verbosity |
+
+Set `READ_ONLY=true` (or pass `--read-only`) to run multiple read-only web
+instances against the same data. See
+[Read-Only Mode](configuration.md#read-only-mode) for details.
+
+#### Features unavailable in read-only mode
+
+These web UI features require database writes and are hidden when the server
+runs in read-only mode:
+
+| Feature | Behavior in read-only mode |
+|---------|----------------------------|
+| **Donate Data** (Interesting Papers) | Button is not shown. |
+| **Donation prompt before ZIP export** | Prompt is skipped; export works normally. |
+| **Chat feedback (thumbs up/down)** | Feedback buttons are not shown on assistant messages. |
+
+Direct calls to the write APIs `/api/donate-data` and `/api/donate-chat` return
+HTTP `403`. Everything else remains available: search and filters, chat and MCP
+tools, clustering views, statistics, locally stored Interesting Papers ratings,
+Save/Load JSON, and ZIP export. Ratings stay in the browser's `localStorage`
+and are never uploaded in read-only mode.
 
 ### Docker / Podman
 

@@ -35,11 +35,14 @@ import {
     loadFilterOptions,
     selectAllFilter,
     deselectAllFilter,
+    filterSessionOptions,
+    clearSessionSearch,
     openSearchSettings,
     openChatSettings,
     closeSettings,
     handleYearChange,
     handleConferenceChange,
+    handleLocationChange,
     dismissConferenceError,
     dismissDefaultFilterError
 } from './modules/filters.js';
@@ -198,11 +201,14 @@ function attachToWindow(): void {
 
     window.selectAllFilter = selectAllFilter;
     window.deselectAllFilter = deselectAllFilter;
+    window.filterSessionOptions = filterSessionOptions;
+    window.clearSessionSearch = clearSessionSearch;
     window.openSearchSettings = openSearchSettings;
     window.openChatSettings = openChatSettings;
     window.closeSettings = closeSettings;
     window.handleYearChange = handleYearChange;
     window.handleConferenceChange = handleConferenceChange;
+    window.handleLocationChange = handleLocationChange;
     window.dismissConferenceError = dismissConferenceError;
     window.dismissDefaultFilterError = dismissDefaultFilterError;
 

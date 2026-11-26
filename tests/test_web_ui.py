@@ -149,6 +149,39 @@ class TestWebInterface:
         finally:
             web_app_module._config.imprint_link = original_imprint_link
 
+    def test_index_read_only_hides_donation_and_sets_flag(self, client):
+        """Read-only mode sets window.readOnly and omits the donate button."""
+        import importlib
+
+        web_app_module = importlib.import_module("abstracts_explorer.web_ui.app")
+
+        original_read_only = web_app_module._config.read_only
+        try:
+            web_app_module._config.read_only = True
+            response = client.get("/")
+            assert response.status_code == 200
+            assert b"window.readOnly = true;" in response.data
+            assert b"donate-data-btn" not in response.data
+            assert b"Donate Data" not in response.data
+        finally:
+            web_app_module._config.read_only = original_read_only
+
+    def test_index_writable_shows_donation_and_sets_flag(self, client):
+        """Writable mode sets window.readOnly to false and shows the donate button."""
+        import importlib
+
+        web_app_module = importlib.import_module("abstracts_explorer.web_ui.app")
+
+        original_read_only = web_app_module._config.read_only
+        try:
+            web_app_module._config.read_only = False
+            response = client.get("/")
+            assert response.status_code == 200
+            assert b"window.readOnly = false;" in response.data
+            assert b"donate-data-btn" in response.data
+        finally:
+            web_app_module._config.read_only = original_read_only
+
     def test_stats_endpoint_no_db(self, client):
         """Test stats endpoint when database doesn't exist."""
         response = client.get("/api/stats")
@@ -182,6 +215,7 @@ class TestWebInterface:
 
         mock_db = MagicMock()
         mock_db.get_conference_years_from_db.return_value = conferences_with_years
+        mock_db.get_conference_year_locations.return_value = {}
         mock_db.get_conferences.return_value = sorted(conferences_with_years.keys())
         mock_db.get_years.side_effect = lambda conference=None: (
             conferences_with_years.get(conference, [])
@@ -1194,6 +1228,38 @@ class TestWebUIChatEndpointSuccess:
                     assert call_kwargs.kwargs["limit"] == 5
                     assert call_kwargs.kwargs["conferences"] is None
                     assert call_kwargs.kwargs["years"] is None
+                    assert call_kwargs.kwargs["sessions"] is None
+
+    def test_chat_forwards_sessions(self):
+        """Test that the session filter is forwarded to RAG chat."""
+        from abstracts_explorer.web_ui.app import app
+
+        with app.test_client() as client:
+            with patch("abstracts_explorer.web_ui.request_services.get_rag_chat") as mock_get_rag:
+                with patch("abstracts_explorer.web_ui.request_services.get_config") as mock_get_config:
+                    mock_config = Mock()
+                    mock_config.max_context_papers = 3
+                    mock_get_config.return_value = mock_config
+
+                    mock_rag = Mock()
+                    mock_rag.query.return_value = {
+                        "response": "Test",
+                        "papers": [],
+                        "metadata": {},
+                    }
+                    mock_get_rag.return_value = mock_rag
+
+                    response = client.post(
+                        "/api/chat",
+                        json={
+                            "message": "Show oral papers",
+                            "sessions": ["Oral Session 1", "Spotlight Session"],
+                        },
+                    )
+
+        assert response.status_code == 200
+        call_kwargs = mock_rag.query.call_args
+        assert call_kwargs.kwargs["sessions"] == ["Oral Session 1", "Spotlight Session"]
 
     def test_chat_forwards_paper_priorities(self):
         """Test that interesting-paper ratings are forwarded to RAG chat."""
@@ -1820,6 +1886,75 @@ class TestWebUIRunServer:
                 with pytest.raises(SystemExit) as exc_info:
                     sigterm_handler(signal_module.SIGTERM, None)
                 assert exc_info.value.code == 0
+
+
+class TestPortConflictDetection:
+    """Test detection of an already-bound web UI port."""
+
+    def test_port_in_use_returns_true_for_bound_port(self):
+        """A listening socket on the probe host is detected as in use."""
+        import socket
+
+        from abstracts_explorer.web_ui.app import _port_in_use
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            sock.listen(1)
+            port = sock.getsockname()[1]
+            assert _port_in_use("127.0.0.1", port) is True
+
+    def test_port_in_use_returns_false_for_free_port(self):
+        """A closed port is reported as free."""
+        import socket
+
+        from abstracts_explorer.web_ui.app import _port_in_use
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        assert _port_in_use("127.0.0.1", port) is False
+
+    def test_run_server_warns_on_port_conflict(self, capsys):
+        """run_server warns with an AirPlay hint when the port is already bound."""
+        from abstracts_explorer.web_ui import run_server
+
+        with (
+            patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=True),
+            patch("abstracts_explorer.web_ui.app._port_in_use", return_value=True),
+            patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config,
+        ):
+            mock_cfg = Mock()
+            mock_cfg.database_url = "sqlite:////some/path/test.db"
+            mock_cfg.embedding_db_path = "/some/path/chroma_db"
+            mock_cfg.web_ui_threads = 6
+            mock_config.return_value = mock_cfg
+
+            with patch("waitress.serve", side_effect=KeyboardInterrupt()):
+                with pytest.raises(KeyboardInterrupt):
+                    run_server(host="127.0.0.1", port=5000)
+
+        captured = capsys.readouterr()
+        assert "already in use" in captured.err
+        assert "AirPlay" in captured.err
+
+    def test_run_server_reports_bind_failure_with_hint(self):
+        """A bind failure is converted into an actionable ValueError."""
+        from abstracts_explorer.web_ui import run_server
+
+        with (
+            patch("abstracts_explorer.web_ui.app.os.path.exists", return_value=True),
+            patch("abstracts_explorer.web_ui.app._port_in_use", return_value=False),
+            patch("abstracts_explorer.web_ui.request_services.get_config") as mock_config,
+        ):
+            mock_cfg = Mock()
+            mock_cfg.database_url = "sqlite:////some/path/test.db"
+            mock_cfg.embedding_db_path = "/some/path/chroma_db"
+            mock_cfg.web_ui_threads = 6
+            mock_config.return_value = mock_cfg
+
+            with patch("waitress.serve", side_effect=OSError("Address already in use")):
+                with pytest.raises(ValueError, match="already in use"):
+                    run_server(host="127.0.0.1", port=5000)
 
 
 class TestConferencePluginMapping:
@@ -2822,6 +2957,7 @@ class TestClusteringEndpoint:
                     ]
                     mock_db.find_paper_ids_within_distance.return_value = [("paper1", 0.5), ("paper2", 1.0)]
                     mock_db.get_result_details.return_value = cluster_papers
+                    mock_db.group_papers_by_content.side_effect = lambda papers: papers
 
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
@@ -2871,6 +3007,7 @@ class TestClusteringEndpoint:
                     # Mock find_paper_ids_within_distance to return no matches
                     mock_db.find_paper_ids_within_distance.return_value = []
                     mock_db.get_result_details.return_value = []
+                    mock_db.group_papers_by_content.side_effect = lambda papers: papers
 
                     mock_get_em.return_value = mock_em
                     mock_get_db.return_value = mock_db
@@ -3703,6 +3840,7 @@ class TestWebInputHardeningAndRateLimits:
         mock_db = MagicMock()
         mock_db.find_paper_ids_within_distance.return_value = []
         mock_db.get_result_details.return_value = []
+        mock_db.group_papers_by_content.side_effect = lambda papers: papers
         mock_config = Mock(web_rate_limit_per_minute=2)
 
         with patch("abstracts_explorer.web_ui.rate_limit.get_config", return_value=mock_config):
@@ -3723,6 +3861,7 @@ class TestWebInputHardeningAndRateLimits:
         mock_db = MagicMock()
         mock_db.find_paper_ids_within_distance.return_value = []
         mock_db.get_result_details.return_value = []
+        mock_db.group_papers_by_content.side_effect = lambda papers: papers
         mock_config = Mock(web_rate_limit_per_minute=0)
 
         with patch("abstracts_explorer.web_ui.rate_limit.get_config", return_value=mock_config):

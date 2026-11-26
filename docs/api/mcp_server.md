@@ -32,9 +32,10 @@ evolution = get_topic_evolution(
     end_year=2025,
 )
 
-# Search for papers on a topic
+# Search for papers on a topic, optionally restricted to sessions
 results = search_papers(
     topic_keywords="reinforcement learning",
+    sessions=["Oral Session 1"],
     limit=10,
 )
 

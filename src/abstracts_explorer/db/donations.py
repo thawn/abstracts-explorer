@@ -19,12 +19,15 @@ from abstracts_explorer.db_models import (
 from abstracts_explorer.db.errors import DatabaseError
 from abstracts_explorer.db.session import SessionMixin
 
+from abstracts_explorer.utils.read_only import require_writable
+
 logger = logging.getLogger(__name__)
 
 
 class DonationsMixin(SessionMixin):
     """User-donated validation data and chat transcripts."""
 
+    @require_writable()
     def donate_validation_data(self, paper_priorities: Dict[str, Dict[str, Any]]) -> int:
         """
         Store donated paper rating data for validation purposes.
@@ -92,6 +95,7 @@ class DonationsMixin(SessionMixin):
             logger.error(f"Error donating validation data: {e}", exc_info=True)
             raise DatabaseError(f"Failed to donate validation data: {e}")
 
+    @require_writable()
     def donate_chat_transcript(self, rating: str, transcript: List[Dict[str, str]]) -> int:
         """
         Store a donated chat transcript with thumbs up/down feedback.
@@ -372,6 +376,7 @@ class DonationsMixin(SessionMixin):
             logger.error(f"Error retrieving validation data stats: {e}", exc_info=True)
             raise self._db_error("Failed to retrieve validation data stats", e)
 
+    @require_writable()
     def delete_chat_donations(self, ids: Optional[List[int]] = None) -> int:
         """
         Delete donated chat transcripts.
@@ -417,6 +422,7 @@ class DonationsMixin(SessionMixin):
             logger.error(f"Error deleting chat donations: {e}", exc_info=True)
             raise DatabaseError(f"Failed to delete chat donations: {e}")
 
+    @require_writable()
     def delete_validation_data(self, ids: Optional[List[int]] = None) -> int:
         """
         Delete donated validation (interesting-paper) data.

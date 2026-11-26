@@ -6,7 +6,7 @@
 
 import { API_BASE } from './utils/constants.js';
 import { parseJsonResponse } from './utils/api-utils.js';
-import { escapeHtml, getSelectedConference, getSelectedYears } from './utils/dom-utils.js';
+import { escapeHtml, getSelectedConference, getSelectedLocation, getSelectedYears } from './utils/dom-utils.js';
 import { setCurrentTab } from './state.js';
 import { getInterestingPapersSortOrder } from './state.js';
 import { areClustersLoaded } from './clustering.js';
@@ -59,10 +59,12 @@ export async function loadStats(): Promise<void> {
     try {
         const selectedYears = getSelectedYears();
         const selectedConference = getSelectedConference();
+        const selectedLocation = getSelectedLocation();
 
         const statsParams = new URLSearchParams();
         if (selectedYears.length === 1) statsParams.append('year', String(selectedYears[0]));
         if (selectedConference) statsParams.append('conference', selectedConference);
+        if (selectedLocation) statsParams.append('location', selectedLocation);
 
         const response = await fetch(`${API_BASE}/api/stats?${statsParams.toString()}`);
         const data = await parseJsonResponse(response);
@@ -90,12 +92,16 @@ export async function loadStats(): Promise<void> {
         } else {
             displayText = 'All Papers';
         }
+        if (selectedLocation) {
+            displayText = `${displayText} · ${selectedLocation}`;
+        }
 
         const statsBox = document.getElementById('stats') as HTMLElement;
         statsBox.innerHTML = '';
         const totalLine = document.createElement('div');
         totalLine.className = 'text-sm font-semibold';
-        totalLine.textContent = `${data.total_papers.toLocaleString()} Abstracts`;
+        const uniquePapers = data.unique_papers ?? data.total_papers;
+        totalLine.textContent = `${uniquePapers.toLocaleString()} Papers`;
         const contextLine = document.createElement('div');
         contextLine.className = 'text-xs opacity-90';
         contextLine.textContent = displayText;

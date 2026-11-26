@@ -26,6 +26,7 @@ from abstracts_explorer.cli import (
     create_embeddings_command,
     _download_single,
 )
+from abstracts_explorer.cli._common import _HttpRequestLogFilter
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.plugin import LightweightPaper, get_failed_downloads_path
 from tests.conftest import set_test_db
@@ -2796,7 +2797,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em_class.return_value = Mock()
             mock_compute.return_value = {
@@ -2836,7 +2837,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -2880,7 +2881,7 @@ class TestCLI:
         with (
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em_class.return_value = Mock()
 
@@ -2919,7 +2920,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -2964,7 +2965,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em_class.return_value = Mock()
             mock_compute.return_value = mock_results
@@ -3004,7 +3005,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -3056,7 +3057,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -3102,7 +3103,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em_class.return_value = Mock()
             mock_compute.side_effect = Exception("Clustering failed")
@@ -3141,7 +3142,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -3187,7 +3188,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -3277,7 +3278,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -3513,6 +3514,15 @@ class TestWebUICommand:
 
         assert exit_code == 0
         mock_run_server.assert_called_once_with(host="127.0.0.1", port=5000, debug=False, dev=False, threads=10)
+
+    def test_web_ui_default_port_avoids_airplay(self):
+        """The web-ui default port does not collide with macOS AirPlay (5000)."""
+        from abstracts_explorer.cli.parsers import build_parser
+
+        parser, _ = build_parser(Config())
+
+        args = parser.parse_args(["web-ui"])
+        assert args.port == 5001
 
     def test_web_ui_threads_default_from_config(self):
         """The web-ui --threads default comes from the loaded config."""
@@ -4567,6 +4577,82 @@ class TestLogging:
 
         # Effective level of package logger should match root (INFO)
         assert logging.getLogger("abstracts_explorer").getEffectiveLevel() == logging.INFO
+
+    @staticmethod
+    def _clear_http_filter() -> None:
+        httpx_logger = logging.getLogger("httpx2")
+        for existing in list(httpx_logger.filters):
+            if isinstance(existing, _HttpRequestLogFilter):
+                httpx_logger.removeFilter(existing)
+
+    def test_setup_logging_filters_httpx_info_at_info(self, monkeypatch):
+        """HTTP request logs are dropped at INFO verbosity."""
+        from tests.conftest import get_env_test_path
+
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+        get_config(reload=True, env_path=get_env_test_path())
+        self._clear_http_filter()
+        try:
+            setup_logging(1)
+
+            httpx_logger = logging.getLogger("httpx2")
+            request_record = logging.LogRecord("httpx2", logging.INFO, __file__, 1, "HTTP Request", (), None)
+            warning_record = logging.LogRecord("httpx2", logging.WARNING, __file__, 1, "warning", (), None)
+            http_filter = next(f for f in httpx_logger.filters if isinstance(f, _HttpRequestLogFilter))
+
+            assert http_filter.filter(request_record) is False
+            assert http_filter.filter(warning_record) is True
+        finally:
+            self._clear_http_filter()
+
+    def test_setup_logging_allows_httpx_info_at_debug(self, monkeypatch):
+        """HTTP request logs are shown at DEBUG verbosity."""
+        from tests.conftest import get_env_test_path
+
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+        get_config(reload=True, env_path=get_env_test_path())
+        self._clear_http_filter()
+        try:
+            setup_logging(2)
+
+            httpx_logger = logging.getLogger("httpx2")
+            request_record = logging.LogRecord("httpx2", logging.INFO, __file__, 1, "HTTP Request", (), None)
+            http_filter = next(f for f in httpx_logger.filters if isinstance(f, _HttpRequestLogFilter))
+
+            assert http_filter.filter(request_record) is True
+        finally:
+            self._clear_http_filter()
+
+    def test_setup_logging_never_sets_httpx_level(self, monkeypatch):
+        """The httpx2 logger level is left untouched (never raised to WARNING)."""
+        from tests.conftest import get_env_test_path
+
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+        get_config(reload=True, env_path=get_env_test_path())
+        self._clear_http_filter()
+        try:
+            setup_logging(1)
+            assert logging.getLogger("httpx2").level == logging.NOTSET
+        finally:
+            self._clear_http_filter()
+
+    def test_setup_logging_http_filter_idempotent(self, monkeypatch):
+        """Repeated setup_logging calls leave a single request-log filter."""
+        from tests.conftest import get_env_test_path
+
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+        get_config(reload=True, env_path=get_env_test_path())
+        self._clear_http_filter()
+        try:
+            setup_logging(1)
+            setup_logging(2)
+            setup_logging(1)
+
+            httpx_logger = logging.getLogger("httpx2")
+            filters = [f for f in httpx_logger.filters if isinstance(f, _HttpRequestLogFilter)]
+            assert len(filters) == 1
+        finally:
+            self._clear_http_filter()
 
 
 class TestPackageLogging:

@@ -99,6 +99,11 @@ class Paper(Base):
         Publication year.
     conference : str, optional
         Conference name (e.g., "NeurIPS", "ICLR").
+    location : str, optional
+        Physical location (city/site) where this presentation takes place.
+    content_hash : str, optional
+        SHA-256 content hash of the title and abstract. Identical
+        presentations of the same abstract share this value.
     created_at : datetime
         Timestamp when record was created.
     """
@@ -122,6 +127,8 @@ class Paper(Base):
     award = Column(String, nullable=True)
     year = Column(Integer, nullable=True, index=True)
     conference = Column(String, nullable=True, index=True)
+    location = Column(String, nullable=True, index=True)
+    content_hash = Column(String(71), nullable=True, index=True)
     created_at = timestamp_column()
 
     def __repr__(self) -> str:

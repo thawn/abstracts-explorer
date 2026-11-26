@@ -119,3 +119,8 @@ Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
 ## Alpha status
 
 - no backwards compatibility needed yet, but the public API is expected to stabilize in the future.
+
+## Extra instructions
+
+- Never pipe slow commands through `tail`; it masks the exit code and breaks error handling/timeouts. Run the command on its own (`<cmd>`), or redirect and inspect separately: `<cmd> >> <log_file>; tail -20 <log_file>`. Piping fast/verbose commands is fine.
+- Never write to a database file in the source tree; use a temp path or `:memory:` for tests.

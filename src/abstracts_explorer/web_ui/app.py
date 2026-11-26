@@ -8,10 +8,12 @@ and exploring the abstracts database.
 import os
 import secrets
 import signal
+import socket
 import sys
 import logging
 import json
 from pathlib import Path
+from typing import List
 from flask import Flask, Response, render_template, request, jsonify, send_file, abort
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -177,6 +179,7 @@ def index():
     return render_template(
         "index.html",
         version=__version__,
+        read_only=_config.read_only,
         imprint_link=_config.imprint_link,
         url_conference=None,
         url_conference_error=None,
@@ -222,6 +225,7 @@ def conference_index(conference_name):
             render_template(
                 "index.html",
                 version=__version__,
+                read_only=_config.read_only,
                 imprint_link=_config.imprint_link,
                 url_conference=None,
                 url_conference_error={"message": "Conference data is temporarily unavailable."},
@@ -235,6 +239,7 @@ def conference_index(conference_name):
             render_template(
                 "index.html",
                 version=__version__,
+                read_only=_config.read_only,
                 imprint_link=_config.imprint_link,
                 url_conference=None,
                 url_conference_error={"message": "Unable to load conference information."},
@@ -248,6 +253,7 @@ def conference_index(conference_name):
         render_template(
             "index.html",
             version=__version__,
+            read_only=_config.read_only,
             imprint_link=_config.imprint_link,
             url_conference=result["conference"],
             url_conference_error=result["error"],
@@ -279,6 +285,56 @@ def health():
         return jsonify({"status": "unhealthy", "error": "Service unavailable"}), 503
 
 
+def _filter_cluster_results_by_locations(cached: dict, locations: List[str]) -> dict:
+    """
+    Filter cached clustering points to the selected presentation locations.
+
+    Recomputes cluster statistics and centers for the visible subset. Cluster
+    labels and hierarchy are kept because they describe the full clustering.
+    """
+    selected = set(locations)
+    points = []
+    for point in cached.get("points", []):
+        point_locations = point.get("locations")
+        if not point_locations:
+            single = point.get("location")
+            point_locations = [single] if single else []
+        if selected & set(point_locations):
+            points.append(point)
+
+    cached["points"] = points
+    counts: dict = {}
+    for point in points:
+        cluster_id = point.get("cluster")
+        if cluster_id is None:
+            continue
+        counts[cluster_id] = counts.get(cluster_id, 0) + 1
+
+    cluster_sizes = {int(key): int(value) for key, value in counts.items() if int(key) >= 0}
+    n_noise = sum(1 for point in points if point.get("cluster") == -1)
+    statistics = dict(cached.get("statistics") or {})
+    statistics.update(
+        {
+            "cluster_sizes": cluster_sizes,
+            "n_clusters": len(cluster_sizes),
+            "n_noise": n_noise,
+            "total_papers": len(points),
+        }
+    )
+    cached["statistics"] = statistics
+
+    centers = {}
+    for cluster_id in cluster_sizes:
+        cluster_points = [point for point in points if point.get("cluster") == cluster_id]
+        if cluster_points:
+            centers[cluster_id] = {
+                "x": sum(point.get("x", 0.0) for point in cluster_points) / len(cluster_points),
+                "y": sum(point.get("y", 0.0) for point in cluster_points) / len(cluster_points),
+            }
+    cached["cluster_centers"] = centers
+    return cached
+
+
 @app.route("/api/stats")
 @api_error_handler
 def stats():
@@ -295,9 +351,14 @@ def stats():
         Statistics including paper count, year, and conference
     """
     conference, year = get_conference_year_params(request)
+    location = request.args.get("location")
 
     database = services.get_database()
-    stats_data = database.get_stats(year=year, conference=conference)
+    stats_data = database.get_stats(
+        year=year,
+        conference=conference,
+        locations=[location] if location else None,
+    )
 
     return jsonify(stats_data)
 
@@ -368,9 +429,10 @@ def get_filters():
         Dictionary with sessions list filtered by the given conference/year
     """
     conference, year = get_conference_year_params(request)
+    location = request.args.get("location")
 
     database = services.get_database()
-    sessions = database.get_sessions(conference=conference, year=year)
+    sessions = database.get_sessions(conference=conference, year=year, location=location)
     return jsonify({"sessions": sessions})
 
 
@@ -397,6 +459,7 @@ def get_available_filters_endpoint() -> Response:
     database = services.get_database()
 
     db_conference_years = database.get_conference_years_from_db()
+    conference_year_locations = database.get_conference_year_locations()
 
     conferences = sorted(db_conference_years.keys())
     all_years: set[int] = set()
@@ -413,6 +476,7 @@ def get_available_filters_endpoint() -> Response:
             "conferences": conferences,
             "years": years_sorted,
             "conference_years": db_conference_years,
+            "conference_year_locations": conference_year_locations,
             "default_conference": default_result["conference"],
             "default_year": default_result["year"],
             "default_conference_error": default_result["error"],
@@ -447,6 +511,7 @@ def search():
     sessions = coerce_str_list(data.get("sessions", []), "sessions", max_items=_MAX_FILTER_ITEMS)
     years = coerce_int_list(data.get("years", []), "years", max_items=_MAX_FILTER_ITEMS)
     conferences = coerce_str_list(data.get("conferences", []), "conferences", max_items=_MAX_FILTER_ITEMS)
+    locations = coerce_str_list(data.get("locations", []), "locations", max_items=_MAX_FILTER_ITEMS)
     distance_threshold = coerce_number(
         data.get("distance_threshold"),
         "distance_threshold",
@@ -469,6 +534,7 @@ def search():
         sessions=sessions,
         years=years,
         conferences=conferences,
+        locations=locations,
         use_embeddings=use_embeddings,
         distance_threshold=distance_threshold,
         embeddings_manager=embeddings_manager,
@@ -590,6 +656,7 @@ def chat():
         raise ApiError(f"paper_priorities must contain at most {_MAX_PRIORITY_ENTRIES} entries", 400)
 
     # Get filters
+    sessions = coerce_str_list(data.get("sessions", []), "sessions", max_items=_MAX_FILTER_ITEMS)
     years = coerce_int_list(data.get("years", []), "years", max_items=_MAX_FILTER_ITEMS)
     conferences = coerce_str_list(data.get("conferences", []), "conferences", max_items=_MAX_FILTER_ITEMS)
 
@@ -607,6 +674,7 @@ def chat():
             limit=n_papers,
             conferences=conferences if conferences else None,
             years=years if years else None,
+            sessions=sessions if sessions else None,
             available_conferences=available_conferences,
             paper_priorities=paper_priorities,
         )
@@ -662,6 +730,7 @@ def compute_clusters():
 
     conferences = coerce_str_list(data.get("conferences"), "conferences", max_items=_MAX_FILTER_ITEMS) or None
     years = coerce_int_list(data.get("years"), "years", max_items=_MAX_FILTER_ITEMS) or None
+    locations = coerce_str_list(data.get("locations"), "locations", max_items=_MAX_FILTER_ITEMS) or None
     hierarchy_levels = coerce_limit(
         data.get("hierarchy_levels"),
         default=DEFAULT_NR_LEVELS,
@@ -714,6 +783,8 @@ def compute_clusters():
                 "'abstracts-explorer clustering pre-generate --force'.",
                 409,
             )
+        if locations:
+            cached = _filter_cluster_results_by_locations(cached, locations)
         cached["hierarchy"] = derive_hierarchy_levels(
             cached,
             nr_levels=hierarchy_levels,
@@ -776,6 +847,7 @@ def search_custom_cluster():
     )
     conferences = coerce_str_list(data.get("conferences"), "conferences", max_items=_MAX_FILTER_ITEMS) or None
     years = coerce_int_list(data.get("years"), "years", max_items=_MAX_FILTER_ITEMS) or None
+    locations = coerce_str_list(data.get("locations"), "locations", max_items=_MAX_FILTER_ITEMS) or None
 
     # Get embeddings manager and database
     enforce_client_rate_limit(_client_id())
@@ -788,8 +860,9 @@ def search_custom_cluster():
         distance_threshold,
         conferences=conferences,
         years=years,
+        locations=locations,
     )
-    papers = database.get_result_details(matches, slice(0, _MAX_CLUSTER_RESULTS))
+    papers = database.group_papers_by_content(database.get_result_details(matches, slice(0, _MAX_CLUSTER_RESULTS)))
     return jsonify(
         {
             "query": query,
@@ -1101,7 +1174,41 @@ def internal_error(e):
     return jsonify({"error": "Internal server error"}), 500
 
 
-def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=None):
+def _port_conflict_message(host: str, port: int) -> str:
+    """Return an actionable message for an already occupied web UI port."""
+    return (
+        f"Port {port} on {host} is already in use. On macOS, port 5000 is often "
+        "occupied by AirPlay Receiver, which answers with HTTP 403 Forbidden. "
+        "Choose another port with --port or disable AirPlay Receiver in "
+        "System Settings > General > AirDrop & Handoff."
+    )
+
+
+def _port_in_use(host: str, port: int) -> bool:
+    """
+    Return True when a TCP listener already accepts connections on host:port.
+
+    Parameters
+    ----------
+    host : str
+        Host the web UI would bind to.
+    port : int
+        Port the web UI would bind to.
+
+    Returns
+    -------
+    bool
+        ``True`` if something is already listening, otherwise ``False``.
+    """
+    probe_host = "127.0.0.1" if host in ("", "0.0.0.0", "::", "localhost") else host
+    try:
+        with socket.create_connection((probe_host, port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def run_server(host="127.0.0.1", port=5001, debug=False, dev=False, threads=None):
     """
     Run the Flask web server.
 
@@ -1110,7 +1217,7 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=None
     host : str
         Host to bind to (default: 127.0.0.1)
     port : int
-        Port to bind to (default: 5000)
+        Port to bind to (default: 5001)
     debug : bool
         Enable debug mode (default: False)
     dev : bool
@@ -1122,7 +1229,7 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=None
     Raises
     ------
     ValueError
-        If threads is less than 1.
+        If threads is less than 1 or the port is already occupied.
     FileNotFoundError
         If the database file does not exist.
     """
@@ -1166,6 +1273,12 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=None
     # Print embeddings configuration
     print(f"Embeddings: {config.embedding_db}")
 
+    if config.read_only:
+        print("Mode: read-only (database and embedding writes are disabled)")
+
+    if _port_in_use(host, port):
+        print(f"\n⚠️  {_port_conflict_message(host, port)}", file=sys.stderr)
+
     print(f"Server: http://{host}:{port}")
 
     # Register SIGTERM handler for graceful shutdown (e.g., docker stop).
@@ -1175,33 +1288,36 @@ def run_server(host="127.0.0.1", port=5000, debug=False, dev=False, threads=None
 
     services.start_chat_history_cleanup()
 
-    # Use Flask development server if explicitly requested
-    if dev:
-        print("\n⚠️  Using Flask development server (not suitable for production)")
-        print("   Use without --dev flag for production server")
-        print("\nPress CTRL+C to stop the server")
-        # LGTM: Debug mode only used when explicitly requested via --dev flag or -vv
-        # This is intentionally for development/debugging purposes only
-        app.run(host=host, port=port, debug=debug)
-    else:
-        # Use Waitress production server (debug mode works with Waitress too)
-        try:
-            from waitress import serve  # type: ignore[import-untyped]
-
-            print("\n✅ Using Waitress production WSGI server")
-            if debug:
-                print("⚠️  Debug mode enabled (logging level set to DEBUG via -vv)")
-            print(f"Waitress threads: {threads}")
+    try:
+        # Use Flask development server if explicitly requested
+        if dev:
+            print("\n⚠️  Using Flask development server (not suitable for production)")
+            print("   Use without --dev flag for production server")
             print("\nPress CTRL+C to stop the server")
-            # Set Flask debug mode even with Waitress for better error messages
-            app.debug = debug
-            serve(app, host=host, port=port, threads=threads)
-        except ImportError:
-            print("\n⚠️  Waitress not installed, falling back to Flask development server", file=sys.stderr)
-            print("   Install Waitress with: pip install waitress", file=sys.stderr)
-            print("   Or install web extras: pip install abstracts-explorer[web]", file=sys.stderr)
-            print("\nPress CTRL+C to stop the server")
+            # LGTM: Debug mode only used when explicitly requested via --dev flag or -vv
+            # This is intentionally for development/debugging purposes only
             app.run(host=host, port=port, debug=debug)
+        else:
+            # Use Waitress production server (debug mode works with Waitress too)
+            try:
+                from waitress import serve  # type: ignore[import-untyped]
+
+                print("\n✅ Using Waitress production WSGI server")
+                if debug:
+                    print("⚠️  Debug mode enabled (logging level set to DEBUG via -vv)")
+                print(f"Waitress threads: {threads}")
+                print("\nPress CTRL+C to stop the server")
+                # Set Flask debug mode even with Waitress for better error messages
+                app.debug = debug
+                serve(app, host=host, port=port, threads=threads)
+            except ImportError:
+                print("\n⚠️  Waitress not installed, falling back to Flask development server", file=sys.stderr)
+                print("   Install Waitress with: pip install waitress", file=sys.stderr)
+                print("   Or install web extras: pip install abstracts-explorer[web]", file=sys.stderr)
+                print("\nPress CTRL+C to stop the server")
+                app.run(host=host, port=port, debug=debug)
+    except OSError as exc:
+        raise ValueError(_port_conflict_message(host, port)) from exc
 
 
 if __name__ == "__main__":
@@ -1209,7 +1325,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Abstracts Explorer Web Interface")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
-    parser.add_argument("--port", type=int, default=5000, help="Port to bind to")
+    parser.add_argument("--port", type=int, default=5001, help="Port to bind to")
     parser.add_argument(
         "--debug",
         action="store_true",

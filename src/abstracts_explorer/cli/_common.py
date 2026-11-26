@@ -12,9 +12,75 @@ from typing import Any, Dict, Optional, Tuple
 
 
 from abstracts_explorer.config import Config, get_config
-from abstracts_explorer.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
+
+
+class _HttpRequestLogFilter(logging.Filter):
+    """
+    Drop HTTP client request logs unless DEBUG verbosity is enabled.
+
+    ``httpx2`` emits one INFO record per HTTP request. Those records are
+    useful when debugging the LLM/embedding backend but noisy during normal
+    operation, so they are filtered out unless DEBUG is active. The logger's
+    level is left untouched so its own warnings and errors still propagate.
+
+    Attributes
+    ----------
+    allow_info : bool
+        When ``True``, INFO records are allowed through; when ``False`` they
+        are dropped. Records above INFO always pass.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.allow_info = False
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """
+        Decide whether a log record should be emitted.
+
+        Parameters
+        ----------
+        record : logging.LogRecord
+            The record being evaluated.
+
+        Returns
+        -------
+        bool
+            ``True`` if the record should be emitted, ``False`` otherwise.
+        """
+        return self.allow_info or record.levelno > logging.INFO
+
+
+def _command_writes_storage(args: Any) -> bool:
+    """
+    Return whether the selected command may write to the paper or embedding store.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command-line arguments.
+
+    Returns
+    -------
+    bool
+        ``True`` when the command is known to perform database/embedding writes.
+    """
+    command = getattr(args, "command", None)
+    if command in {"download", "create-embeddings", "pre-process", "delete-data"}:
+        return True
+    if command == "clustering":
+        return getattr(args, "clustering_command", None) in {"run", "pre-generate", "clear-cache"}
+    if command == "eval":
+        return getattr(args, "eval_command", None) in {"generate", "verify", "run", "clear"}
+    if command == "registry":
+        return getattr(args, "registry_command", None) in {"download", "delete"}
+    if command == "feedback":
+        return getattr(args, "feedback_command", None) == "clear"
+    if command == "check-consistency":
+        return bool(getattr(args, "fix", False))
+    return False
 
 
 def setup_logging(verbosity: int) -> None:
@@ -65,6 +131,15 @@ def setup_logging(verbosity: int) -> None:
     # Reset the package logger so it inherits the newly configured root level.
     # This overrides the level set at import time by _configure_package_logging().
     logging.getLogger("abstracts_explorer").setLevel(logging.NOTSET)
+
+    # Gate httpx2 request logs behind DEBUG without altering its log level.
+    httpx_logger = logging.getLogger("httpx2")
+    for existing in list(httpx_logger.filters):
+        if isinstance(existing, _HttpRequestLogFilter):
+            httpx_logger.removeFilter(existing)
+    request_filter = _HttpRequestLogFilter()
+    request_filter.allow_info = level == logging.DEBUG
+    httpx_logger.addFilter(request_filter)
 
 
 def _print_header(title: str, *lines: Optional[str]) -> None:
@@ -220,6 +295,8 @@ def _resolve_conference_arg(conference: Optional[str]) -> Optional[str]:
     """
     if not conference:
         return conference
+    from abstracts_explorer.database import DatabaseManager
+
     with DatabaseManager() as db:
         db.create_tables()
         resolved_conference = db.resolve_conference_name(conference)

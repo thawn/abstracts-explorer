@@ -119,9 +119,11 @@ class EmbeddingsManager(GenerationMixin, QueryMixin, IngestMixin, ArtifactsMixin
 
         self.embedding_db = config.embedding_db
         self.collection_name = collection_name or config.collection_name
+        self.read_only = bool(config.read_only)
         self._client: Optional[object] = None
         self._collection: Optional[object] = None
         self._chroma_lock_path: Optional[str] = None
+        self._chroma_lock_mode: Optional[str] = None
         self._init_lock = threading.RLock()
         self.min_free_disk_mb = config.min_free_disk_mb
 
@@ -134,6 +136,8 @@ class EmbeddingsManager(GenerationMixin, QueryMixin, IngestMixin, ArtifactsMixin
         self.connect_timeout = config.llm_connect_timeout
         self.llm_max_attempts = config.llm_max_attempts
         self.llm_rate_limit_delay = config.llm_rate_limit_delay
+        self.llm_adaptive_rate_limit = config.llm_adaptive_rate_limit
+        self.llm_adaptive_min_rpm = config.llm_adaptive_min_rpm
 
     def __enter__(self) -> "EmbeddingsManager":
         """Context manager entry; connects to ChromaDB."""

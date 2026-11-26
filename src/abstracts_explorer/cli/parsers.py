@@ -67,6 +67,14 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         help="Increase verbosity (can be repeated: -v for INFO, -vv for DEBUG)",
     )
 
+    # Add read-only flag
+    parser.add_argument(
+        "--read-only",
+        action="store_true",
+        default=None,
+        help=("Refuse database and embedding writes and allow multiple read-only " "instances (env: READ_ONLY)."),
+    )
+
     # Add version flag
     parser.add_argument(
         "--version",
@@ -372,8 +380,8 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
     web_parser.add_argument(
         "--port",
         type=int,
-        default=5000,
-        help="Port to bind to (default: 5000)",
+        default=5001,
+        help="Port to bind to (default: 5001)",
     )
     web_parser.add_argument(
         "--dev",

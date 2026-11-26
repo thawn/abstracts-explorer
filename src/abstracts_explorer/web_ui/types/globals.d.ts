@@ -16,6 +16,7 @@ interface DefaultFilterError {
 }
 
 interface Window {
+    readOnly?: boolean;
     urlConference?: string;
     urlConferenceError?: UrlConferenceError;
     conferenceYearsMap?: Record<string, Array<string | number>>;
@@ -53,11 +54,14 @@ interface Window {
 
     selectAllFilter?: (...args: any[]) => any;
     deselectAllFilter?: (...args: any[]) => any;
+    filterSessionOptions?: (...args: any[]) => any;
+    clearSessionSearch?: (...args: any[]) => any;
     openSearchSettings?: (...args: any[]) => any;
     openChatSettings?: (...args: any[]) => any;
     closeSettings?: (...args: any[]) => any;
     handleYearChange?: (...args: any[]) => any;
     handleConferenceChange?: (...args: any[]) => any;
+    handleLocationChange?: (...args: any[]) => any;
     dismissConferenceError?: (...args: any[]) => any;
     dismissDefaultFilterError?: (...args: any[]) => any;
 

@@ -19,12 +19,14 @@ from abstracts_explorer.db.session import (
     reset_metadata_cache,
     reset_schema_cache,
 )
+from abstracts_explorer.utils.read_only import ReadOnlyError
 
 __all__ = [
     "Base",
     "DatabaseError",
     "DatabaseManager",
     "EmbeddingModelConflictError",
+    "ReadOnlyError",
     "normalize_model_name",
     "mask_database_url",
     "reset_metadata_cache",

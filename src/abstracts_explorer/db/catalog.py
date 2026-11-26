@@ -19,15 +19,22 @@ from abstracts_explorer.db.errors import DatabaseError
 from abstracts_explorer.db.papers import PapersMixin
 from abstracts_explorer.utils.time_utils import utcnow
 
+from abstracts_explorer.utils.read_only import require_writable
+
 logger = logging.getLogger(__name__)
 
 
 class CatalogMixin(PapersMixin):
     """Conference catalog metadata and embedding-model tracking."""
 
-    def get_stats(self, year: Optional[int] = None, conference: Optional[str] = None) -> Dict[str, Any]:
+    def get_stats(
+        self,
+        year: Optional[int] = None,
+        conference: Optional[str] = None,
+        locations: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """
-        Get database statistics, optionally filtered by year and conference.
+        Get database statistics, optionally filtered by year, conference and location.
 
         Parameters
         ----------
@@ -35,35 +42,38 @@ class CatalogMixin(PapersMixin):
             Filter by specific year
         conference : str, optional
             Filter by specific conference
+        locations : list of str, optional
+            Filter by presentation locations
 
         Returns
         -------
         dict
             Statistics dictionary with:
-            - total_papers: int - Number of papers matching filters
+            - total_papers: int - Number of distinct papers matching filters
+            - unique_papers: int - Same as ``total_papers`` (kept for compatibility)
+            - presentations: int - Number of presentation rows matching filters
             - year: int or None - Filter year if provided
             - conference: str or None - Filter conference if provided
-
-        Examples
-        --------
-        >>> stats = db.get_stats()
-        >>> print(f"Total papers: {stats['total_papers']}")
-
-        >>> stats_2024 = db.get_stats(year=2024)
-        >>> print(f"Papers in 2024: {stats_2024['total_papers']}")
+            - locations: list or None - Filter locations if provided
         """
         where_filters: Dict[str, Any] = {}
         if year is not None:
             where_filters["year"] = year
         if conference is not None:
             where_filters["conference"] = conference
+        if locations:
+            where_filters["location"] = {"$in": list(locations)}
 
         total_papers = self.get_paper_count(where_filters=where_filters or None)
+        presentations = self.get_total_presentation_count(where_filters=where_filters or None)
 
         return {
             "total_papers": total_papers,
+            "unique_papers": total_papers,
+            "presentations": presentations,
             "year": year,
             "conference": conference,
+            "locations": locations,
         }
 
     def get_conference_years_from_db(self) -> Dict[str, List[int]]:
@@ -354,7 +364,12 @@ class CatalogMixin(PapersMixin):
                 "reason": "not_found",
             }
 
-    def get_sessions(self, conference: Optional[str] = None, year: Optional[int] = None) -> List[str]:
+    def get_sessions(
+        self,
+        conference: Optional[str] = None,
+        year: Optional[int] = None,
+        location: Optional[str] = None,
+    ) -> List[str]:
         """
         Get distinct session names from the database.
 
@@ -364,6 +379,8 @@ class CatalogMixin(PapersMixin):
             Filter sessions to only those belonging to this conference.
         year : int, optional
             Filter sessions to only those belonging to this year.
+        location : str, optional
+            Filter sessions to only those presented at this location.
 
         Returns
         -------
@@ -384,7 +401,7 @@ class CatalogMixin(PapersMixin):
         ['Session 1', 'Session 2', ...]
         >>> sessions = db.get_sessions(conference="NeurIPS", year=2025)
         """
-        cached = self._metadata_cache_get("sessions", conference, year)
+        cached = self._metadata_cache_get("sessions", conference, year, location)
         if cached is not None:
             return cached
 
@@ -394,6 +411,8 @@ class CatalogMixin(PapersMixin):
                 conditions.append(Paper.conference == conference)
             if year is not None:
                 conditions.append(Paper.year == year)
+            if location is not None:
+                conditions.append(Paper.location == location)
 
             stmt: Any = select(Paper.session).distinct()
             if conditions:
@@ -401,10 +420,45 @@ class CatalogMixin(PapersMixin):
             stmt = stmt.where(and_(Paper.session.isnot(None), Paper.session != "")).order_by(Paper.session)
 
             result = list(self.session.execute(stmt).scalars().all())
-            self._metadata_cache_set(result, "sessions", conference, year)
+            self._metadata_cache_set(result, "sessions", conference, year, location)
             return result
         except Exception as e:
             raise self._db_error("Failed to get sessions", e)
+
+    def get_conference_year_locations(self) -> Dict[str, Dict[int, List[str]]]:
+        """
+        Return presentation locations grouped by conference and year.
+
+        Returns
+        -------
+        dict
+            Mapping ``conference -> year -> sorted location list``. Only rows
+            with a non-empty location are included.
+
+        Raises
+        ------
+        DatabaseError
+            If the query fails.
+        """
+        try:
+            stmt: Any = (
+                select(Paper.conference, Paper.year, Paper.location)
+                .where(Paper.location.is_not(None), Paper.location != "")
+                .distinct()
+            )
+            grouped: Dict[str, Dict[int, set]] = {}
+            for conference, year, location in self.session.execute(stmt).all():
+                if conference is None or year is None or not location:
+                    continue
+                grouped.setdefault(str(conference), {}).setdefault(int(year), set()).add(str(location))
+            return {
+                conference: {year: sorted(locations) for year, locations in years.items()}
+                for conference, years in grouped.items()
+            }
+        except DatabaseError:
+            raise
+        except Exception as e:
+            raise self._db_error("Failed to retrieve conference year locations", e)
 
     def get_conferences(self, year: Optional[int] = None) -> List[str]:
         """
@@ -528,6 +582,7 @@ class CatalogMixin(PapersMixin):
         except Exception as e:
             raise self._db_error("Failed to get embedding model", e)
 
+    @require_writable()
     def set_embedding_model(self, model_name: str) -> None:
         """
         Set the embedding model used for embeddings.

@@ -36,12 +36,14 @@ nano .env
 - **LLM_RETRY_BASE_DELAY**: Base delay in seconds for retrying cluster-label responses that contain no usable content (default: `1.0`). HTTP-level backoff is handled by the OpenAI SDK.
 - **LLM_RETRY_MAX_DELAY**: Maximum delay in seconds for empty-content cluster-label retries (default: `10.0`)
 - **LLM_RATE_LIMIT_DELAY**: Cooldown applied after an HTTP `429` when the backend does not send a usable `Retry-After` header (default: `60.0`). The cooldown is shared process-wide so parallel sync and async LLM requests pause together.
+- **ADAPTIVE_RATE_LIMIT_ENABLED**: Whether the shared rate limiter lowers its effective request rate after sustained `429` responses and recovers it after successful requests (default: `true`). Disable to keep the rate fixed at `REQUESTS_PER_MINUTE`.
+- **ADAPTIVE_MIN_RPM**: Lower bound for the adaptively throttled request rate in requests per minute (default: `6`). The limiter halves the effective rate on each `429` down to this floor and restores it as requests succeed again.
 
 ### Embedding Model Settings
 
 - **EMBEDDING_MODEL**: The embedding model to use (default: `text-embedding-qwen3-embedding-4b`)
 - **EMBEDDING_MAX_INPUT_TOKENS**: Maximum number of tokens sent to the embedding model in one request (default: `8192`). Longer titles/abstracts are truncated before the API call; the full text is still stored in ChromaDB. Set to `0` to disable proactive truncation.
-- **REQUESTS_PER_MINUTE**: Maximum OpenAI-compatible API requests per minute. This covers embedding and LLM (chat-completion) calls because both share the same rate-limited HTTP client and global token bucket. Requests are paced smoothly with a one-request burst so an initial burst cannot exhaust a provider’s per-minute quota. `0` disables rate limiting (default: `60`). Can be overridden per command with `--requests-per-minute`.
+- **REQUESTS_PER_MINUTE**: Maximum OpenAI-compatible API requests per minute. This covers embedding and LLM (chat-completion) calls because both share the same rate-limited HTTP client and global token bucket. Requests are paced smoothly with a one-request burst so an initial burst cannot exhaust a provider’s per-minute quota. Set this at or below the server’s global per-minute quota; with adaptive throttling enabled the effective rate is automatically reduced on sustained `429` responses and recovers afterwards. Requests waiting for a token re-check the shared cooldown, so parallel workers do not fire during a pause. `0` disables rate limiting (default: `60`). Can be overridden per command with `--requests-per-minute`.
 - **WEB_RATE_LIMIT_PER_MINUTE**: Maximum expensive web API requests per client per minute for chat, semantic search, cluster search, and topic evolution; `0` disables client rate limiting (default: `30`). The limiter is per-process; multi-worker deployments need a shared store for global enforcement.
 
 ### LLM Backend Configuration
@@ -140,13 +142,47 @@ The configuration automatically detects the type based on the format:
     the process using it. Do **not** run multiple `create-embeddings`,
     clustering, web UI, or MCP processes against the same local store
     simultaneously: each process persists its own copy of the HNSW index, and
-    concurrent writers can corrupt the store. A second process now fails fast
-    with an "Another process is using the local ChromaDB" error. For concurrent
-    access, use an HTTP ChromaDB server (`EMBEDDING_DB=http://...`).
+    concurrent writers can corrupt the store. A second process fails fast with
+    an "Another process is using the local ChromaDB" error. Multiple
+    **read-only** processes are supported through a shared read lock (see
+    [Read-Only Mode](#read-only-mode)). For concurrent readers and writers, use
+    an HTTP ChromaDB server (`EMBEDDING_DB=http://...`).
 
     If a local store was corrupted by concurrent writers, stop all processes,
     move the store aside, and rebuild it with `create-embeddings` (the paper
     database is unaffected).
+
+### Read-Only Mode
+
+- **READ_ONLY**: Set to `true` to disable all writes to the paper database and
+  the embedding store (default: `false`). The CLI also accepts a global
+  `--read-only` flag, which overrides the environment variable.
+
+In read-only mode:
+
+- SQLite connections are opened with `PRAGMA query_only=ON`; PostgreSQL
+  connections use a read-only transaction. The database file must already
+  exist, and schema creation is skipped.
+- Every database write method (imports, donations, evaluations, cache updates,
+  deletes, and embedding-model metadata) raises `ReadOnlyError`.
+- Embedding writes (ingestion, imports, deletes, and collection creation)
+  raise `ReadOnlyError`; the existing ChromaDB collection is opened without
+  being created.
+- Write-capable CLI commands (`download`, `create-embeddings`, `pre-process`,
+  `delete-data`, clustering `run`/`pre-generate`/`clear-cache`, evaluation
+  writes, feedback `clear`, registry install/delete, and
+  `check-consistency --fix`) exit with an error before doing any work.
+- Web API write endpoints return HTTP `403`.
+
+Multiple read-only instances may run concurrently against the same data. A
+local ChromaDB store uses a shared read lock: readers may overlap, but a writer
+cannot start while readers are active (and vice versa). For concurrent readers
+and writers, use an HTTP ChromaDB server (`EMBEDDING_DB=http://...`).
+
+```bash
+READ_ONLY=true abstracts-explorer web-ui --host 0.0.0.0 --port 5000
+abstracts-explorer search "graph neural networks" --read-only
+```
 
 ### RAG Settings
 
@@ -231,6 +267,7 @@ set them to `1`.
 ### Logging
 
 - **LOG_LEVEL**: Optional root log level override (`DEBUG`, `INFO`, `WARNING`, ...). Empty uses the default level.
+- HTTP client (`httpx2`) request logs are only shown at `DEBUG` (`-vv` or `LOG_LEVEL=DEBUG`); they are filtered out at higher levels. The logger's level itself is left unchanged.
 
 ### Registry Settings
 

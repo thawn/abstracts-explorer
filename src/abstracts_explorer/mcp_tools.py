@@ -189,6 +189,7 @@ class NormRule:
 
 SEARCH_PAPERS_RULES = [
     NormRule("years", ("year",), _to_int_list_or_none),
+    NormRule("sessions", ("session",), _to_conference_list),
     NormRule("topic_keywords", ("query",), _join_list),
     NormRule("conference", ("conferences",), _first_or_none),
     NormRule(

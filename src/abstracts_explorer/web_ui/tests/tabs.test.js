@@ -71,6 +71,26 @@ describe('Tabs Module', () => {
             expect(stats.innerHTML).toContain('1,234');
         });
 
+        it('should show only the unique paper count', async () => {
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    total_papers: 8,
+                    unique_papers: 8,
+                    presentations: 20,
+                    conference: 'NeurIPS',
+                    year: 2025
+                })
+            });
+
+            await loadStats();
+
+            const stats = document.getElementById('stats');
+            expect(stats.innerHTML).toContain('8 Papers');
+            expect(stats.innerHTML).not.toContain('presentations');
+            expect(stats.innerHTML).not.toContain('20 presentations');
+        });
+
         it('should include filters in request', async () => {
             document.getElementById('year-selector').value = '2025';
             document.getElementById('conference-selector').value = 'NeurIPS';

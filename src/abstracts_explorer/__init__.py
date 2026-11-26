@@ -111,23 +111,60 @@ def _configure_package_logging() -> None:
 
 _configure_package_logging()
 
-from abstracts_explorer.config import Config, get_config  # noqa: E402
-from abstracts_explorer.database import DatabaseManager  # noqa: E402
-from abstracts_explorer.embeddings import EmbeddingsManager  # noqa: E402
-from abstracts_explorer.clustering import ClusteringManager, ClusteringError, perform_clustering  # noqa: E402
-from abstracts_explorer.rag import RAGChat  # noqa: E402
-from abstracts_explorer.registry import RegistryClient, RegistryError  # noqa: E402
-from abstracts_explorer.plugins import (  # noqa: E402
-    DownloaderPlugin,
-    PluginRegistry,
-    register_plugin,
-    get_plugin,
-    list_plugins,
-    list_plugin_names,
-)
+from typing import TYPE_CHECKING, Any  # noqa: E402
 
-# Import plugins to auto-register them
-import abstracts_explorer.plugins  # noqa: E402, F401
+if TYPE_CHECKING:
+    from abstracts_explorer.config import Config, get_config
+    from abstracts_explorer.database import DatabaseManager
+    from abstracts_explorer.embeddings import EmbeddingsManager
+    from abstracts_explorer.clustering import ClusteringManager, ClusteringError, perform_clustering
+    from abstracts_explorer.rag import RAGChat
+    from abstracts_explorer.registry import RegistryClient, RegistryError
+    from abstracts_explorer.plugins import (
+        DownloaderPlugin,
+        PluginRegistry,
+        register_plugin,
+        get_plugin,
+        list_plugins,
+        list_plugin_names,
+    )
+
+_LAZY_IMPORTS = {
+    "Config": "abstracts_explorer.config",
+    "get_config": "abstracts_explorer.config",
+    "DatabaseManager": "abstracts_explorer.database",
+    "EmbeddingsManager": "abstracts_explorer.embeddings",
+    "ClusteringManager": "abstracts_explorer.clustering",
+    "ClusteringError": "abstracts_explorer.clustering",
+    "perform_clustering": "abstracts_explorer.clustering",
+    "RAGChat": "abstracts_explorer.rag",
+    "RegistryClient": "abstracts_explorer.registry",
+    "RegistryError": "abstracts_explorer.registry",
+    "DownloaderPlugin": "abstracts_explorer.plugins",
+    "PluginRegistry": "abstracts_explorer.plugins",
+    "register_plugin": "abstracts_explorer.plugins",
+    "get_plugin": "abstracts_explorer.plugins",
+    "list_plugins": "abstracts_explorer.plugins",
+    "list_plugin_names": "abstracts_explorer.plugins",
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily import heavy public API symbols on first access (PEP 562)."""
+    module_path = _LAZY_IMPORTS.get(name)
+    if module_path is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    import importlib
+
+    module = importlib.import_module(module_path)
+    value = getattr(module, name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(__all__) | set(globals()))
+
 
 try:
     from abstracts_explorer._version import __version__
