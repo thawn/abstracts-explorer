@@ -175,6 +175,51 @@ def cleanup_scope_cache(
     return db.delete_clustering_cache_ids(stale_ids)
 
 
+def cleanup_stale_cache_rows(
+    scopes: List[Tuple[str, int, int, int]],
+    embedding_model: str,
+    collection_name: str,
+    paper_db: str | None,
+) -> int:
+    """
+    Delete older duplicate cache rows for every scope in *scopes*.
+
+    This runs for all selected scopes, including scopes skipped because they
+    were already regenerated, so stale rows left by earlier runs are removed
+    even when no cluster recomputation happens.
+
+    Parameters
+    ----------
+    scopes : list of tuple
+        ``(conference, year, rows, duplicates)`` scopes to clean up.
+    embedding_model : str
+        Embedding model used by the cache rows.
+    collection_name : str
+        ChromaDB collection encoded in the cache key.
+    paper_db : str or None
+        Optional database URL override.
+
+    Returns
+    -------
+    int
+        Number of stale cache rows deleted.
+    """
+    deleted = 0
+    with DatabaseManager() as db:
+        if paper_db:
+            db.database_url = paper_db
+        db.connect()
+        for scope_conference, scope_year, _, _ in scopes:
+            deleted += cleanup_scope_cache(
+                db,
+                scope_conference,
+                scope_year,
+                embedding_model,
+                collection_name,
+            )
+    return deleted
+
+
 def parse_args() -> argparse.Namespace:
     """
     Parse command-line arguments.
@@ -288,6 +333,8 @@ def main() -> int:
         db.connect()
         scopes = high_duplicate_scopes(db, args.conference, args.year, args.threshold)
 
+    all_scopes = list(scopes)
+
     skipped = 0
     if completed:
         remaining = [scope for scope in scopes if _scope_key(scope[0], scope[1]) not in completed]
@@ -305,6 +352,10 @@ def main() -> int:
         print(f"  {scope_conference} {scope_year}: {row_count:,} rows, " f"{duplicates:,} duplicate(s)")
 
     if not scopes:
+        if args.execute:
+            cleaned = cleanup_stale_cache_rows(all_scopes, embedding_model, collection_name, args.paper_db)
+            if cleaned:
+                print(f"Removed {cleaned:,} stale cache row(s).")
         print("Nothing to regenerate.")
         return 0
 
@@ -319,6 +370,10 @@ def main() -> int:
         print("")
         print("Dry run only. Re-run with --execute to regenerate the selected scopes.")
         return 0
+
+    cleaned = cleanup_stale_cache_rows(all_scopes, embedding_model, collection_name, args.paper_db)
+    if cleaned:
+        print(f"Removed {cleaned:,} stale cache row(s).")
 
     failures = 0
     with EmbeddingsManager(collection_name=collection_name) as embeddings_manager:

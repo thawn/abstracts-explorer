@@ -272,3 +272,52 @@ def test_main_shows_progress_by_default_and_quiet(tmp_path, connected_db, monkey
     monkeypatch.setattr(regen, "parse_args", lambda: _args(state_path, quiet=True))
     assert regen.main() == 0
     assert progress and not any(progress)
+
+
+def test_main_cleans_stale_rows_for_skipped_scopes(tmp_path, connected_db, monkeypatch):
+    config = get_config()
+    connected_db.add_papers(_duplicate_papers())
+
+    def add_cache(year: int) -> None:
+        connected_db.save_clustering_cache(
+            embedding_model=config.embedding_model,
+            reduction_method="umap",
+            n_components=2,
+            clustering_method="bertopic-agglomerative",
+            results={"statistics": {"n_clusters": 1, "total_papers": 1}},
+            n_clusters=1,
+            clustering_params={"pipeline_version": 3},
+            conference="ICML",
+            year=year,
+            collection_name=config.collection_name,
+        )
+
+    add_cache(2022)
+    add_cache(2022)
+    add_cache(2023)
+    add_cache(2023)
+
+    state_path = tmp_path / "state.json"
+    regen.save_state(
+        state_path,
+        {"meta": _run_meta(), "completed": ["ICML::2022", "ICML::2023"]},
+    )
+
+    calls: List[Tuple[str, int]] = []
+
+    def fake_compute(**kwargs: Any) -> Dict[str, Any]:
+        calls.append((kwargs["conferences"][0], kwargs["years"][0]))
+        return {"statistics": {"total_papers": 1, "n_clusters": 1}}
+
+    monkeypatch.setattr(regen, "EmbeddingsManager", _DummyEmbeddingsManager)
+    monkeypatch.setattr(regen, "compute_clusters_with_cache", fake_compute)
+    monkeypatch.setattr(regen, "parse_args", lambda: _args(state_path))
+
+    assert regen.main() == 0
+    assert calls == []
+    for year in (2022, 2023):
+        rows = connected_db.session.execute(
+            regen.text("SELECT id FROM clustering_cache WHERE conference = :c AND year = :y ORDER BY id"),
+            {"c": "ICML", "y": year},
+        ).all()
+        assert len(rows) == 1
