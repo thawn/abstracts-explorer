@@ -93,17 +93,22 @@ jobs:
           images: |
             ${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}
             ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}', env.REGISTRY_DOCKERHUB, env.IMAGE_NAME) || '' }}
+          # latest=auto adds the `latest` tag for stable semver releases only and
+          # automatically skips prereleases (e.g. v1.0.0-RC1), so release
+          # candidates never overwrite `latest` or the major/minor tags.
+          flavor: |
+            latest=auto
           tags: |
             # Tag with branch name for branch pushes
             type=ref,event=branch
             # Tag with PR number for pull requests
             type=ref,event=pr
-            # Tag with semver for release tags
+            # Tag with semver for release tags. Pre-release (rc, beta, alpha)
+            # tags only get their full version tag; latest/major/minor are
+            # generated for stable releases only.
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            # Tag as latest ONLY for release tags (not main branch)
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             # Tag with git commit SHA for traceability
             type=sha,prefix=sha-,format=short
           labels: |
