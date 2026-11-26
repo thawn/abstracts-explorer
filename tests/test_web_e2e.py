@@ -891,13 +891,15 @@ class TestWebUIE2E:
         request_body = json.loads(request_info.value.post_data or "{}")
         assert request_body.get("sessions") == ["Oral Session 1"]
 
-    @requires_lm_studio
     def test_chat_session_filter_restricts_search_papers(self, web_server, test_embeddings, page: Page):
         """
         Test that the selected session filter restricts ``search_papers`` results.
 
         The chat agent should call ``search_papers`` and every returned paper
         must belong to the session selected in the chat settings.
+
+        The LLM is replaced with a scripted ``FunctionModel`` so the test is
+        deterministic and does not require a live backend.
 
         Parameters
         ----------
@@ -909,16 +911,35 @@ class TestWebUIE2E:
             Playwright page
         """
         import abstracts_explorer.mcp.shared_dependencies as mcp_deps
+        import abstracts_explorer.rag.agent as agent_module
+        from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+        from pydantic_ai.models.function import FunctionModel
 
         mock_client = test_embeddings[3]
         original_embeddings_cls = mcp_deps.EmbeddingsManager
+        original_model_cls = agent_module.OpenAIChatModel
 
         class _MockClientEmbeddingsManager(original_embeddings_cls):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
                 self._openai_client = mock_client
 
+        def _scripted_model(messages, info):
+            for message in messages:
+                for part in message.parts:
+                    if getattr(part, "part_kind", None) == "tool-return":
+                        return ModelResponse(parts=[TextPart("Here are the relevant papers.")])
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="search_papers",
+                        args={"topic_keywords": "transformers", "conference": "NeurIPS"},
+                    )
+                ]
+            )
+
         mcp_deps.EmbeddingsManager = _MockClientEmbeddingsManager
+        agent_module.OpenAIChatModel = lambda *args, **kwargs: FunctionModel(_scripted_model)
         close_mcp_resources(force=True)
         try:
             base_url, _ = web_server
@@ -941,13 +962,12 @@ class TestWebUIE2E:
 
             with page.expect_response(
                 lambda response: response.url.endswith("/api/chat") and response.request.method == "POST",
-                timeout=120000,
+                timeout=30000,
             ) as response_info:
                 chat_input.press("Enter")
 
             response = response_info.value
-            if response.status != 200:
-                pytest.skip(f"Chat backend unavailable (HTTP {response.status})")
+            assert response.status == 200, f"Chat request failed with HTTP {response.status}"
 
             request_body = json.loads(response.request.post_data or "{}")
             assert request_body.get("sessions") == ["Oral Session 1"]
@@ -962,6 +982,7 @@ class TestWebUIE2E:
             assert {paper["session"] for paper in papers} == {"Oral Session 1"}
         finally:
             mcp_deps.EmbeddingsManager = original_embeddings_cls
+            agent_module.OpenAIChatModel = original_model_cls
             close_mcp_resources(force=True)
 
     @requires_lm_studio
