@@ -21,7 +21,6 @@ from abstracts_explorer.clustering.errors import ClusteringError
 from abstracts_explorer.clustering.hierarchy_levels import level_parent_descriptions, level_parent_labels
 from abstracts_explorer.clustering.labels import split_label_description
 from abstracts_explorer.clustering.loading import LoadingMixin
-from abstracts_explorer.clustering.representation import ProjectLLMRepresentation
 from abstracts_explorer.clustering.results import build_clustering_results, export_results_to_json
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
@@ -221,6 +220,8 @@ class ClusteringManager(LoadingMixin):
             raise ClusteringError("No embeddings loaded. Call load_embeddings() first.")
 
         from bertopic import BERTopic
+
+        from abstracts_explorer.clustering.representation import ProjectLLMRepresentation
 
         docs = self._build_documents()
         if not docs:

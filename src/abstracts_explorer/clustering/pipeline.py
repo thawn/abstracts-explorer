@@ -6,7 +6,6 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from abstracts_explorer.clustering.backfill import backfill_missing_labels as _backfill_missing_labels
 from abstracts_explorer.clustering.constants import (
     DEFAULT_CLUSTERING_METHOD,
     DEFAULT_CLUSTERING_PARAMS,
@@ -20,6 +19,13 @@ from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
 
 logger = logging.getLogger(__name__)
+
+
+def _backfill_missing_labels(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+    """Lazily load and run ``backfill_missing_labels`` (keeps BERTopic lazy)."""
+    from abstracts_explorer.clustering.backfill import backfill_missing_labels
+
+    return backfill_missing_labels(*args, **kwargs)
 
 
 def _effective_params(

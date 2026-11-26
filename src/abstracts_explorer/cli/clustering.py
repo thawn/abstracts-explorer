@@ -6,17 +6,11 @@ import argparse
 import logging
 import sys
 from contextlib import closing
-from typing import Optional
+from typing import Any, Optional
 
 
 from abstracts_explorer.config import get_config
 from abstracts_explorer.database import DatabaseManager
-from abstracts_explorer.embeddings import EmbeddingsManager
-from abstracts_explorer.clustering import (
-    perform_clustering,
-    compute_clusters_with_cache,
-    ClusteringError,
-)
 
 
 from abstracts_explorer.cli._common import (
@@ -27,6 +21,29 @@ from abstracts_explorer.cli._common import (
 )
 
 logger = logging.getLogger(__name__)
+
+_LAZY_IMPORTS = {
+    "perform_clustering": "abstracts_explorer.clustering.pipeline",
+    "compute_clusters_with_cache": "abstracts_explorer.clustering.pipeline",
+    "EmbeddingsManager": "abstracts_explorer.embeddings",
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily import heavy clustering/embeddings symbols (PEP 562)."""
+    module_path = _LAZY_IMPORTS.get(name)
+    if module_path is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    import importlib
+
+    value = getattr(importlib.import_module(module_path), name)
+    globals()[name] = value
+    return value
+
+
+def _load(name: str) -> Any:
+    """Return a lazily imported symbol, honouring module-level patches."""
+    return getattr(sys.modules[__name__], name)
 
 
 def cluster_embeddings_command(args: argparse.Namespace) -> int:
@@ -67,10 +84,12 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
         f"Limit: {args.limit} papers" if args.limit else None,
     )
 
+    from abstracts_explorer.clustering import ClusteringError
+
     try:
         # Perform clustering with fixed parameters
         print("\n🚀 Starting clustering pipeline...")
-        results = perform_clustering(
+        results = _load("perform_clustering")(
             collection_name=args.collection,
             output_path=args.output,
             limit=args.limit,
@@ -232,9 +251,11 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
         *extra_lines,
     )
 
+    from abstracts_explorer.clustering import ClusteringError
+
     try:
         with closing(
-            EmbeddingsManager(
+            _load("EmbeddingsManager")(
                 collection_name=args.collection,
                 requests_per_minute=args.requests_per_minute,
             )
@@ -258,7 +279,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
 
                 try:
                     with DatabaseManager() as db:
-                        results = compute_clusters_with_cache(
+                        results = _load("compute_clusters_with_cache")(
                             embeddings_manager=em,
                             database=db,
                             embedding_model=config.embedding_model,
