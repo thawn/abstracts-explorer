@@ -15,6 +15,8 @@ from abstracts_explorer.db_models import ClusteringCache
 
 from abstracts_explorer.db.session import SessionMixin
 
+from abstracts_explorer.utils.read_only import require_writable
+
 logger = logging.getLogger(__name__)
 
 
@@ -285,6 +287,7 @@ class ClusteringCacheMixin(SessionMixin):
         except Exception as e:
             raise self._db_error("Failed to list clustering cache entries", e)
 
+    @require_writable()
     def update_clustering_cache_results(self, cache_id: int, results: Dict[str, Any]) -> None:
         """
         Replace the stored results of an existing cache row.
@@ -314,6 +317,7 @@ class ClusteringCacheMixin(SessionMixin):
         except Exception as e:
             raise self._db_error(f"Failed to update clustering cache entry {cache_id}", e)
 
+    @require_writable()
     def update_clustering_cache_entry(
         self,
         cache_id: int,
@@ -356,6 +360,7 @@ class ClusteringCacheMixin(SessionMixin):
         except Exception as e:
             raise self._db_error(f"Failed to update clustering cache entry {cache_id}", e)
 
+    @require_writable()
     def save_clustering_cache(
         self,
         embedding_model: str,
@@ -446,6 +451,7 @@ class ClusteringCacheMixin(SessionMixin):
         except Exception as e:
             raise self._db_error("Failed to save clustering cache", e)
 
+    @require_writable()
     def delete_clustering_cache_by_id(self, cache_id: int) -> bool:
         """
         Delete a single clustering cache entry by its primary key.
@@ -476,6 +482,7 @@ class ClusteringCacheMixin(SessionMixin):
         except Exception as e:
             raise self._db_error(f"Failed to delete clustering cache entry {cache_id}", e)
 
+    @require_writable()
     def delete_clustering_cache_ids(self, cache_ids: List[int]) -> int:
         """
         Delete clustering cache entries by primary key.
@@ -508,6 +515,7 @@ class ClusteringCacheMixin(SessionMixin):
         except Exception as e:
             raise self._db_error("Failed to delete clustering cache entries", e)
 
+    @require_writable()
     def delete_clustering_cache_by_conference_year(self, conference: str, year: int) -> int:
         """
         Delete all clustering cache entries for a specific conference and year.
@@ -575,6 +583,7 @@ class ClusteringCacheMixin(SessionMixin):
         except Exception as e:
             raise self._db_error(f"Failed to count clustering cache for {conference}/{year}", e)
 
+    @require_writable()
     def clear_clustering_cache(self, embedding_model: Optional[str] = None) -> int:
         """
         Clear clustering cache, optionally filtered by embedding model.
@@ -620,6 +629,7 @@ class ClusteringCacheMixin(SessionMixin):
         except Exception as e:
             raise self._db_error("Failed to clear clustering cache", e)
 
+    @require_writable()
     def update_clustering_cache_embedding_model(self, old_model: str, new_model: str) -> int:
         """
         Update the embedding model name in all clustering cache entries.

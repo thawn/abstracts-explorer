@@ -19,6 +19,8 @@ from abstracts_explorer.db.errors import DatabaseError
 from abstracts_explorer.db.papers import PapersMixin
 from abstracts_explorer.utils.time_utils import utcnow
 
+from abstracts_explorer.utils.read_only import require_writable
+
 logger = logging.getLogger(__name__)
 
 
@@ -580,6 +582,7 @@ class CatalogMixin(PapersMixin):
         except Exception as e:
             raise self._db_error("Failed to get embedding model", e)
 
+    @require_writable()
     def set_embedding_model(self, model_name: str) -> None:
         """
         Set the embedding model used for embeddings.

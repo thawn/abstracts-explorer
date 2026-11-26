@@ -17,6 +17,8 @@ from abstracts_explorer.db_models import (
 
 from abstracts_explorer.db.session import SessionMixin
 
+from abstracts_explorer.utils.read_only import require_writable
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,6 +29,7 @@ class EvaluationRepoMixin(SessionMixin):
     #  Evaluation Q/A pair and result methods                              #
     # ------------------------------------------------------------------ #
 
+    @require_writable()
     def add_eval_qa_pair(
         self,
         conversation_id: str,
@@ -197,6 +200,7 @@ class EvaluationRepoMixin(SessionMixin):
         except Exception as e:
             raise self._db_error("Failed to count eval QA pairs", e)
 
+    @require_writable()
     def update_eval_qa_pair(self, pair_id: int, **fields) -> bool:
         """
         Update fields on an existing Q/A pair.
@@ -241,6 +245,7 @@ class EvaluationRepoMixin(SessionMixin):
         except Exception as e:
             raise self._db_error("Failed to update eval QA pair", e)
 
+    @require_writable()
     def delete_verified_eval_qa_pairs(self) -> int:
         """
         Delete all verified (accepted) evaluation Q/A pairs.
@@ -265,6 +270,7 @@ class EvaluationRepoMixin(SessionMixin):
         except Exception as e:
             raise self._db_error("Failed to delete verified eval QA pairs", e)
 
+    @require_writable()
     def delete_eval_results(self, run_id: Optional[str] = None) -> int:
         """
         Delete stored evaluation results, optionally filtered to a single run.
@@ -296,6 +302,7 @@ class EvaluationRepoMixin(SessionMixin):
         except Exception as e:
             raise self._db_error("Failed to delete eval results", e)
 
+    @require_writable()
     def add_eval_result(
         self,
         run_id: str,

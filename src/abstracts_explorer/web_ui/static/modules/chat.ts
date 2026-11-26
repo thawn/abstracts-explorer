@@ -335,7 +335,7 @@ export function addChatMessage(text: string, role: string, isLoading = false): s
             <div class="${bgColor} rounded-lg p-4 shadow-sm max-w-2xl">
                 <div data-chat-content>${contentHtml}</div>
                 ${isLoading ? '<div class="spinner mt-2" style="width: 20px; height: 20px; border-width: 2px;"></div>' : ''}
-                ${!isUser && !isLoading ? `
+                ${!isUser && !isLoading && !window.readOnly ? `
                 <div class="chat-feedback-buttons flex items-center gap-2 mt-3 pt-2 border-t border-gray-100 dark:border-gray-600">
                     <span class="text-s text-gray-500 dark:text-gray-400 mr-1">Helpful?</span>
                     <button class="chat-feedback-btn text-gray-400 hover:text-green-600 transition-colors p-1"
@@ -690,6 +690,10 @@ function collectChatTranscript(): Array<{ role: string; text: string }> {
  * Handle chat feedback (thumbs up/down) button click.
  */
 export async function handleChatFeedback(messageId: string, rating: string): Promise<void> {
+    if (window.readOnly) {
+        return;
+    }
+
     let consent = getChatDonationConsent();
 
     if (consent === null) {

@@ -9,6 +9,7 @@ from abstracts_explorer.db.errors import normalize_model_name
 from abstracts_explorer.embeddings.batching import IO_BATCH_SIZE, iter_batches
 from abstracts_explorer.embeddings.errors import EmbeddingsError, translate_errors
 from abstracts_explorer.embeddings.hashing import is_content_hash
+from abstracts_explorer.utils.read_only import require_writable
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class ArtifactsMixin:
     model_name: str
     _store_embeddings: Any
 
+    @require_writable()
     def delete_embeddings_by_ids(self, ids: list[str]) -> int:
         """
         Delete embeddings by paper UID.
@@ -101,6 +103,7 @@ class ArtifactsMixin:
                 "embeddings": embeddings,
             }
 
+    @require_writable()
     def import_embeddings(
         self,
         data: dict[str, Any],

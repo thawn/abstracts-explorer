@@ -29,9 +29,12 @@ the actual `--help` output of the tool.
 
 ```text
 -v, --verbose   Increase verbosity (can be repeated: -v for INFO, -vv for DEBUG)
+--read-only     Refuse database and embedding writes (overrides READ_ONLY)
 -h, --help      Show help message and exit
 --version       Show version information
 ```
+
+See [Read-Only Mode](configuration.md#read-only-mode) for details.
 
 ## download
 

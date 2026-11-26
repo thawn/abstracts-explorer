@@ -16,6 +16,7 @@ describe('Chat Module', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         localStorage.clear();
+        delete window.readOnly;
         _resetChatState();
         document.body.innerHTML = `
             <input id="chat-input" value="test message" />
@@ -685,6 +686,16 @@ describe('Chat Module', () => {
             expect(messages.innerHTML).not.toContain('chat-feedback-buttons');
         });
 
+        it('should not show feedback buttons in read-only mode', () => {
+            window.readOnly = true;
+
+            addChatMessage('Test response', 'assistant');
+
+            const messages = document.getElementById('chat-messages');
+            expect(messages.innerHTML).not.toContain('chat-feedback-buttons');
+            expect(messages.innerHTML).not.toContain('fa-thumbs-up');
+        });
+
         it('should have data attributes on feedback buttons', () => {
             const messageId = addChatMessage('Test response', 'assistant');
 
@@ -703,6 +714,15 @@ describe('Chat Module', () => {
         beforeEach(() => {
             localStorage.clear();
             global.confirm = jest.fn();
+        });
+
+        it('should do nothing in read-only mode', async () => {
+            window.readOnly = true;
+
+            await handleChatFeedback('some-message-id', 'up');
+
+            expect(global.confirm).not.toHaveBeenCalled();
+            expect(global.fetch).not.toHaveBeenCalled();
         });
 
         it('should show consent popup on first click', async () => {

@@ -84,6 +84,11 @@ class Config:
     ----------
     data_dir : str
         Base directory for data files (databases, embeddings).
+    read_only : bool
+        Whether to run in read-only mode.  In this mode the paper database and
+        the embedding store are opened without writing, schema creation is
+        skipped, and every write operation raises ``ReadOnlyError``.  Multiple
+        read-only instances may run concurrently against the same data.
     chat_model : str
         Name of the language model for chat/RAG.
     embedding_model : str
@@ -258,6 +263,10 @@ class Config:
         """Load configuration from environment variables."""
         # Data Directory (base directory for all data files)
         self.data_dir = self._get_env("DATA_DIR", default="data")
+
+        # Read-only mode: refuse database/embedding writes and allow multiple
+        # concurrent readers.
+        self.read_only = self._get_env_bool("READ_ONLY", default=False)
 
         # Chat/Language Model Settings
         self.chat_model = self._get_env("CHAT_MODEL", default="diffbot-small-xl-2508")
@@ -552,6 +561,7 @@ class Config:
         """
         return {
             "data_dir": self.data_dir,
+            "read_only": self.read_only,
             "chat_model": self.chat_model,
             "chat_temperature": self.chat_temperature,
             "chat_max_tokens": self.chat_max_tokens,

@@ -16,6 +16,7 @@ interface DefaultFilterError {
 }
 
 interface Window {
+    readOnly?: boolean;
     urlConference?: string;
     urlConferenceError?: UrlConferenceError;
     conferenceYearsMap?: Record<string, Array<string | number>>;

@@ -15,8 +15,11 @@ from abstracts_explorer.embeddings.errors import EmbeddingsError, translate_erro
 from abstracts_explorer.embeddings.locking import (
     LocalChromaInUseError,
     acquire_local_chroma_lock,
+    acquire_local_chroma_read_lock,
     release_local_chroma_lock,
+    release_local_chroma_read_lock,
 )
+from abstracts_explorer.utils.read_only import require_writable
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +32,12 @@ class ChromaMixin:
     _client: Optional[Any]
     _collection: Optional[Any]
     _chroma_lock_path: Optional[str]
+    _chroma_lock_mode: Optional[str]
     _openai_client: Any
     _init_lock: Any
     embedding_db: str
     collection_name: str
+    read_only: bool
 
     @property
     def client(self) -> Any:
@@ -80,7 +85,10 @@ class ChromaMixin:
         if self._collection is None:
             with self._init_lock:
                 if self._collection is None:
-                    self.create_collection()
+                    if self.read_only:
+                        self._get_existing_collection()
+                    else:
+                        self.create_collection()
         return self._collection
 
     @collection.setter
@@ -102,23 +110,59 @@ class ChromaMixin:
                     logger.debug("Connected to ChromaDB HTTP service at: %s", self.embedding_db)
                 else:
                     chroma_path = Path(self.embedding_db)
-                    chroma_path.mkdir(parents=True, exist_ok=True)
-                    try:
-                        acquire_local_chroma_lock(str(chroma_path))
-                    except LocalChromaInUseError as exc:
-                        raise EmbeddingsError(str(exc)) from exc
+                    if self.read_only:
+                        if not chroma_path.exists():
+                            raise EmbeddingsError(f"Embedding database not found in read-only mode: {chroma_path}")
+                        try:
+                            acquire_local_chroma_read_lock(str(chroma_path))
+                        except LocalChromaInUseError as exc:
+                            raise EmbeddingsError(str(exc)) from exc
+                        lock_mode = "read"
+                        settings = Settings(
+                            anonymized_telemetry=False,
+                            migrations="validate",
+                            allow_reset=False,
+                        )
+                    else:
+                        chroma_path.mkdir(parents=True, exist_ok=True)
+                        try:
+                            acquire_local_chroma_lock(str(chroma_path))
+                        except LocalChromaInUseError as exc:
+                            raise EmbeddingsError(str(exc)) from exc
+                        lock_mode = "write"
+                        settings = Settings(anonymized_telemetry=False)
+
                     self._chroma_lock_path = str(chroma_path)
+                    self._chroma_lock_mode = lock_mode
                     try:
                         self._client = chromadb.PersistentClient(
                             path=str(chroma_path),
-                            settings=Settings(anonymized_telemetry=False),
+                            settings=settings,
                         )
                     except Exception:
-                        release_local_chroma_lock(self._chroma_lock_path)
-                        self._chroma_lock_path = None
+                        self._release_chroma_lock()
                         raise
                     logger.debug("Connected to ChromaDB at: %s", chroma_path)
 
+    def _release_chroma_lock(self) -> None:
+        """Release the local ChromaDB lock held by this manager, if any."""
+        lock_path = getattr(self, "_chroma_lock_path", None)
+        if lock_path is None:
+            return
+        if getattr(self, "_chroma_lock_mode", None) == "read":
+            release_local_chroma_read_lock(lock_path)
+        else:
+            release_local_chroma_lock(lock_path)
+        self._chroma_lock_path = None
+        self._chroma_lock_mode = None
+
+    def _get_existing_collection(self) -> None:
+        """Open an existing collection without creating it (read-only mode)."""
+        with self._init_lock, translate_errors("Failed to open collection"):
+            self._collection = self.client.get_collection(name=self.collection_name)
+            logger.debug("Opened existing collection: %s", self.collection_name)
+
+    @require_writable("create the embeddings collection")
     def create_collection(self, reset: bool = False) -> None:
         """
         Create or get ChromaDB collection.
@@ -168,10 +212,7 @@ class ChromaMixin:
         if self._client is not None:
             self._client = None
             self._collection = None
-            lock_path = getattr(self, "_chroma_lock_path", None)
-            if lock_path is not None:
-                release_local_chroma_lock(lock_path)
-                self._chroma_lock_path = None
+            self._release_chroma_lock()
             logger.debug("ChromaDB connection closed")
 
     def get_collection_stats(self) -> dict[str, Any]:

@@ -149,6 +149,39 @@ class TestWebInterface:
         finally:
             web_app_module._config.imprint_link = original_imprint_link
 
+    def test_index_read_only_hides_donation_and_sets_flag(self, client):
+        """Read-only mode sets window.readOnly and omits the donate button."""
+        import importlib
+
+        web_app_module = importlib.import_module("abstracts_explorer.web_ui.app")
+
+        original_read_only = web_app_module._config.read_only
+        try:
+            web_app_module._config.read_only = True
+            response = client.get("/")
+            assert response.status_code == 200
+            assert b"window.readOnly = true;" in response.data
+            assert b"donate-data-btn" not in response.data
+            assert b"Donate Data" not in response.data
+        finally:
+            web_app_module._config.read_only = original_read_only
+
+    def test_index_writable_shows_donation_and_sets_flag(self, client):
+        """Writable mode sets window.readOnly to false and shows the donate button."""
+        import importlib
+
+        web_app_module = importlib.import_module("abstracts_explorer.web_ui.app")
+
+        original_read_only = web_app_module._config.read_only
+        try:
+            web_app_module._config.read_only = False
+            response = client.get("/")
+            assert response.status_code == 200
+            assert b"window.readOnly = false;" in response.data
+            assert b"donate-data-btn" in response.data
+        finally:
+            web_app_module._config.read_only = original_read_only
+
     def test_stats_endpoint_no_db(self, client):
         """Test stats endpoint when database doesn't exist."""
         response = client.get("/api/stats")

@@ -21,6 +21,7 @@ def clean_config_env_vars():
     """
     env_vars = {
         "DATA_DIR",
+        "READ_ONLY",
         "CHAT_MODEL",
         "CHAT_TEMPERATURE",
         "CHAT_MAX_TOKENS",
@@ -226,6 +227,7 @@ class TestConfig:
         config = Config(env_path=get_base_env_test_path())
 
         assert config.data_dir == "data"
+        assert config.read_only is False
         assert config.chat_model == "deepseek-v4.1-flash-at-hzdr"
         assert config.embedding_model == "alias-qwen3-8b-embeddings"
         assert config.llm_backend_url == "https://api.helmholtz-blablador.fz-juelich.de"
@@ -262,6 +264,19 @@ class TestConfig:
         assert config.guard_jailbreak_threshold == 0.8
         assert config.guard_max_chars == 1500
         assert config.guard_refusal_message == ""
+
+    def test_read_only_from_env(self, tmp_path):
+        """READ_ONLY enables read-only mode."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("READ_ONLY=true\n")
+
+        config = Config(env_path=env_file)
+        assert config.read_only is True
+        assert config.to_dict()["read_only"] is True
+
+    def test_read_only_defaults_to_false(self, tmp_path):
+        """Read-only mode is off unless explicitly enabled."""
+        assert Config(env_path=tmp_path / "missing.env").read_only is False
 
     def test_web_ui_threads_from_env(self, tmp_path):
         """WEB_UI_THREADS overrides the default Waitress thread count."""
@@ -556,6 +571,7 @@ CHAT_MAX_TOKENS=500
         config_dict = config.to_dict()
         assert isinstance(config_dict, dict)
         assert "data_dir" in config_dict
+        assert "read_only" in config_dict
         assert "chat_model" in config_dict
         assert "embedding_model" in config_dict
         assert "llm_backend_url" in config_dict

@@ -26,6 +26,8 @@ from abstracts_explorer.db.errors import DatabaseError
 from abstracts_explorer.db.filters import WhereFilterMixin, _filter_has_key
 from abstracts_explorer.utils.hashing import paper_content_hash
 
+from abstracts_explorer.utils.read_only import require_writable
+
 logger = logging.getLogger(__name__)
 
 
@@ -115,6 +117,7 @@ class PapersMixin(WhereFilterMixin):
             content_hash=paper_content_hash(paper.title, paper.abstract),
         )
 
+    @require_writable()
     def add_paper(self, paper: LightweightPaper) -> Optional[str]:
         """
         Add a single paper to the database.
@@ -169,6 +172,7 @@ class PapersMixin(WhereFilterMixin):
         except Exception as e:
             raise self._db_error("Failed to add paper", e)
 
+    @require_writable()
     def add_papers(self, papers: List[LightweightPaper]) -> int:
         """
         Add multiple papers to the database in a batch.
@@ -723,6 +727,7 @@ class PapersMixin(WhereFilterMixin):
             "created_at": str(paper.created_at) if paper.created_at is not None else None,
         }
 
+    @require_writable()
     def delete_papers_by_conference_year(self, conference: str, year: int) -> int:
         """
         Delete all papers for a specific conference and year combination.
@@ -757,6 +762,7 @@ class PapersMixin(WhereFilterMixin):
         except Exception as e:
             raise self._db_error(f"Failed to delete papers for {conference}/{year}", e)
 
+    @require_writable()
     def delete_papers_by_uids(self, uids: List[str]) -> int:
         """
         Delete papers by their UIDs.
