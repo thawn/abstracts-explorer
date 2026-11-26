@@ -181,6 +181,16 @@ automatically with the chat request.
 | **Responsive layout** | The page renders without horizontal overflow at a narrow viewport width (e.g. 768 px). |
 
 ```{note}
+Staging and production deployments must be writable. The staging suite includes
+`TestStagingWriteMode::test_staging_deployment_is_writable`, which fails with
+instructions when the deployment reports `window.readOnly === true` (donation
+and chat feedback are disabled in that mode). If a deployment is intentionally
+read-only, use it only for read-only UI checks and do not run the full staging
+suite against it. The guard test skips writable deployments so it never writes
+test data to the shared database.
+```
+
+```{note}
 This list is a **first draft** and should evolve as the project matures. The staging
 tests are implemented as Playwright tests in
 [`tests/test_staging_e2e.py`](https://github.com/thawn/abstracts-explorer/blob/main/tests/test_staging_e2e.py)

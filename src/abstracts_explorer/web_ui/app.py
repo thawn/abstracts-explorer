@@ -179,6 +179,7 @@ def index():
     return render_template(
         "index.html",
         version=__version__,
+        read_only=_config.read_only,
         imprint_link=_config.imprint_link,
         url_conference=None,
         url_conference_error=None,
@@ -224,6 +225,7 @@ def conference_index(conference_name):
             render_template(
                 "index.html",
                 version=__version__,
+                read_only=_config.read_only,
                 imprint_link=_config.imprint_link,
                 url_conference=None,
                 url_conference_error={"message": "Conference data is temporarily unavailable."},
@@ -237,6 +239,7 @@ def conference_index(conference_name):
             render_template(
                 "index.html",
                 version=__version__,
+                read_only=_config.read_only,
                 imprint_link=_config.imprint_link,
                 url_conference=None,
                 url_conference_error={"message": "Unable to load conference information."},
@@ -250,6 +253,7 @@ def conference_index(conference_name):
         render_template(
             "index.html",
             version=__version__,
+            read_only=_config.read_only,
             imprint_link=_config.imprint_link,
             url_conference=result["conference"],
             url_conference_error=result["error"],

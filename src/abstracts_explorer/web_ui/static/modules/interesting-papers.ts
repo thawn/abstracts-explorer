@@ -77,8 +77,12 @@ export function updateControlsVisibility(): void {
         actionsControl.classList.toggle('hidden', !hasPapers);
     }
 
-    if (donateBtn && hasPapers) {
-        donateBtn.classList.toggle('hidden', hasDataBeenDonated());
+    if (donateBtn) {
+        if (window.readOnly) {
+            donateBtn.classList.add('hidden');
+        } else if (hasPapers) {
+            donateBtn.classList.toggle('hidden', hasDataBeenDonated());
+        }
     }
 }
 
@@ -470,7 +474,7 @@ export async function saveInterestingPapersAsMarkdown(event: Event): Promise<voi
         return;
     }
 
-    if (!donationPromptShownThisSession) {
+    if (!window.readOnly && !donationPromptShownThisSession) {
         const exportDonateMessage =
             '💡 Before you export, would you like to donate your ratings?\n\n' +
             'Your data helps improve our service and is fully anonymized.\n\n' +
@@ -776,6 +780,11 @@ export function changeInterestingPapersSortOrder(sortOrder: string): void {
  * Donate interesting papers data for validation purposes.
  */
 export async function donateInterestingPapersData(): Promise<void> {
+    if (window.readOnly) {
+        alert('Data donation is unavailable in read-only mode.');
+        return;
+    }
+
     if (Object.keys(getAllPaperPriorities()).length === 0) {
         alert('No papers rated yet. Rate some papers before donating data.');
         return;

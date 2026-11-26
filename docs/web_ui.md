@@ -186,6 +186,23 @@ Set `READ_ONLY=true` (or pass `--read-only`) to run multiple read-only web
 instances against the same data. See
 [Read-Only Mode](configuration.md#read-only-mode) for details.
 
+#### Features unavailable in read-only mode
+
+These web UI features require database writes and are hidden when the server
+runs in read-only mode:
+
+| Feature | Behavior in read-only mode |
+|---------|----------------------------|
+| **Donate Data** (Interesting Papers) | Button is not shown. |
+| **Donation prompt before ZIP export** | Prompt is skipped; export works normally. |
+| **Chat feedback (thumbs up/down)** | Feedback buttons are not shown on assistant messages. |
+
+Direct calls to the write APIs `/api/donate-data` and `/api/donate-chat` return
+HTTP `403`. Everything else remains available: search and filters, chat and MCP
+tools, clustering views, statistics, locally stored Interesting Papers ratings,
+Save/Load JSON, and ZIP export. Ratings stay in the browser's `localStorage`
+and are never uploaded in read-only mode.
+
 ### Docker / Podman
 
 See the [Docker Guide](docker.md) for running the docker container.

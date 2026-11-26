@@ -24,13 +24,16 @@ import {
     donateInterestingPapersData,
     switchInterestingSession,
     switchInterestingConferenceFromMenu,
-    changeInterestingPapersSortOrder
+    changeInterestingPapersSortOrder,
+    updateControlsVisibility
 } from '../static/modules/interesting-papers.js';
 
 import { loadPriorities } from '../static/modules/state.js';
 
 describe('Interesting Papers Module', () => {
     beforeEach(() => {
+        delete window.readOnly;
+
         // Setup DOM
         document.body.innerHTML = `
             <div id="interesting-papers-list"></div>
@@ -553,6 +556,61 @@ describe('Interesting Papers Module', () => {
             // Verify the value was set in localStorage
             const storedOrder = localStorage.getItem('interestingPapersSortOrder');
             expect(storedOrder).toBe('rating-poster-search');
+        });
+    });
+
+    describe('read-only mode', () => {
+        beforeEach(() => {
+            document.body.innerHTML += `
+                <div id="interesting-controls-sort"></div>
+                <div id="interesting-controls-actions"></div>
+                <button id="donate-data-btn"></button>
+            `;
+            global.alert = jest.fn();
+            global.confirm = jest.fn(() => true);
+            localStorage.setItem(
+                'paperPriorities',
+                JSON.stringify({ p1: { priority: 5, searchTerm: 'transformers' } })
+            );
+            loadPriorities();
+        });
+
+        afterEach(() => {
+            delete window.readOnly;
+        });
+
+        test('hides the donate button even when papers are rated', () => {
+            window.readOnly = true;
+
+            updateControlsVisibility();
+
+            expect(document.getElementById('donate-data-btn').classList.contains('hidden')).toBe(true);
+        });
+
+        test('does not write to the API when donation is invoked', async () => {
+            window.readOnly = true;
+            global.fetch = jest.fn();
+
+            await donateInterestingPapersData();
+
+            expect(global.fetch).not.toHaveBeenCalled();
+            expect(global.alert).toHaveBeenCalledWith(
+                expect.stringContaining('unavailable in read-only mode')
+            );
+        });
+
+        test('skips the donation prompt before export', async () => {
+            window.readOnly = true;
+            global.fetch = jest.fn().mockResolvedValueOnce({
+                ok: false,
+                status: 503,
+                json: async () => ({})
+            });
+            const button = document.createElement('button');
+
+            await saveInterestingPapersAsMarkdown({ target: button });
+
+            expect(global.confirm).not.toHaveBeenCalled();
         });
     });
 
