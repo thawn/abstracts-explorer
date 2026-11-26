@@ -38,7 +38,9 @@ from abstracts_explorer.clustering.manager import ClusteringManager
 from abstracts_explorer.clustering.pipeline import compute_clusters_with_cache, perform_clustering
 from abstracts_explorer.clustering.representation import ProjectLLMRepresentation
 from abstracts_explorer.clustering.results import (
+    attach_tree_centers,
     build_cluster_centers,
+    build_cluster_centers_from_points,
     build_clustering_results,
     build_hierarchy_levels,
     build_hierarchy_tree,
@@ -195,6 +197,50 @@ class TestResults:
         assert centers[0] == {"x": 1.0, "y": 1.0}
         assert centers[1] == {"x": 10.0, "y": 10.0}
 
+    def test_build_cluster_centers_uses_median_with_outliers(self):
+        embeddings = np.array([[0.0, 0.0], [2.0, 0.0], [100.0, 100.0]])
+        centers = build_cluster_centers(embeddings, [0, 0, 0])
+        assert centers[0] == {"x": 2.0, "y": 0.0}
+
+    def test_build_cluster_centers_from_points_uses_median(self):
+        points = [
+            {"cluster": 0, "x": 0.0, "y": 0.0},
+            {"cluster": 0, "x": 2.0, "y": 0.0},
+            {"cluster": 0, "x": 100.0, "y": 100.0},
+            {"cluster": -1, "x": 5.0, "y": 5.0},
+        ]
+        centers = build_cluster_centers_from_points(points)
+        assert centers == {0: {"x": 2.0, "y": 0.0}}
+
+    def test_attach_tree_centers_uses_median(self):
+        points = [
+            {"cluster": 0, "x": 0.0, "y": 0.0},
+            {"cluster": 0, "x": 2.0, "y": 0.0},
+            {"cluster": 1, "x": 1.0, "y": 3.0},
+            {"cluster": 1, "x": 1.0, "y": 100.0},
+        ]
+        tree = [{"id": 10, "topics": [0, 1]}]
+        enriched = attach_tree_centers(tree, points)
+        assert enriched[0]["center"] == {"x": 1.0, "y": 1.5}
+        assert "center" not in tree[0]
+
+    def test_build_hierarchy_levels_requires_cached_centers(self):
+        points = [
+            {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0},
+            {"id": "p2", "x": 2.0, "y": 2.0, "cluster": 1},
+        ]
+        tree = [{"id": 10, "topics": [0, 1], "label": "Merged", "description": "", "distance": 0.1}]
+        with pytest.raises(ClusteringError, match="missing precomputed centers"):
+            build_hierarchy_levels(
+                tree=tree,
+                flat_topic_ids=[0, 1],
+                flat_labels={0: "A", 1: "B"},
+                flat_keywords={0: ["a"], 1: ["b"]},
+                statistics=build_statistics([0, 1]),
+                points=points,
+                nr_levels=2,
+            )
+
     def test_build_hierarchy_levels_from_tree(self):
         points = [
             {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0},
@@ -217,6 +263,7 @@ class TestResults:
             statistics=stats,
             points=points,
             nr_levels=3,
+            recompute_centers=True,
         )
         assert hierarchy["method"] == "bertopic"
         assert hierarchy["nr_levels"] == 3
@@ -254,25 +301,31 @@ class TestResults:
         assert hierarchy["levels"] == []
 
     def test_derive_hierarchy_levels_uses_tree(self):
+        points = [
+            {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0},
+            {"id": "p2", "x": 2.0, "y": 2.0, "cluster": 1},
+            {"id": "p3", "x": 10.0, "y": 10.0, "cluster": 2},
+            {"id": "p4", "x": 12.0, "y": 12.0, "cluster": 3},
+        ]
+        tree = attach_tree_centers(
+            build_hierarchy_tree(
+                sample_hierarchy(),
+                level_parent_labels(sample_hierarchy()),
+                {4: "Papers about alpha and beta."},
+            ),
+            points,
+        )
         results = {
-            "points": [
-                {"id": "p1", "x": 0.0, "y": 0.0, "cluster": 0},
-                {"id": "p2", "x": 2.0, "y": 2.0, "cluster": 1},
-                {"id": "p3", "x": 10.0, "y": 10.0, "cluster": 2},
-                {"id": "p4", "x": 12.0, "y": 12.0, "cluster": 3},
-            ],
+            "points": points,
             "statistics": build_statistics([0, 1, 2, 3]),
+            "cluster_centers": build_cluster_centers_from_points(points),
             "cluster_labels": {0: "A", 1: "B", 2: "C", 3: "D"},
             "cluster_descriptions": {0: "Papers about A."},
             "cluster_keywords": {0: ["a"], 1: ["b"], 2: ["c"], 3: ["d"]},
             "hierarchy": {
                 "method": "bertopic",
                 "n_topics": 4,
-                "tree": build_hierarchy_tree(
-                    sample_hierarchy(),
-                    level_parent_labels(sample_hierarchy()),
-                    {4: "Papers about alpha and beta."},
-                ),
+                "tree": tree,
             },
         }
 
@@ -281,6 +334,7 @@ class TestResults:
         assert derived["nr_levels"] == 3
         assert len(derived["levels"]) == 3
         assert derived["levels"][0]["mapping"] == {"0": 4, "1": 4, "2": 2, "3": 3}
+        assert derived["levels"][0]["clusters"][0]["center"] == {"x": 1.0, "y": 1.0}
 
     def test_derive_hierarchy_levels_requires_tree(self):
         with pytest.raises(ClusteringError, match="missing their hierarchy tree"):

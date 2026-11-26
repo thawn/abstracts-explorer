@@ -311,9 +311,19 @@ export async function loadFilterOptions(): Promise<void> {
                 }
             }
 
+            // When the configured default is unavailable, the browser selects the
+            // first option implicitly. Make that selection explicit so the years
+            // list and the stats query agree with the visible filters.
+            if (!defaultApplied && conferencesJustPopulated && conferenceSelect && conferenceSelect.options.length > 0) {
+                if (!conferenceSelect.value) {
+                    conferenceSelect.selectedIndex = 0;
+                }
+                updateYearsForConference();
+            }
+
             updateLocationsForConferenceYear();
 
-            if (defaultApplied && window.loadStats) {
+            if (window.loadStats) {
                 window.loadStats();
             }
 
@@ -356,6 +366,9 @@ export async function loadFilterOptions(): Promise<void> {
         populateSessionSelect(modalSessionSelect, filtersData.sessions);
     } catch (error) {
         console.error('Error loading filter options:', error);
+        if (window.loadStats) {
+            window.loadStats();
+        }
     }
 }
 
@@ -486,8 +499,6 @@ function currentActiveTab(): string | undefined {
 export function handleYearChange(): void {
     cancelPendingSearch();
 
-    if (window.loadStats) window.loadStats();
-
     loadFilterOptions();
 
     const currentTab = currentActiveTab();
@@ -527,8 +538,6 @@ export function handleConferenceChange(): void {
     updateYearsForConference();
     cancelPendingSearch();
 
-    if (window.loadStats) window.loadStats();
-
     loadFilterOptions();
 
     const currentTab = currentActiveTab();
@@ -566,8 +575,6 @@ export function handleConferenceChange(): void {
  */
 export function handleLocationChange(): void {
     cancelPendingSearch();
-
-    if (window.loadStats) window.loadStats();
 
     loadFilterOptions();
 

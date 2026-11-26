@@ -65,7 +65,6 @@ function initializeApp(): void {
     configureMarkedWithKatex();
     loadPriorities();
 
-    loadStats();
     loadFilterOptions();
     checkEmbeddingModelCompatibility();
 

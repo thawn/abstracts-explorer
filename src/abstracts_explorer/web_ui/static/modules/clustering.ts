@@ -8,7 +8,7 @@
 import { API_BASE, PLOTLY_COLORS } from './utils/constants.js';
 import { showLoading, showErrorInElement } from './utils/ui-utils.js';
 import { parseJsonResponse } from './utils/api-utils.js';
-import { getSelectedConference, getSelectedLocation, getSelectedYears, escapeHtml } from './utils/dom-utils.js';
+import { getSelectedConference, getSelectedLocation, getSelectedYears, escapeHtml, escapeAttr } from './utils/dom-utils.js';
 import { formatPaperCard } from './paper-card.js';
 import { renderInlineMarkdownWithLatex } from './utils/markdown-utils.js';
 import { ensurePlotly, getPlotly } from './plotly-loader.js';
@@ -22,6 +22,20 @@ const Plotly: any = new Proxy({}, {
         return typeof value === 'function' ? value.bind(impl) : value;
     }
 });
+
+/**
+ * Return the median of a numeric array.
+ * @param {number[]} values
+ * @returns {number}
+ */
+function _median(values) {
+    if (!values.length) return 0;
+    const sorted = values.slice().sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2
+        ? sorted[middle]
+        : (sorted[middle - 1] + sorted[middle]) / 2;
+}
 
 /**
  * Returns Plotly background and font colours matching the current colour scheme.
@@ -72,6 +86,22 @@ let currentClusterConfig = {
 let selectedClusters = new Set();
 let currentLevelIndex = 4;
 let currentLevelState = null;
+// Persisted search query for the cluster legend (survives re-renders)
+let legendSearchQuery = '';
+
+// Zoom-driven hierarchy state
+const ZOOM_LEVEL_MIN = 1;
+const ZOOM_LEVEL_MAX = 10;
+const MIN_ZOOM_DELTA = 0.01;
+const ZOOM_HYSTERESIS = 0.1;
+const ZOOM_SYNC_DELAY_MS = 120;
+let baselineRanges = null;
+let lastAutoZoom = 1;
+let suppressZoomSync = false;
+let resetViewOnNextRender = true;
+let zoomSyncTimer = null;
+let pendingZoomPlot = null;
+let renderedDocumentCount = 0;
 
 // Custom topic clustering state
 let customQueryClusters = [];  // Array of custom topic cluster objects
@@ -109,8 +139,15 @@ export function resetClusters() {
     customClusterMode = false;
     customClusterVisibility = {};
     selectedClusters.clear();
+    legendSearchQuery = '';
     currentLevelIndex = DEFAULT_HIERARCHY_LEVEL;
     currentLevelState = null;
+    _cancelZoomSync();
+    baselineRanges = null;
+    lastAutoZoom = 1;
+    suppressZoomSync = false;
+    resetViewOnNextRender = true;
+    renderedDocumentCount = 0;
     // Reset topic evolution state
     topicEvolutionTraces = [];
     topicEvolutionColorIdx = 0;
@@ -155,8 +192,13 @@ export async function loadClusters() {
         }
 
         const levels = _getHierarchyLevels();
-        currentLevelIndex = levels.length ? Math.min(DEFAULT_HIERARCHY_LEVEL, levels.length - 1) : 0;
+        currentLevelIndex = levels.length ? levels.length - 1 : 0;
         selectedClusters.clear();
+        _cancelZoomSync();
+        baselineRanges = null;
+        lastAutoZoom = 1;
+        resetViewOnNextRender = true;
+        renderedDocumentCount = 0;
         _bindHierarchySlider();
         renderCurrentLevel();
     } catch (error) {
@@ -182,6 +224,127 @@ function _getActiveLevel() {
     if (!levels.length) return null;
     const index = Math.min(Math.max(currentLevelIndex, 0), levels.length - 1);
     return levels[index];
+}
+
+/**
+ * Read the current x/y axis ranges from a Plotly plot.
+ * @param {HTMLElement} plotDiv
+ * @returns {{x: number[], y: number[]}|null}
+ */
+function _capturePlotRanges(plotDiv) {
+    if (!plotDiv) return null;
+    const fullLayout = plotDiv._fullLayout || {};
+    const layout = plotDiv.layout || {};
+    const fullX = fullLayout.xaxis && fullLayout.xaxis.range;
+    const fullY = fullLayout.yaxis && fullLayout.yaxis.range;
+    const layoutX = layout.xaxis && layout.xaxis.range;
+    const layoutY = layout.yaxis && layout.yaxis.range;
+    const xRange = Array.isArray(fullX) ? fullX : (Array.isArray(layoutX) ? layoutX : null);
+    const yRange = Array.isArray(fullY) ? fullY : (Array.isArray(layoutY) ? layoutY : null);
+    if (!xRange || !yRange) return null;
+    const x = xRange.map(Number);
+    const y = yRange.map(Number);
+    if (!x.every(Number.isFinite) || !y.every(Number.isFinite)) return null;
+    return { x, y };
+}
+
+/**
+ * Compute the current zoom factor relative to the initial full view.
+ * @param {HTMLElement} plotDiv
+ * @returns {number}
+ */
+function _getZoomFactor(plotDiv) {
+    if (!baselineRanges) return 1;
+    const current = _capturePlotRanges(plotDiv);
+    if (!current) return 1;
+    const baseX = Math.abs(baselineRanges.x[1] - baselineRanges.x[0]);
+    const baseY = Math.abs(baselineRanges.y[1] - baselineRanges.y[0]);
+    const curX = Math.abs(current.x[1] - current.x[0]);
+    const curY = Math.abs(current.y[1] - current.y[0]);
+    if (!(baseX > 0) || !(baseY > 0) || !(curX > 0) || !(curY > 0)) return 1;
+    const zoom = Math.sqrt((baseX / curX) * (baseY / curY));
+    return Number.isFinite(zoom) ? Math.max(1, zoom) : 1;
+}
+
+/**
+ * Map a zoom factor to a hierarchy level index.
+ *
+ * A small deadband around each level boundary prevents rapid flip-flopping
+ * when the zoom factor hovers right at a threshold.
+ * @param {number} zoom
+ * @returns {number}
+ */
+function _levelForZoom(zoom) {
+    const levels = _getHierarchyLevels();
+    if (!levels.length) return 0;
+    const maxIndex = levels.length - 1;
+    const span = ZOOM_LEVEL_MAX - ZOOM_LEVEL_MIN;
+    const t = Math.min(Math.max((zoom - ZOOM_LEVEL_MIN) / span, 0), 1);
+    const continuous = maxIndex * (1 - t);
+    const target = Math.round(continuous);
+    if (target === currentLevelIndex) return currentLevelIndex;
+    if (Math.abs(continuous - currentLevelIndex) < 0.5 + ZOOM_HYSTERESIS) {
+        return currentLevelIndex;
+    }
+    return target;
+}
+
+/**
+ * Adjust the hierarchy level to match the current zoom factor.
+ * @param {HTMLElement} plotDiv
+ */
+function _syncLevelToZoom(plotDiv) {
+    if (customClusterMode || suppressZoomSync) return;
+    if (!_getHierarchyLevels().length || !baselineRanges) return;
+    const zoom = _getZoomFactor(plotDiv);
+    if (Math.abs(zoom - lastAutoZoom) <= MIN_ZOOM_DELTA) return;
+    lastAutoZoom = zoom;
+    const level = _levelForZoom(zoom);
+    if (level !== currentLevelIndex) setHierarchyLevel(level);
+}
+
+/**
+ * Cancel a pending zoom-driven level sync.
+ */
+function _cancelZoomSync() {
+    if (zoomSyncTimer !== null) {
+        clearTimeout(zoomSyncTimer);
+    }
+    zoomSyncTimer = null;
+    pendingZoomPlot = null;
+}
+
+/**
+ * Coalesce rapid relayout events into a single level sync once the zoom
+ * gesture settles. Rendering the new level for every wheel tick is what makes
+ * the plot stutter on large datasets.
+ * @param {HTMLElement} plotDiv
+ */
+function _scheduleZoomSync(plotDiv) {
+    pendingZoomPlot = plotDiv;
+    if (zoomSyncTimer !== null) {
+        clearTimeout(zoomSyncTimer);
+    }
+    zoomSyncTimer = setTimeout(function () {
+        zoomSyncTimer = null;
+        const target = pendingZoomPlot;
+        pendingZoomPlot = null;
+        if (target) _syncLevelToZoom(target);
+    }, ZOOM_SYNC_DELAY_MS);
+}
+
+/**
+ * Keep the hierarchy level in sync with Plotly zoom changes.
+ * @param {HTMLElement} plotDiv
+ */
+function _bindZoomSyncHandler(plotDiv) {
+    if (!plotDiv || typeof plotDiv.on !== 'function') return;
+    if (typeof plotDiv.removeAllListeners === 'function') {
+        plotDiv.removeAllListeners('plotly_relayout');
+    }
+    plotDiv.on('plotly_relayout', function () {
+        _scheduleZoomSync(plotDiv);
+    });
 }
 
 /**
@@ -236,6 +399,7 @@ function _bindHierarchySlider() {
 export function setHierarchyLevel(index) {
     const levels = _getHierarchyLevels();
     if (!levels.length) return;
+    _cancelZoomSync();
     const previousLevel = _getActiveLevel();
     currentLevelIndex = Math.min(Math.max(parseInt(index, 10) || 0, 0), levels.length - 1);
     const nextLevel = levels[currentLevelIndex];
@@ -298,9 +462,10 @@ function _buildLevelState() {
         let center = meta.center;
         if (!center && flatCenters[String(id)]) center = flatCenters[String(id)];
         if (!center) {
-            const sumX = clusterPoints.reduce((sum, point) => sum + point.x, 0);
-            const sumY = clusterPoints.reduce((sum, point) => sum + point.y, 0);
-            center = { x: sumX / clusterPoints.length, y: sumY / clusterPoints.length };
+            center = {
+                x: _median(clusterPoints.map(point => point.x)),
+                y: _median(clusterPoints.map(point => point.y))
+            };
         }
         const label = meta.label
             || flatLabels[String(id)]
@@ -420,6 +585,13 @@ export function renderCurrentLevel(preserveSelection = false) {
         selectedClusters = new Set(state.entries.map(entry => String(entry.id)));
     }
 
+    const shouldResetView = resetViewOnNextRender;
+    resetViewOnNextRender = false;
+    if (shouldResetView) {
+        baselineRanges = null;
+        lastAutoZoom = 1;
+    }
+
     const plotColors = getPlotColors();
     const layout = {
         title: '',
@@ -513,39 +685,55 @@ export function renderCurrentLevel(preserveSelection = false) {
     const plotElement = document.getElementById('cluster-plot');
     if (!plotElement) return;
 
-    const canRestyle = plotElement.data
-        && plotElement.data.length === 2
-        && plotElement.data[0].x
-        && plotElement.data[0].x.length === state.xs.length;
+    const previousRanges = shouldResetView ? null : _capturePlotRanges(plotElement);
+
+    const canRestyle = !shouldResetView
+        && plotElement.data
+        && plotElement.data.length === 2;
 
     if (canRestyle) {
-        Plotly.restyle(plotElement, {
-            'marker.color': [state.colors],
-            customdata: [state.customdata]
-        }, [0]);
-        Plotly.restyle(plotElement, {
-            x: [state.starX],
-            y: [state.starY],
-            text: [state.starText],
-            customdata: [state.starCustomdata],
-            hovertemplate: [state.starHoverTemplate],
-            'marker.color': [state.starColors]
-        }, [1]);
-        _bindClusterClickHandler(plotElement);
-        createLevelLegend(state);
-        _updateHierarchyControls(state);
-        applySelectionToPlot();
+        suppressZoomSync = true;
+        try {
+            if (!baselineRanges) {
+                baselineRanges = _capturePlotRanges(plotElement);
+            }
+            lastAutoZoom = _getZoomFactor(plotElement);
+            createLevelLegend(state);
+            _updateHierarchyControls(state);
+            applySelectionToPlot();
+        } finally {
+            suppressZoomSync = false;
+        }
         return;
     }
 
+    if (previousRanges) {
+        layout.xaxis.range = previousRanges.x.slice();
+        layout.yaxis.range = previousRanges.y.slice();
+    }
+
+    suppressZoomSync = true;
     plotElement.innerHTML = '';
     Plotly.newPlot(plotElement, [documentTrace, starTrace], layout, config).then(function () {
-        Plotly.relayout(plotElement, {
-            'xaxis.fixedrange': false,
-            'yaxis.fixedrange': false
-        });
-        _bindClusterClickHandler(plotElement);
-        applySelectionToPlot();
+        try {
+            Plotly.relayout(plotElement, {
+                'xaxis.fixedrange': false,
+                'yaxis.fixedrange': false
+            });
+            if (!baselineRanges) {
+                baselineRanges = _capturePlotRanges(plotElement);
+            }
+            lastAutoZoom = _getZoomFactor(plotElement);
+            renderedDocumentCount = state.xs.length;
+            _bindClusterClickHandler(plotElement);
+            _bindZoomSyncHandler(plotElement);
+            applySelectionToPlot();
+        } finally {
+            suppressZoomSync = false;
+        }
+    }).catch(function (error) {
+        suppressZoomSync = false;
+        console.error('Error rendering cluster plot:', error);
     });
 
     createLevelLegend(state);
@@ -570,11 +758,33 @@ function _bindClusterClickHandler(plotDiv) {
     }
     plotDiv.on('plotly_click', function (data) {
         const point = data.points && data.points[0];
-        const customdata = point && point.customdata;
-        if (customdata && customdata.id) {
+        if (!point) return;
+        const customdata = point.customdata || {};
+        const isStar = (point.data && point.data.name === 'Clusters')
+            || (customdata.cluster_id !== undefined && customdata.id == null);
+        if (isStar && customdata.cluster_id !== undefined) {
+            _toggleClusterIsolation(customdata.cluster_id);
+            return;
+        }
+        if (customdata.id) {
             showClusterPaperDetails(customdata.id, customdata);
         }
     });
+}
+
+/**
+ * Isolate a cluster (hide all others), toggling back to all clusters when the
+ * cluster is already the only visible one.
+ * @param {number|string} clusterId - ID of the cluster whose star was clicked
+ */
+function _toggleClusterIsolation(clusterId) {
+    const state = currentLevelState;
+    if (!state || !state.entries) return;
+    const key = String(clusterId);
+    const allIds = state.entries.map(entry => String(entry.id));
+    const isIsolated = selectedClusters.size === 1 && selectedClusters.has(key);
+    selectedClusters = isIsolated ? new Set(allIds) : new Set([key]);
+    applySelectionToPlot();
 }
 
 /**
@@ -617,14 +827,24 @@ function applySelectionToPlot() {
         if (isVisible) visibleIndices.push(index);
     });
 
-    Plotly.restyle(plotDiv, {
-        x: [visibleIndices.map(index => state.xs[index])],
-        y: [visibleIndices.map(index => state.ys[index])],
-        text: [visibleIndices.map(index => state.texts[index])],
-        customdata: [visibleIndices.map(index => state.customdata[index])],
-        ids: [visibleIndices.map(index => state.ids[index])],
-        'marker.color': [visibleIndices.map(index => state.colors[index])]
-    }, [0]);
+    const allVisible = visibleIndices.length === state.xs.length;
+    const traceHasAllPoints = renderedDocumentCount === state.xs.length;
+
+    if (allVisible && traceHasAllPoints) {
+        Plotly.restyle(plotDiv, {
+            'marker.color': [state.colors]
+        }, [0]);
+    } else {
+        Plotly.restyle(plotDiv, {
+            x: [visibleIndices.map(index => state.xs[index])],
+            y: [visibleIndices.map(index => state.ys[index])],
+            text: [visibleIndices.map(index => state.texts[index])],
+            customdata: [visibleIndices.map(index => state.customdata[index])],
+            ids: [visibleIndices.map(index => state.ids[index])],
+            'marker.color': [visibleIndices.map(index => state.colors[index])]
+        }, [0]);
+    }
+    renderedDocumentCount = visibleIndices.length;
 
     const visibleEntries = state.entries.filter(entry => selectedClusters.has(String(entry.id)));
     Plotly.restyle(plotDiv, {
@@ -638,6 +858,7 @@ function applySelectionToPlot() {
             description: entry.description
         }))],
         ids: [visibleEntries.map(entry => String(entry.id))],
+        hovertemplate: [state.starHoverTemplate],
         'marker.color': [visibleEntries.map(entry => entry.color)]
     }, [1]);
 
@@ -677,6 +898,68 @@ function formatClusterStats(statistics, labels) {
 }
 
 /**
+ * Filter legend elements live based on a search query.
+ *
+ * Matching is a case-insensitive substring search over each element's
+ * `data-search-text`. Non-matching elements are hidden but kept in the DOM so
+ * their selection state is preserved.
+ *
+ * @param {HTMLElement} container - Container holding the legend elements
+ * @param {string} selector - Selector identifying the filterable elements
+ * @param {string} query - Search query entered by the user
+ */
+function applyLegendSearch(container, selector, query) {
+    if (!container) return;
+    const normalized = (query || '').trim().toLowerCase();
+    container.querySelectorAll(selector).forEach(element => {
+        const haystack = (element.dataset.searchText || element.textContent || '').toLowerCase();
+        const matches = normalized === '' || haystack.includes(normalized);
+        element.style.display = matches ? '' : 'none';
+    });
+}
+
+/**
+ * Create the search input used to live-filter the legend.
+ *
+ * @param {Function} onInput - Callback invoked with the current query on input
+ * @returns {HTMLDivElement} Wrapper element containing the input and clear button
+ */
+function createLegendSearchField(onInput) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'relative mb-2';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'cluster-legend-search';
+    input.placeholder = 'Search clusters...';
+    input.value = legendSearchQuery;
+    input.className = 'w-full pr-10 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-600 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500';
+    input.addEventListener('input', () => {
+        legendSearchQuery = input.value;
+        onInput(input.value);
+    });
+
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.setAttribute('aria-label', 'Clear cluster search');
+    clearBtn.title = 'Clear search';
+    clearBtn.className = 'absolute right-2 top-1/2 -translate-y-1/2 px-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200';
+    const clearIcon = document.createElement('i');
+    clearIcon.className = 'fas fa-times';
+    clearBtn.appendChild(clearIcon);
+    clearBtn.addEventListener('click', () => {
+        legendSearchQuery = '';
+        input.value = '';
+        onInput('');
+        input.focus();
+    });
+
+    wrapper.appendChild(input);
+    wrapper.appendChild(clearBtn);
+    return wrapper;
+}
+
+/**
  * Create the custom legend for the active level.
  * @param {Object} state
  */
@@ -699,6 +982,11 @@ function createLevelLegend(state) {
     levelInfo.textContent = `Level ${currentLevelIndex} · ${state.entries.length} clusters`;
     header.appendChild(levelInfo);
 
+    const itemsContainer = document.createElement('div');
+    itemsContainer.className = 'space-y-1 overflow-y-auto pr-2 flex-1';
+    itemsContainer.style.minHeight = '0';
+    itemsContainer.style.maxHeight = '100%';
+
     const buttonContainer = document.createElement('div');
     buttonContainer.className = 'flex gap-2';
 
@@ -706,7 +994,13 @@ function createLevelLegend(state) {
     selectAllBtn.className = 'px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors';
     selectAllBtn.textContent = 'All';
     selectAllBtn.addEventListener('click', () => {
-        selectedClusters = new Set(state.entries.map(entry => String(entry.id)));
+        const visibleIds = [];
+        itemsContainer.querySelectorAll('[data-cluster-id]').forEach((item: HTMLElement) => {
+            if (item.style.display !== 'none') {
+                visibleIds.push(String(item.dataset.clusterId));
+            }
+        });
+        selectedClusters = new Set(visibleIds);
         applySelectionToPlot();
     });
 
@@ -714,24 +1008,31 @@ function createLevelLegend(state) {
     clearAllBtn.className = 'px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors';
     clearAllBtn.textContent = 'None';
     clearAllBtn.addEventListener('click', () => {
-        selectedClusters.clear();
+        const hiddenIds = [];
+        itemsContainer.querySelectorAll('[data-cluster-id]').forEach((item: HTMLElement) => {
+            if (item.style.display === 'none') {
+                hiddenIds.push(String(item.dataset.clusterId));
+            }
+        });
+        selectedClusters = new Set(hiddenIds);
         applySelectionToPlot();
     });
 
     buttonContainer.appendChild(selectAllBtn);
     buttonContainer.appendChild(clearAllBtn);
     header.appendChild(buttonContainer);
-    legendContainer.appendChild(header);
 
-    const itemsContainer = document.createElement('div');
-    itemsContainer.className = 'space-y-1 overflow-y-auto pr-2 flex-1';
-    itemsContainer.style.minHeight = '0';
-    itemsContainer.style.maxHeight = '100%';
+    header.appendChild(createLegendSearchField(query => {
+        applyLegendSearch(itemsContainer, '[data-cluster-id]', query);
+    }));
+
+    legendContainer.appendChild(header);
 
     state.entries.forEach(entry => {
         const item = document.createElement('div');
         item.className = 'flex items-center gap-2 p-2 rounded cursor-pointer transition-all';
         item.dataset.clusterId = String(entry.id);
+        item.dataset.searchText = `${entry.label} ${entry.description || ''}`;
         item.title = entry.description
             ? `${entry.label} (${entry.size} papers)\n${entry.description}`
             : `${entry.label} (${entry.size} papers)`;
@@ -763,6 +1064,7 @@ function createLevelLegend(state) {
     });
 
     legendContainer.appendChild(itemsContainer);
+    applyLegendSearch(itemsContainer, '[data-cluster-id]', legendSearchQuery);
     _updateLegendSelectionStyles();
 }
 
@@ -1082,9 +1384,9 @@ function visualizeClustersWithCustomQueries() {
             legendgroup: cluster.id
         });
         
-        // Calculate center position as mean of cluster points
-        const centerX = clusterPoints.reduce((sum, p) => sum + p.x, 0) / clusterPoints.length;
-        const centerY = clusterPoints.reduce((sum, p) => sum + p.y, 0) / clusterPoints.length;
+        // Calculate robust center position as median of cluster points
+        const centerX = _median(clusterPoints.map(p => p.x));
+        const centerY = _median(clusterPoints.map(p => p.y));
         
         // Add cluster center as star marker
         traces.push({
@@ -1095,6 +1397,7 @@ function visualizeClustersWithCustomQueries() {
             name: `${cluster.query} (center)`,
             text: [cluster.query],
             textposition: 'top center',
+            customdata: [{ cluster_id: cluster.id }],
             marker: {
                 color: clusterColor,
                 symbol: 'star',
@@ -1153,6 +1456,7 @@ function visualizeClustersWithCustomQueries() {
         displayModeBar: true,
         modeBarButtonsToRemove: ['lasso2d', 'select2d'],
         displaylogo: false,
+        scrollZoom: true,
         toImageButtonOptions: {
             format: 'png',
             filename: 'custom_cluster_plot',
@@ -1167,12 +1471,17 @@ function visualizeClustersWithCustomQueries() {
     
     // Add click handler
     plotDiv.on('plotly_click', function(data) {
-        if (data.points.length > 0) {
-            const point = data.points[0];
-            const paperId = point.customdata?.id || point.data.customdata?.[point.pointIndex]?.id;
-            if (paperId) {
-                showClusterPaperDetails(paperId);
-            }
+        if (!data.points || data.points.length === 0) return;
+        const point = data.points[0];
+        const customdata = point.customdata || {};
+        const isStar = point.data && point.data.marker && point.data.marker.symbol === 'star';
+        if (isStar && customdata.cluster_id) {
+            _toggleCustomClusterIsolation(customdata.cluster_id);
+            return;
+        }
+        const paperId = customdata.id || point.data.customdata?.[point.pointIndex]?.id;
+        if (paperId) {
+            showClusterPaperDetails(paperId);
         }
     });
     
@@ -1185,27 +1494,45 @@ function visualizeClustersWithCustomQueries() {
  */
 function updateCustomQueryLegend() {
     const legendDiv = document.getElementById('cluster-legend');
-    
+    if (!legendDiv) return;
+
     if (customQueryClusters.length === 0) {
         legendDiv.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-sm">No custom topics</p>';
         return;
     }
-    
-    let html = '<div class="space-y-3">';
-    html += '<h4 class="text-md font-bold text-gray-700 dark:text-gray-300 mb-3">Custom Topics</h4>';
-    
+
+    legendDiv.innerHTML = '';
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'space-y-3';
+
+    const title = document.createElement('h4');
+    title.className = 'text-md font-bold text-gray-700 dark:text-gray-300 mb-3';
+    title.textContent = 'Custom Topics';
+    wrapper.appendChild(title);
+
+    const itemsContainer = document.createElement('div');
+    itemsContainer.className = 'space-y-3';
+
+    wrapper.appendChild(createLegendSearchField(query => {
+        applyLegendSearch(itemsContainer, '[data-custom-topic]', query);
+    }));
+
+    let html = '';
     customQueryClusters.forEach((cluster, idx) => {
         // Skip blue (first color) - start from index 1 to avoid confusion with background
         const colorIndex = (idx + 1) % PLOTLY_COLORS.length;
         const clusterColor = PLOTLY_COLORS[colorIndex];
         const escapedQuery = escapeHtml(cluster.query);
-        
+        const searchText = escapeAttr(cluster.query);
+
         // Check if this cluster is visible (default: true)
         const isVisible = customClusterVisibility[cluster.id] !== false;
         const opacityClass = isVisible ? 'opacity-100' : 'opacity-50';
-        
+
         html += `
-            <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+            <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                data-custom-topic data-search-text="${searchText}">
                 <div class="flex items-center gap-3 flex-1 cursor-pointer ${opacityClass}" onclick="toggleCustomClusterVisibility('${cluster.id}')">
                     <div class="w-4 h-4 rounded-full" style="background-color: ${clusterColor}"></div>
                     <div class="flex-1">
@@ -1220,9 +1547,12 @@ function updateCustomQueryLegend() {
             </div>
         `;
     });
-    
-    html += '</div>';
-    legendDiv.innerHTML = html;
+
+    itemsContainer.innerHTML = html;
+    wrapper.appendChild(itemsContainer);
+    legendDiv.appendChild(wrapper);
+
+    applyLegendSearch(itemsContainer, '[data-custom-topic]', legendSearchQuery);
 }
 
 /**
@@ -1241,6 +1571,45 @@ function displayCustomQueryStats(customCluster) {
  */
 function updateVisualizationWithCustomCluster(customCluster) {
     // No longer used - replaced by visualizeClustersWithCustomQueries
+}
+
+/**
+ * Apply the current custom-cluster visibility flags to all cluster traces.
+ */
+function _applyCustomClusterVisibility() {
+    const plotDiv = document.getElementById('cluster-plot');
+    if (!plotDiv || !plotDiv.data) return;
+
+    const traceIndices = [];
+    const visibility = [];
+    plotDiv.data.forEach((trace, idx) => {
+        if (trace.legendgroup) {
+            traceIndices.push(idx);
+            visibility.push(customClusterVisibility[trace.legendgroup] !== false);
+        }
+    });
+
+    if (traceIndices.length > 0) {
+        Plotly.restyle(plotDiv, { visible: visibility }, traceIndices);
+    }
+    updateCustomQueryLegend();
+}
+
+/**
+ * Isolate a custom cluster (hide all others), toggling back to all clusters
+ * when the cluster is already the only visible one.
+ * @param {string} clusterId - ID of the custom cluster whose star was clicked
+ */
+function _toggleCustomClusterIsolation(clusterId) {
+    const clusterIds = customQueryClusters.map(cluster => cluster.id);
+    const visibleIds = clusterIds.filter(id => customClusterVisibility[id] !== false);
+    const isIsolated = visibleIds.length === 1 && visibleIds[0] === clusterId;
+
+    clusterIds.forEach(id => {
+        customClusterVisibility[id] = isIsolated ? true : id === clusterId;
+    });
+
+    _applyCustomClusterVisibility();
 }
 
 /**

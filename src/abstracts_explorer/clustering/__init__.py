@@ -29,13 +29,17 @@ if TYPE_CHECKING:
         compute_clusters_with_cache,
         perform_clustering,
     )
-    from abstracts_explorer.clustering.results import derive_hierarchy_levels
+    from abstracts_explorer.clustering.results import (
+        build_cluster_centers_from_points,
+        derive_hierarchy_levels,
+    )
 
 _LAZY_IMPORTS = {
     "ClusteringManager": "abstracts_explorer.clustering.manager",
     "perform_clustering": "abstracts_explorer.clustering.pipeline",
     "compute_clusters_with_cache": "abstracts_explorer.clustering.pipeline",
     "derive_hierarchy_levels": "abstracts_explorer.clustering.results",
+    "build_cluster_centers_from_points": "abstracts_explorer.clustering.results",
 }
 
 
@@ -62,6 +66,7 @@ __all__ = [
     "perform_clustering",
     "compute_clusters_with_cache",
     "derive_hierarchy_levels",
+    "build_cluster_centers_from_points",
     "DEFAULT_CLUSTERING_METHOD",
     "DEFAULT_REDUCTION_METHOD",
     "DEFAULT_N_COMPONENTS",

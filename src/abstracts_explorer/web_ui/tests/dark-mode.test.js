@@ -90,7 +90,8 @@ jest.unstable_mockModule('../static/modules/utils/dom-utils.js', () => ({
     getSelectedConference: jest.fn(() => ''),
     getSelectedYears: jest.fn(() => []),
     getSelectedLocation: jest.fn(() => ''),
-    escapeHtml: jest.fn((s) => s)
+    escapeHtml: jest.fn((s) => s),
+    escapeAttr: jest.fn((s) => s)
 }));
 
 jest.unstable_mockModule('../static/modules/paper-card.js', () => ({

@@ -7,7 +7,7 @@ This workflow automatically builds and publishes Docker container images for Abs
 The workflow runs on:
 - **Push to main/develop branches** - Builds and pushes to GitHub Container Registry
 - **Pull requests** - Builds only (no push) for validation
-- **Git tags** (v*.*.*) - Builds and pushes to both GitHub Container Registry and Docker Hub
+- **Git tags** (v*.*.*, including prereleases like `v1.0.0-RC1`) - Builds and pushes to both GitHub Container Registry and Docker Hub
 - **Manual trigger** - Via workflow_dispatch
 
 ## Published Images
@@ -30,12 +30,13 @@ The workflow creates the following tags following best practices:
 
 | Tag Pattern | When Created | Example | Notes |
 |-------------|--------------|---------|-------|
-| `latest` | Release tags only | `latest` | Always points to latest release |
+| `latest` | Stable release tags only | `latest` | Always points to latest stable release; never updated by prereleases |
 | `main` | Main branch | `main` | Latest main branch build |
 | `develop` | Develop branch | `develop` | Latest develop branch build |
-| `v*.*.*` | Release tags | `v1.0.0` | Full semver version |
-| `v*.*` | Release tags | `v1.0` | Major.minor version |
-| `v*` | Release tags | `v1` | Major version |
+| `X.Y.Z` | Stable release tags | `1.0.0` | Full semver version |
+| `X.Y` | Stable release tags | `1.0` | Major.minor version |
+| `X` | Stable release tags | `1` | Major version |
+| `X.Y.Z-<pre>` | Prerelease tags | `1.0.0-RC1` | Full version only; does not update `latest`/major/minor |
 | `sha-*` | All builds | `sha-5f8567d` | Git commit SHA (short) |
 | `pr-*` | Pull requests | `pr-123` | Pull request number |
 
@@ -43,8 +44,8 @@ The workflow creates the following tags following best practices:
 
 This workflow follows container image tagging best practices:
 
-1. **`latest` tag** - Points ONLY to the latest release, never to branch builds
-2. **Git tags** - Each git tag (`v*.*.*`) creates corresponding container tags
+1. **`latest` tag** - Points ONLY to the latest *stable* release, never to branch builds or prereleases (`v1.0.0-RC1`, `v1.0.0-beta.1`)
+2. **Git tags** - Each git tag (`v*.*.*`) creates corresponding container tags; prerelease tags produce only their full version tag
 3. **Git commit SHA** - Every container has a `sha-*` tag for traceability to source code
 4. **Branch tags** - Development branches have their own tags for testing
 

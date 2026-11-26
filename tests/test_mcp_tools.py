@@ -688,6 +688,7 @@ class TestExecuteMCPToolE2E:
             },
             "cluster_labels": {"0": "Machine Learning", "1": "NLP"},
             "cluster_keywords": {"0": ["ml", "deep"], "1": ["nlp", "bert"]},
+            "cluster_centers": {"0": {"x": 0.1, "y": 0.1}, "1": {"x": 1.05, "y": 1.05}},
             "hierarchy": {
                 "method": "bertopic",
                 "n_topics": 2,
@@ -700,6 +701,7 @@ class TestExecuteMCPToolE2E:
                         "distance": 0.42,
                         "child_left_id": 0,
                         "child_right_id": 1,
+                        "center": {"x": 0.2, "y": 0.2},
                     }
                 ],
             },
@@ -1698,6 +1700,7 @@ def test_select_hierarchy_level_derives_from_tree():
             "distance": 0.1 * (index + 1),
             "child_left_id": 0,
             "child_right_id": 1,
+            "center": {"x": 0.0, "y": 0.0},
         }
         for index in range(7)
     ]
@@ -1706,6 +1709,7 @@ def test_select_hierarchy_level_derives_from_tree():
         "statistics": {"n_clusters": 2, "cluster_sizes": {0: 1, 1: 1}},
         "cluster_labels": {"0": "A", "1": "B"},
         "cluster_keywords": {"0": ["a"], "1": ["b"]},
+        "cluster_centers": {"0": {"x": 0.0, "y": 0.0}, "1": {"x": 1.0, "y": 1.0}},
         "hierarchy": {"method": "bertopic", "n_topics": 2, "tree": tree},
     }
 
