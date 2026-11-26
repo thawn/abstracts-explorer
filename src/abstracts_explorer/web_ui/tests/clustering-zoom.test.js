@@ -39,6 +39,8 @@ const { loadClusters, setHierarchyLevel, resetClusters, searchCustomCluster } = 
     '../static/modules/clustering.js'
 );
 
+const ZOOM_SYNC_DELAY_MS = 120;
+
 function buildData(levels) {
     return {
         points: [
@@ -118,13 +120,30 @@ function setRanges(plotDiv, xRange, yRange = xRange) {
     };
 }
 
+function triggerZoom(plotDiv, data = {}) {
+    getRelayoutHandler(plotDiv)(data);
+    jest.advanceTimersByTime(ZOOM_SYNC_DELAY_MS);
+}
+
+function installRenderedTraces(plotDiv) {
+    plotDiv.data = [
+        { x: [1, 2], y: [1, 2] },
+        { x: [1.5], y: [1.5] }
+    ];
+}
+
 describe('Zoom-driven hierarchy levels', () => {
     let plotDiv;
 
     beforeEach(() => {
+        jest.useFakeTimers();
         jest.clearAllMocks();
         resetClusters();
         plotDiv = installDom();
+    });
+
+    afterEach(() => {
+        jest.useRealTimers();
     });
 
     it('starts at the coarsest level when fully zoomed out', async () => {
@@ -165,62 +184,97 @@ describe('Zoom-driven hierarchy levels', () => {
 
     it('zooms all the way in to the finest level at 10x', async () => {
         await loadWithLevels(plotDiv, buildLevels(10));
-        const handler = getRelayoutHandler(plotDiv);
 
         setRanges(plotDiv, [45, 55]);
-        handler({ 'xaxis.range[0]': 45, 'xaxis.range[1]': 55 });
+        triggerZoom(plotDiv, { 'xaxis.range[0]': 45, 'xaxis.range[1]': 55 });
 
         expect(document.getElementById('hierarchy-level-slider').value).toBe('0');
     });
 
     it('maps intermediate zoom levels to intermediate hierarchy levels', async () => {
         await loadWithLevels(plotDiv, buildLevels(10));
-        const handler = getRelayoutHandler(plotDiv);
 
         // 3.25x zoom: t = (3.25 - 1) / 9 = 0.25 -> level round(9 * 0.75) = 7
         setRanges(plotDiv, [34.6153846, 65.3846154]);
-        handler({});
+        triggerZoom(plotDiv, {});
 
         expect(document.getElementById('hierarchy-level-slider').value).toBe('7');
     });
 
     it('returns to the coarsest level when zooming back out', async () => {
         await loadWithLevels(plotDiv, buildLevels(10));
-        const handler = getRelayoutHandler(plotDiv);
 
         setRanges(plotDiv, [45, 55]);
-        handler({});
+        triggerZoom(plotDiv, {});
         expect(document.getElementById('hierarchy-level-slider').value).toBe('0');
         await flushPromises();
 
         setRanges(plotDiv, [0, 100]);
-        getRelayoutHandler(plotDiv)({});
+        triggerZoom(plotDiv, {});
         expect(document.getElementById('hierarchy-level-slider').value).toBe('9');
     });
 
     it('does not override a manual level when the plot is only panned', async () => {
         await loadWithLevels(plotDiv, buildLevels(10));
-        let handler = getRelayoutHandler(plotDiv);
 
         setRanges(plotDiv, [33.3333, 66.6667]);
-        handler({});
+        triggerZoom(plotDiv, {});
         expect(document.getElementById('hierarchy-level-slider').value).toBe('7');
         await flushPromises();
 
         setHierarchyLevel(3);
         await flushPromises();
-        handler = getRelayoutHandler(plotDiv);
 
         setRanges(plotDiv, [43.3333, 76.6667]);
-        handler({});
+        triggerZoom(plotDiv, {});
 
         expect(document.getElementById('hierarchy-level-slider').value).toBe('3');
+    });
+
+    it('coalesces a burst of relayout events into a single level render', async () => {
+        await loadWithLevels(plotDiv, buildLevels(10));
+        installRenderedTraces(plotDiv);
+        const handler = getRelayoutHandler(plotDiv);
+        global.Plotly.restyle.mockClear();
+
+        setRanges(plotDiv, [40, 60]);
+        handler({});
+        setRanges(plotDiv, [30, 70]);
+        handler({});
+        setRanges(plotDiv, [45, 55]);
+        handler({});
+        jest.advanceTimersByTime(ZOOM_SYNC_DELAY_MS);
+
+        expect(document.getElementById('hierarchy-level-slider').value).toBe('0');
+        const documentRestyles = global.Plotly.restyle.mock.calls.filter(
+            call => Array.isArray(call[2]) && call[2][0] === 0
+        );
+        expect(documentRestyles).toHaveLength(1);
+    });
+
+    it('uses restyle and only recolors points when all are visible', async () => {
+        await loadWithLevels(plotDiv, buildLevels(10));
+        installRenderedTraces(plotDiv);
+        setRanges(plotDiv, [45, 55]);
+        global.Plotly.newPlot.mockClear();
+        global.Plotly.restyle.mockClear();
+
+        triggerZoom(plotDiv, {});
+
+        expect(global.Plotly.newPlot).not.toHaveBeenCalled();
+        const documentRestyles = global.Plotly.restyle.mock.calls.filter(
+            call => Array.isArray(call[2]) && call[2][0] === 0
+        );
+        expect(documentRestyles).toHaveLength(1);
+        const update = documentRestyles[0][1];
+        expect(update['marker.color']).toBeTruthy();
+        expect(update.x).toBeUndefined();
     });
 
     it('does not change the zoom range when the manual slider is moved', async () => {
         await loadWithLevels(plotDiv, buildLevels(10));
         setRanges(plotDiv, [33.3333, 66.6667]);
-        getRelayoutHandler(plotDiv)({});
+        triggerZoom(plotDiv, {});
         await flushPromises();
 
         const before = JSON.parse(JSON.stringify(plotDiv.layout));
@@ -237,11 +291,11 @@ describe('Zoom-driven hierarchy levels', () => {
     it('preserves the current zoom when a level change rebuilds the plot', async () => {
         await loadWithLevels(plotDiv, buildLevels(10));
 
-        plotDiv.data = [{ x: [1], y: [1] }, { x: [] }];
+        plotDiv.data = null;
         setRanges(plotDiv, [45, 55]);
         global.Plotly.newPlot.mockClear();
 
-        getRelayoutHandler(plotDiv)({});
+        triggerZoom(plotDiv, {});
 
         expect(global.Plotly.newPlot).toHaveBeenCalled();
         const layout = global.Plotly.newPlot.mock.calls.at(-1)[2];
@@ -258,9 +312,8 @@ describe('Zoom-driven hierarchy levels', () => {
         await loadClusters();
         await flushPromises();
 
-        const handler = getRelayoutHandler(plotDiv);
         setRanges(plotDiv, [45, 55]);
-        handler({});
+        triggerZoom(plotDiv, {});
 
         expect(document.getElementById('hierarchy-controls').classList.contains('hidden')).toBe(true);
     });

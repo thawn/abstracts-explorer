@@ -77,10 +77,15 @@ let currentLevelState = null;
 const ZOOM_LEVEL_MIN = 1;
 const ZOOM_LEVEL_MAX = 10;
 const MIN_ZOOM_DELTA = 0.01;
+const ZOOM_HYSTERESIS = 0.1;
+const ZOOM_SYNC_DELAY_MS = 120;
 let baselineRanges = null;
 let lastAutoZoom = 1;
 let suppressZoomSync = false;
 let resetViewOnNextRender = true;
+let zoomSyncTimer = null;
+let pendingZoomPlot = null;
+let renderedDocumentCount = 0;
 
 // Custom topic clustering state
 let customQueryClusters = [];  // Array of custom topic cluster objects
@@ -120,10 +125,12 @@ export function resetClusters() {
     selectedClusters.clear();
     currentLevelIndex = DEFAULT_HIERARCHY_LEVEL;
     currentLevelState = null;
+    _cancelZoomSync();
     baselineRanges = null;
     lastAutoZoom = 1;
     suppressZoomSync = false;
     resetViewOnNextRender = true;
+    renderedDocumentCount = 0;
     // Reset topic evolution state
     topicEvolutionTraces = [];
     topicEvolutionColorIdx = 0;
@@ -170,9 +177,11 @@ export async function loadClusters() {
         const levels = _getHierarchyLevels();
         currentLevelIndex = levels.length ? levels.length - 1 : 0;
         selectedClusters.clear();
+        _cancelZoomSync();
         baselineRanges = null;
         lastAutoZoom = 1;
         resetViewOnNextRender = true;
+        renderedDocumentCount = 0;
         _bindHierarchySlider();
         renderCurrentLevel();
     } catch (error) {
@@ -242,6 +251,9 @@ function _getZoomFactor(plotDiv) {
 
 /**
  * Map a zoom factor to a hierarchy level index.
+ *
+ * A small deadband around each level boundary prevents rapid flip-flopping
+ * when the zoom factor hovers right at a threshold.
  * @param {number} zoom
  * @returns {number}
  */
@@ -251,7 +263,13 @@ function _levelForZoom(zoom) {
     const maxIndex = levels.length - 1;
     const span = ZOOM_LEVEL_MAX - ZOOM_LEVEL_MIN;
     const t = Math.min(Math.max((zoom - ZOOM_LEVEL_MIN) / span, 0), 1);
-    return Math.round(maxIndex * (1 - t));
+    const continuous = maxIndex * (1 - t);
+    const target = Math.round(continuous);
+    if (target === currentLevelIndex) return currentLevelIndex;
+    if (Math.abs(continuous - currentLevelIndex) < 0.5 + ZOOM_HYSTERESIS) {
+        return currentLevelIndex;
+    }
+    return target;
 }
 
 /**
@@ -269,6 +287,36 @@ function _syncLevelToZoom(plotDiv) {
 }
 
 /**
+ * Cancel a pending zoom-driven level sync.
+ */
+function _cancelZoomSync() {
+    if (zoomSyncTimer !== null) {
+        clearTimeout(zoomSyncTimer);
+    }
+    zoomSyncTimer = null;
+    pendingZoomPlot = null;
+}
+
+/**
+ * Coalesce rapid relayout events into a single level sync once the zoom
+ * gesture settles. Rendering the new level for every wheel tick is what makes
+ * the plot stutter on large datasets.
+ * @param {HTMLElement} plotDiv
+ */
+function _scheduleZoomSync(plotDiv) {
+    pendingZoomPlot = plotDiv;
+    if (zoomSyncTimer !== null) {
+        clearTimeout(zoomSyncTimer);
+    }
+    zoomSyncTimer = setTimeout(function () {
+        zoomSyncTimer = null;
+        const target = pendingZoomPlot;
+        pendingZoomPlot = null;
+        if (target) _syncLevelToZoom(target);
+    }, ZOOM_SYNC_DELAY_MS);
+}
+
+/**
  * Keep the hierarchy level in sync with Plotly zoom changes.
  * @param {HTMLElement} plotDiv
  */
@@ -278,7 +326,7 @@ function _bindZoomSyncHandler(plotDiv) {
         plotDiv.removeAllListeners('plotly_relayout');
     }
     plotDiv.on('plotly_relayout', function () {
-        _syncLevelToZoom(plotDiv);
+        _scheduleZoomSync(plotDiv);
     });
 }
 
@@ -334,6 +382,7 @@ function _bindHierarchySlider() {
 export function setHierarchyLevel(index) {
     const levels = _getHierarchyLevels();
     if (!levels.length) return;
+    _cancelZoomSync();
     const previousLevel = _getActiveLevel();
     currentLevelIndex = Math.min(Math.max(parseInt(index, 10) || 0, 0), levels.length - 1);
     const nextLevel = levels[currentLevelIndex];
@@ -622,31 +671,15 @@ export function renderCurrentLevel(preserveSelection = false) {
 
     const canRestyle = !shouldResetView
         && plotElement.data
-        && plotElement.data.length === 2
-        && plotElement.data[0].x
-        && plotElement.data[0].x.length === state.xs.length;
+        && plotElement.data.length === 2;
 
     if (canRestyle) {
         suppressZoomSync = true;
         try {
-            Plotly.restyle(plotElement, {
-                'marker.color': [state.colors],
-                customdata: [state.customdata]
-            }, [0]);
-            Plotly.restyle(plotElement, {
-                x: [state.starX],
-                y: [state.starY],
-                text: [state.starText],
-                customdata: [state.starCustomdata],
-                hovertemplate: [state.starHoverTemplate],
-                'marker.color': [state.starColors]
-            }, [1]);
             if (!baselineRanges) {
                 baselineRanges = _capturePlotRanges(plotElement);
             }
             lastAutoZoom = _getZoomFactor(plotElement);
-            _bindClusterClickHandler(plotElement);
-            _bindZoomSyncHandler(plotElement);
             createLevelLegend(state);
             _updateHierarchyControls(state);
             applySelectionToPlot();
@@ -673,6 +706,7 @@ export function renderCurrentLevel(preserveSelection = false) {
                 baselineRanges = _capturePlotRanges(plotElement);
             }
             lastAutoZoom = _getZoomFactor(plotElement);
+            renderedDocumentCount = state.xs.length;
             _bindClusterClickHandler(plotElement);
             _bindZoomSyncHandler(plotElement);
             applySelectionToPlot();
@@ -753,14 +787,24 @@ function applySelectionToPlot() {
         if (isVisible) visibleIndices.push(index);
     });
 
-    Plotly.restyle(plotDiv, {
-        x: [visibleIndices.map(index => state.xs[index])],
-        y: [visibleIndices.map(index => state.ys[index])],
-        text: [visibleIndices.map(index => state.texts[index])],
-        customdata: [visibleIndices.map(index => state.customdata[index])],
-        ids: [visibleIndices.map(index => state.ids[index])],
-        'marker.color': [visibleIndices.map(index => state.colors[index])]
-    }, [0]);
+    const allVisible = visibleIndices.length === state.xs.length;
+    const traceHasAllPoints = renderedDocumentCount === state.xs.length;
+
+    if (allVisible && traceHasAllPoints) {
+        Plotly.restyle(plotDiv, {
+            'marker.color': [state.colors]
+        }, [0]);
+    } else {
+        Plotly.restyle(plotDiv, {
+            x: [visibleIndices.map(index => state.xs[index])],
+            y: [visibleIndices.map(index => state.ys[index])],
+            text: [visibleIndices.map(index => state.texts[index])],
+            customdata: [visibleIndices.map(index => state.customdata[index])],
+            ids: [visibleIndices.map(index => state.ids[index])],
+            'marker.color': [visibleIndices.map(index => state.colors[index])]
+        }, [0]);
+    }
+    renderedDocumentCount = visibleIndices.length;
 
     const visibleEntries = state.entries.filter(entry => selectedClusters.has(String(entry.id)));
     Plotly.restyle(plotDiv, {
@@ -774,6 +818,7 @@ function applySelectionToPlot() {
             description: entry.description
         }))],
         ids: [visibleEntries.map(entry => String(entry.id))],
+        hovertemplate: [state.starHoverTemplate],
         'marker.color': [visibleEntries.map(entry => entry.color)]
     }, [1]);
 
