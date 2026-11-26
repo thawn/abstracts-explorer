@@ -435,6 +435,132 @@ describe('Hierarchy slider', () => {
         expect(getSelectionRestyleCall(1)[1].ids[0]).toEqual(['100']);
         expect(getSelectionRestyleCall(0)[1].ids[0]).toEqual(['p0', 'p1']);
     });
+
+    it('isolates a cluster when its star is clicked and toggles back', async () => {
+        let clickHandler;
+        const plotDiv = document.getElementById('cluster-plot');
+        plotDiv.on = jest.fn((event, handler) => {
+            if (event === 'plotly_click') clickHandler = handler;
+        });
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildData([flatLevel, mergedLevel]) });
+
+        await loadClusters();
+        setHierarchyLevel(0);
+        await flushPromises();
+        primePlotData(2);
+
+        expect(clickHandler).toBeDefined();
+
+        const starPoint = {
+            customdata: { cluster_id: 0, size: 1, label: 'Cat', description: '' },
+            data: { name: 'Clusters' }
+        };
+
+        clickHandler({ points: [starPoint] });
+
+        expect(getLegendItem('0').style.opacity).toBe('1');
+        expect(getLegendItem('1').style.opacity).toBe('0.4');
+        expect(getStarRestyleCall()[1].ids[0]).toEqual(['0']);
+
+        clickHandler({ points: [starPoint] });
+
+        expect(getLegendItem('1').style.opacity).toBe('1');
+    });
+
+    it('restricts All/None to visible legend items while searching', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildData([flatLevel, mergedLevel]) });
+
+        await loadClusters();
+        setHierarchyLevel(0);
+        await flushPromises();
+        primePlotData(2);
+
+        const input = document.getElementById('cluster-legend-search');
+
+        input.value = 'cat';
+        input.dispatchEvent(new Event('input'));
+        expect(getLegendItem('1').style.display).toBe('none');
+
+        clickLegendButton('None');
+        expect(getLegendItem('0').style.opacity).toBe('0.4');
+        expect(getLegendItem('1').style.opacity).toBe('1');
+
+        input.value = '';
+        input.dispatchEvent(new Event('input'));
+        expect(getLegendItem('0').style.opacity).toBe('0.4');
+        expect(getLegendItem('1').style.opacity).toBe('1');
+
+        input.value = 'cat';
+        input.dispatchEvent(new Event('input'));
+        clickLegendButton('All');
+        expect(getLegendItem('0').style.opacity).toBe('1');
+        expect(getLegendItem('1').style.opacity).toBe('0.4');
+
+        input.value = '';
+        input.dispatchEvent(new Event('input'));
+        expect(getLegendItem('0').style.opacity).toBe('1');
+        expect(getLegendItem('1').style.opacity).toBe('0.4');
+
+        clickLegendButton('None');
+        expect(getLegendItem('0').style.opacity).toBe('0.4');
+        expect(getLegendItem('1').style.opacity).toBe('0.4');
+
+        input.value = 'dog';
+        input.dispatchEvent(new Event('input'));
+        clickLegendButton('All');
+        expect(getLegendItem('0').style.opacity).toBe('0.4');
+        expect(getLegendItem('1').style.opacity).toBe('1');
+    });
+
+    it('None shows clusters for hidden legend items while searching', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildData([flatLevel, mergedLevel]) });
+
+        await loadClusters();
+        setHierarchyLevel(0);
+        await flushPromises();
+        primePlotData(2);
+
+        clickLegendButton('None');
+        expect(getLegendItem('0').style.opacity).toBe('0.4');
+        expect(getLegendItem('1').style.opacity).toBe('0.4');
+
+        const input = document.getElementById('cluster-legend-search');
+        input.value = 'cat';
+        input.dispatchEvent(new Event('input'));
+        expect(getLegendItem('1').style.display).toBe('none');
+
+        clickLegendButton('None');
+        expect(getLegendItem('0').style.opacity).toBe('0.4');
+        expect(getLegendItem('1').style.opacity).toBe('1');
+        expect(getSelectionRestyleCall(1)[1].ids[0]).toEqual(['1']);
+    });
+
+    it('live-filters legend items and persists the query across level changes', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildData([flatLevel, mergedLevel]) });
+
+        await loadClusters();
+        setHierarchyLevel(0);
+        await flushPromises();
+
+        const input = document.getElementById('cluster-legend-search');
+        expect(input).toBeTruthy();
+
+        input.value = 'cat';
+        input.dispatchEvent(new Event('input'));
+
+        expect(getLegendItem('0').style.display).toBe('');
+        expect(getLegendItem('1').style.display).toBe('none');
+
+        setHierarchyLevel(1);
+
+        const persistedInput = document.getElementById('cluster-legend-search');
+        expect(persistedInput.value).toBe('cat');
+        expect(getLegendItem('100').style.display).toBe('none');
+
+        persistedInput.value = '';
+        persistedInput.dispatchEvent(new Event('input'));
+        expect(getLegendItem('100').style.display).toBe('');
+    });
 });
 
 async function flushPromises() {
