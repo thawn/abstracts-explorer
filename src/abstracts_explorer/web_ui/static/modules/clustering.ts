@@ -982,6 +982,11 @@ function createLevelLegend(state) {
     levelInfo.textContent = `Level ${currentLevelIndex} · ${state.entries.length} clusters`;
     header.appendChild(levelInfo);
 
+    const itemsContainer = document.createElement('div');
+    itemsContainer.className = 'space-y-1 overflow-y-auto pr-2 flex-1';
+    itemsContainer.style.minHeight = '0';
+    itemsContainer.style.maxHeight = '100%';
+
     const buttonContainer = document.createElement('div');
     buttonContainer.className = 'flex gap-2';
 
@@ -989,7 +994,11 @@ function createLevelLegend(state) {
     selectAllBtn.className = 'px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors';
     selectAllBtn.textContent = 'All';
     selectAllBtn.addEventListener('click', () => {
-        selectedClusters = new Set(state.entries.map(entry => String(entry.id)));
+        itemsContainer.querySelectorAll('[data-cluster-id]').forEach((item: HTMLElement) => {
+            if (item.style.display !== 'none') {
+                selectedClusters.add(String(item.dataset.clusterId));
+            }
+        });
         applySelectionToPlot();
     });
 
@@ -997,18 +1006,17 @@ function createLevelLegend(state) {
     clearAllBtn.className = 'px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors';
     clearAllBtn.textContent = 'None';
     clearAllBtn.addEventListener('click', () => {
-        selectedClusters.clear();
+        itemsContainer.querySelectorAll('[data-cluster-id]').forEach((item: HTMLElement) => {
+            if (item.style.display !== 'none') {
+                selectedClusters.delete(String(item.dataset.clusterId));
+            }
+        });
         applySelectionToPlot();
     });
 
     buttonContainer.appendChild(selectAllBtn);
     buttonContainer.appendChild(clearAllBtn);
     header.appendChild(buttonContainer);
-
-    const itemsContainer = document.createElement('div');
-    itemsContainer.className = 'space-y-1 overflow-y-auto pr-2 flex-1';
-    itemsContainer.style.minHeight = '0';
-    itemsContainer.style.maxHeight = '100%';
 
     header.appendChild(createLegendSearchField(query => {
         applyLegendSearch(itemsContainer, '[data-cluster-id]', query);

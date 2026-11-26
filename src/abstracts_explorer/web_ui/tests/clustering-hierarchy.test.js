@@ -467,6 +467,48 @@ describe('Hierarchy slider', () => {
         expect(getLegendItem('1').style.opacity).toBe('1');
     });
 
+    it('restricts All/None to visible legend items while searching', async () => {
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildData([flatLevel, mergedLevel]) });
+
+        await loadClusters();
+        setHierarchyLevel(0);
+        await flushPromises();
+        primePlotData(2);
+
+        const input = document.getElementById('cluster-legend-search');
+
+        input.value = 'cat';
+        input.dispatchEvent(new Event('input'));
+        expect(getLegendItem('1').style.display).toBe('none');
+
+        clickLegendButton('None');
+        expect(getLegendItem('0').style.opacity).toBe('0.4');
+        expect(getLegendItem('1').style.opacity).toBe('1');
+
+        input.value = '';
+        input.dispatchEvent(new Event('input'));
+        expect(getLegendItem('0').style.opacity).toBe('0.4');
+        expect(getLegendItem('1').style.opacity).toBe('1');
+
+        input.value = 'cat';
+        input.dispatchEvent(new Event('input'));
+        clickLegendButton('All');
+        expect(getLegendItem('0').style.opacity).toBe('1');
+        expect(getLegendItem('1').style.opacity).toBe('1');
+
+        input.value = '';
+        input.dispatchEvent(new Event('input'));
+        clickLegendButton('None');
+        expect(getLegendItem('0').style.opacity).toBe('0.4');
+        expect(getLegendItem('1').style.opacity).toBe('0.4');
+
+        input.value = 'dog';
+        input.dispatchEvent(new Event('input'));
+        clickLegendButton('All');
+        expect(getLegendItem('0').style.opacity).toBe('0.4');
+        expect(getLegendItem('1').style.opacity).toBe('1');
+    });
+
     it('live-filters legend items and persists the query across level changes', async () => {
         global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildData([flatLevel, mergedLevel]) });
 
