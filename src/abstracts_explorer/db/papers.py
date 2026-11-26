@@ -296,7 +296,11 @@ class PapersMixin(WhereFilterMixin):
 
     def get_paper_count(self, where_filters: Optional[Dict[str, Any]] = None) -> int:
         """
-        Count papers in the database, optionally filtered.
+        Count distinct papers in the database, optionally filtered.
+
+        Duplicate presentations of the same abstract (rows sharing a
+        ``content_hash`` within the same conference and year) are counted
+        once.  Use :meth:`get_total_presentation_count` for the raw row count.
 
         Parameters
         ----------
@@ -306,7 +310,41 @@ class PapersMixin(WhereFilterMixin):
         Returns
         -------
         int
-            Number of matching papers.
+            Number of distinct matching papers.
+
+        Raises
+        ------
+        DatabaseError
+            If query fails.
+        """
+        try:
+            stmt = select(func.count(func.distinct(func.coalesce(Paper.content_hash, Paper.uid))))
+            conditions = self._build_where_conditions(where_filters)
+            if conditions:
+                stmt = stmt.where(and_(*conditions))
+            count = self.session.execute(stmt).scalar()
+            return count or 0
+        except DatabaseError:
+            raise
+        except Exception as e:
+            raise self._db_error("Failed to count papers", e)
+
+    def get_total_presentation_count(self, where_filters: Optional[Dict[str, Any]] = None) -> int:
+        """
+        Count presentation rows in the database, optionally filtered.
+
+        Unlike :meth:`get_paper_count`, this does not collapse duplicate
+        presentations of the same abstract.
+
+        Parameters
+        ----------
+        where_filters : dict, optional
+            Mapping of Paper column names to filter values.
+
+        Returns
+        -------
+        int
+            Number of matching presentation rows.
 
         Raises
         ------
@@ -323,7 +361,7 @@ class PapersMixin(WhereFilterMixin):
         except DatabaseError:
             raise
         except Exception as e:
-            raise self._db_error("Failed to count papers", e)
+            raise self._db_error("Failed to count presentations", e)
 
     def resolve_paper_uids(
         self,

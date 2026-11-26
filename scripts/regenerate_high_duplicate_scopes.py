@@ -239,30 +239,22 @@ def high_duplicate_scopes(
     -------
     list of tuple
         ``(conference, year, rows, duplicates)`` sorted by duplicates descending.
+        ``rows`` is the presentation row count and ``duplicates`` is that count
+        minus the deduplicated paper count.
     """
-    conditions = ["conference IS NOT NULL", "year IS NOT NULL"]
-    params: Dict[str, Any] = {}
-    if conference is not None:
-        conditions.append("conference = :conference")
-        params["conference"] = conference
-    if year is not None:
-        conditions.append("year = :year")
-        params["year"] = year
-    where = " AND ".join(conditions)
-    rows = db.session.execute(
-        text(
-            "SELECT conference, year, COUNT(*) AS rows, "
-            "COUNT(DISTINCT coalesce(content_hash, uid)) AS unique_rows "
-            f"FROM papers WHERE {where} GROUP BY conference, year"
-        ),
-        params,
-    ).all()
-
     scopes: List[Tuple[str, int, int, int]] = []
-    for row_conference, row_year, row_count, unique_count in rows:
-        duplicates = int(row_count) - int(unique_count)
-        if duplicates >= threshold:
-            scopes.append((str(row_conference), int(row_year), int(row_count), duplicates))
+    for row_conference, years in db.get_conference_years_from_db().items():
+        if conference is not None and row_conference != conference:
+            continue
+        for row_year in years:
+            if year is not None and int(row_year) != year:
+                continue
+            filters = {"conference": row_conference, "year": int(row_year)}
+            row_count = db.get_total_presentation_count(filters)
+            paper_count = db.get_paper_count(filters)
+            duplicates = row_count - paper_count
+            if duplicates >= threshold:
+                scopes.append((str(row_conference), int(row_year), row_count, duplicates))
     scopes.sort(key=lambda item: item[3], reverse=True)
     return scopes
 

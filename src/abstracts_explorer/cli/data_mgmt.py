@@ -79,13 +79,16 @@ def delete_data_command(args: argparse.Namespace) -> int:
 
     # Count what will be deleted
     paper_count = 0
+    presentation_count = 0
     cache_count = 0
     paper_uids: List[str] = []
     try:
         with DatabaseManager() as db:
             db.create_tables()
-            paper_uids = db.get_paper_uids({"conference": conference, "year": year})
-            paper_count = len(paper_uids)
+            filters = {"conference": conference, "year": year}
+            paper_uids = db.get_paper_uids(filters)
+            paper_count = db.get_paper_count(filters)
+            presentation_count = db.get_total_presentation_count(filters)
             cache_count = db.count_clustering_cache_by_conference_year(conference, year)
     except Exception as e:
         print(f"\n❌ Error accessing database: {e}", file=sys.stderr)
@@ -103,6 +106,8 @@ def delete_data_command(args: argparse.Namespace) -> int:
 
     print("\nThe following data will be permanently deleted:")
     print(f"  📄 Papers:            {paper_count:,}")
+    if presentation_count != paper_count:
+        print(f"  🎤 Presentations:     {presentation_count:,}")
     print(f"  🔢 Embeddings:        {embedding_count:,}")
     print(f"  🗂️  Clustering cache:  {cache_count:,}")
 
