@@ -1078,6 +1078,67 @@ describe('Clustering Module', () => {
             expect(rows[1].style.display).toBe('');
         });
 
+        it('isolates a custom topic when its star is clicked and toggles back', async () => {
+            let clickHandler;
+            const plotDiv = document.getElementById('cluster-plot');
+            plotDiv.on = jest.fn((event, handler) => {
+                if (event === 'plotly_click') clickHandler = handler;
+            });
+
+            const mockClusterData = {
+                points: [{ x: 1, y: 1, cluster: 0, id: '1', uid: '1', title: 'Paper 1' }],
+                cluster_labels: { 0: 'Cluster 0' },
+                cluster_centers: { 0: { x: 1, y: 1 } }
+            };
+
+            global.fetch.mockResolvedValueOnce({ ok: true, json: async () => mockClusterData });
+            await loadClusters();
+
+            const runCustomSearch = async (query) => {
+                document.getElementById('custom-query-input').value = query;
+                global.fetch.mockResolvedValueOnce({
+                    ok: true,
+                    json: async () => ({
+                        query,
+                        distance: 0.5,
+                        papers: [{ uid: '1', title: 'Paper 1' }],
+                        count: 1,
+                        query_embedding: [0.1]
+                    })
+                });
+                await searchCustomCluster();
+            };
+
+            await runCustomSearch('alpha topic');
+            await runCustomSearch('beta topic');
+
+            expect(clickHandler).toBeDefined();
+
+            const traces = global.Plotly.react.mock.calls.at(-1)[1];
+            const starTrace = traces.find(trace => trace.marker && trace.marker.symbol === 'star');
+            expect(starTrace).toBeDefined();
+
+            const getRows = () => document.querySelectorAll('#cluster-legend [data-custom-topic]');
+            const clickable = (row) => row.querySelector('.cursor-pointer');
+            expect(getRows()).toHaveLength(2);
+
+            clickHandler({
+                points: [{ customdata: starTrace.customdata[0], data: starTrace }]
+            });
+
+            let rows = getRows();
+            expect(clickable(rows[0]).className).toContain('opacity-100');
+            expect(clickable(rows[1]).className).toContain('opacity-50');
+
+            clickHandler({
+                points: [{ customdata: starTrace.customdata[0], data: starTrace }]
+            });
+
+            rows = getRows();
+            expect(clickable(rows[0]).className).toContain('opacity-100');
+            expect(clickable(rows[1]).className).toContain('opacity-100');
+        });
+
         it('should handle cluster statistics with noise', async () => {
             const mockClusterData = {
                 points: [

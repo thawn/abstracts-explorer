@@ -436,6 +436,37 @@ describe('Hierarchy slider', () => {
         expect(getSelectionRestyleCall(0)[1].ids[0]).toEqual(['p0', 'p1']);
     });
 
+    it('isolates a cluster when its star is clicked and toggles back', async () => {
+        let clickHandler;
+        const plotDiv = document.getElementById('cluster-plot');
+        plotDiv.on = jest.fn((event, handler) => {
+            if (event === 'plotly_click') clickHandler = handler;
+        });
+        global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildData([flatLevel, mergedLevel]) });
+
+        await loadClusters();
+        setHierarchyLevel(0);
+        await flushPromises();
+        primePlotData(2);
+
+        expect(clickHandler).toBeDefined();
+
+        const starPoint = {
+            customdata: { cluster_id: 0, size: 1, label: 'Cat', description: '' },
+            data: { name: 'Clusters' }
+        };
+
+        clickHandler({ points: [starPoint] });
+
+        expect(getLegendItem('0').style.opacity).toBe('1');
+        expect(getLegendItem('1').style.opacity).toBe('0.4');
+        expect(getStarRestyleCall()[1].ids[0]).toEqual(['0']);
+
+        clickHandler({ points: [starPoint] });
+
+        expect(getLegendItem('1').style.opacity).toBe('1');
+    });
+
     it('live-filters legend items and persists the query across level changes', async () => {
         global.fetch.mockResolvedValueOnce({ ok: true, json: async () => buildData([flatLevel, mergedLevel]) });
 

@@ -149,6 +149,8 @@ automatically identified topic cluster.
   the plot automatically moves to finer levels, and zooming back out returns to
   the coarser overview; panning alone never changes the level.
 - **Click** a cluster name in the legend to highlight that cluster.
+- **Click** a cluster star to isolate that cluster and hide all others; click the
+  star again to show every cluster.
 - **Export Data** — download the raw clustering JSON for further analysis.
 
 > **Requires pre-generated clusters** — run

@@ -758,11 +758,33 @@ function _bindClusterClickHandler(plotDiv) {
     }
     plotDiv.on('plotly_click', function (data) {
         const point = data.points && data.points[0];
-        const customdata = point && point.customdata;
-        if (customdata && customdata.id) {
+        if (!point) return;
+        const customdata = point.customdata || {};
+        const isStar = (point.data && point.data.name === 'Clusters')
+            || (customdata.cluster_id !== undefined && customdata.id == null);
+        if (isStar && customdata.cluster_id !== undefined) {
+            _toggleClusterIsolation(customdata.cluster_id);
+            return;
+        }
+        if (customdata.id) {
             showClusterPaperDetails(customdata.id, customdata);
         }
     });
+}
+
+/**
+ * Isolate a cluster (hide all others), toggling back to all clusters when the
+ * cluster is already the only visible one.
+ * @param {number|string} clusterId - ID of the cluster whose star was clicked
+ */
+function _toggleClusterIsolation(clusterId) {
+    const state = currentLevelState;
+    if (!state || !state.entries) return;
+    const key = String(clusterId);
+    const allIds = state.entries.map(entry => String(entry.id));
+    const isIsolated = selectedClusters.size === 1 && selectedClusters.has(key);
+    selectedClusters = isIsolated ? new Set(allIds) : new Set([key]);
+    applySelectionToPlot();
 }
 
 /**
@@ -1363,6 +1385,7 @@ function visualizeClustersWithCustomQueries() {
             name: `${cluster.query} (center)`,
             text: [cluster.query],
             textposition: 'top center',
+            customdata: [{ cluster_id: cluster.id }],
             marker: {
                 color: clusterColor,
                 symbol: 'star',
@@ -1436,12 +1459,17 @@ function visualizeClustersWithCustomQueries() {
     
     // Add click handler
     plotDiv.on('plotly_click', function(data) {
-        if (data.points.length > 0) {
-            const point = data.points[0];
-            const paperId = point.customdata?.id || point.data.customdata?.[point.pointIndex]?.id;
-            if (paperId) {
-                showClusterPaperDetails(paperId);
-            }
+        if (!data.points || data.points.length === 0) return;
+        const point = data.points[0];
+        const customdata = point.customdata || {};
+        const isStar = point.data && point.data.marker && point.data.marker.symbol === 'star';
+        if (isStar && customdata.cluster_id) {
+            _toggleCustomClusterIsolation(customdata.cluster_id);
+            return;
+        }
+        const paperId = customdata.id || point.data.customdata?.[point.pointIndex]?.id;
+        if (paperId) {
+            showClusterPaperDetails(paperId);
         }
     });
     
@@ -1531,6 +1559,45 @@ function displayCustomQueryStats(customCluster) {
  */
 function updateVisualizationWithCustomCluster(customCluster) {
     // No longer used - replaced by visualizeClustersWithCustomQueries
+}
+
+/**
+ * Apply the current custom-cluster visibility flags to all cluster traces.
+ */
+function _applyCustomClusterVisibility() {
+    const plotDiv = document.getElementById('cluster-plot');
+    if (!plotDiv || !plotDiv.data) return;
+
+    const traceIndices = [];
+    const visibility = [];
+    plotDiv.data.forEach((trace, idx) => {
+        if (trace.legendgroup) {
+            traceIndices.push(idx);
+            visibility.push(customClusterVisibility[trace.legendgroup] !== false);
+        }
+    });
+
+    if (traceIndices.length > 0) {
+        Plotly.restyle(plotDiv, { visible: visibility }, traceIndices);
+    }
+    updateCustomQueryLegend();
+}
+
+/**
+ * Isolate a custom cluster (hide all others), toggling back to all clusters
+ * when the cluster is already the only visible one.
+ * @param {string} clusterId - ID of the custom cluster whose star was clicked
+ */
+function _toggleCustomClusterIsolation(clusterId) {
+    const clusterIds = customQueryClusters.map(cluster => cluster.id);
+    const visibleIds = clusterIds.filter(id => customClusterVisibility[id] !== false);
+    const isIsolated = visibleIds.length === 1 && visibleIds[0] === clusterId;
+
+    clusterIds.forEach(id => {
+        customClusterVisibility[id] = isIsolated ? true : id === clusterId;
+    });
+
+    _applyCustomClusterVisibility();
 }
 
 /**
