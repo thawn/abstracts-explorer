@@ -12,7 +12,6 @@ from typing import Any, Dict, Optional, Tuple
 
 
 from abstracts_explorer.config import Config, get_config
-from abstracts_explorer.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -266,6 +265,8 @@ def _resolve_conference_arg(conference: Optional[str]) -> Optional[str]:
     """
     if not conference:
         return conference
+    from abstracts_explorer.database import DatabaseManager
+
     with DatabaseManager() as db:
         db.create_tables()
         resolved_conference = db.resolve_conference_name(conference)

@@ -2797,7 +2797,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em_class.return_value = Mock()
             mock_compute.return_value = {
@@ -2837,7 +2837,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -2881,7 +2881,7 @@ class TestCLI:
         with (
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em_class.return_value = Mock()
 
@@ -2920,7 +2920,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -2965,7 +2965,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em_class.return_value = Mock()
             mock_compute.return_value = mock_results
@@ -3005,7 +3005,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -3057,7 +3057,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -3103,7 +3103,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em_class.return_value = Mock()
             mock_compute.side_effect = Exception("Clustering failed")
@@ -3142,7 +3142,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -3188,7 +3188,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em
@@ -3278,7 +3278,7 @@ class TestCLI:
             patch("abstracts_explorer.cli.clustering.EmbeddingsManager") as mock_em_class,
             patch("abstracts_explorer.cli.clustering.compute_clusters_with_cache") as mock_compute,
             patch("abstracts_explorer.cli.clustering.DatabaseManager") as mock_db_class,
-            patch("abstracts_explorer.cli._common.DatabaseManager", mock_db_class),
+            patch("abstracts_explorer.database.DatabaseManager", mock_db_class),
         ):
             mock_em = Mock()
             mock_em_class.return_value = mock_em

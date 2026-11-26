@@ -983,7 +983,7 @@ class TestClusteringManager:
         mocker.patch.object(
             manager, "_make_umap", return_value=Mock(fit_transform=Mock(return_value=np.zeros((4, 2))))
         )
-        representation_class = mocker.patch("abstracts_explorer.clustering.manager.ProjectLLMRepresentation")
+        representation_class = mocker.patch("abstracts_explorer.clustering.representation.ProjectLLMRepresentation")
 
         manager.fit(use_llm_labels=True, show_progress=True)
 
@@ -1001,7 +1001,7 @@ class TestClusteringManager:
             frozenset({0, 1}): combine_label_description("Merged", "Both topics."),
         }
         mocker.patch(
-            "abstracts_explorer.clustering.manager.ProjectLLMRepresentation",
+            "abstracts_explorer.clustering.representation.ProjectLLMRepresentation",
             return_value=representation,
         )
 
