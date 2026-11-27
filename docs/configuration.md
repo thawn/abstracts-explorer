@@ -268,7 +268,7 @@ set them to `1`.
 ### Logging
 
 - **LOG_LEVEL**: Optional root log level override (`DEBUG`, `INFO`, `WARNING`, ...). Empty uses the default level.
-- HTTP client (`httpx2`) request logs are only shown at `DEBUG` (`-vv` or `LOG_LEVEL=DEBUG`); they are filtered out at higher levels. The logger's level itself is left unchanged.
+- HTTP client (`httpx` and `httpx2`) loggers are set to `WARNING`, so per-request INFO lines are never shown, including at `DEBUG` (`-vv` or `LOG_LEVEL=DEBUG`). Warnings and errors still propagate.
 
 ### Registry Settings
 
