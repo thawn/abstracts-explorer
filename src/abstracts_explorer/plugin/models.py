@@ -11,6 +11,8 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ValidationError, field_validator
 
+from abstracts_explorer.utils.text_utils import strip_nul_bytes, strip_nul_bytes_optional
+
 logger = logging.getLogger(__name__)
 
 
@@ -86,8 +88,9 @@ class LightweightPaper(BaseModel):
     @field_validator("title")
     @classmethod
     def validate_title(cls, v: str) -> str:
-        """Ensure title is not empty."""
-        if not v or not v.strip():
+        """Ensure title is not empty and contains no NUL bytes."""
+        v = strip_nul_bytes(v)
+        if not v.strip():
             raise ValueError("Paper title cannot be empty")
         return v.strip()
 
@@ -98,10 +101,11 @@ class LightweightPaper(BaseModel):
 
         Empty or whitespace-only author entries are silently filtered out so
         that a single malformed entry does not cause the entire paper to be
-        rejected.  A ``ValueError`` is still raised when the list is empty
-        after filtering, or when any remaining entry contains a semicolon.
+        rejected.  NUL bytes are stripped from author names.  A ``ValueError``
+        is still raised when the list is empty after filtering, or when any
+        remaining entry contains a semicolon.
         """
-        filtered = [author for author in v if author.strip()]
+        filtered = [strip_nul_bytes(author) for author in v if strip_nul_bytes(author).strip()]
         if not filtered:
             raise ValueError("Authors list cannot be empty")
         for author in filtered:
@@ -112,26 +116,61 @@ class LightweightPaper(BaseModel):
     @field_validator("abstract")
     @classmethod
     def validate_abstract(cls, v: str) -> str:
-        """Ensure abstract is not empty."""
-        if not v or not v.strip():
+        """Ensure abstract is not empty and contains no NUL bytes."""
+        v = strip_nul_bytes(v)
+        if not v.strip():
             raise ValueError("Paper abstract cannot be empty")
         return v.strip()
 
     @field_validator("session")
     @classmethod
     def validate_session(cls, v: str) -> str:
-        """Ensure session is not empty."""
-        if not v or not v.strip():
+        """Ensure session is not empty and contains no NUL bytes."""
+        v = strip_nul_bytes(v)
+        if not v.strip():
             raise ValueError("Session cannot be empty")
         return v.strip()
 
     @field_validator("conference")
     @classmethod
     def validate_conference(cls, v: str) -> str:
-        """Ensure conference is not empty."""
-        if not v or not v.strip():
+        """Ensure conference is not empty and contains no NUL bytes."""
+        v = strip_nul_bytes(v)
+        if not v.strip():
             raise ValueError("Conference cannot be empty")
         return v.strip()
+
+    @field_validator("keywords")
+    @classmethod
+    def validate_keywords(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        """Strip NUL bytes from keyword values."""
+        if v is None:
+            return None
+        return [strip_nul_bytes(keyword) for keyword in v]
+
+    @field_validator(
+        "poster_position",
+        "paper_pdf_url",
+        "poster_image_url",
+        "url",
+        "room_name",
+        "starttime",
+        "endtime",
+        "award",
+        "location",
+    )
+    @classmethod
+    def validate_optional_text(cls, v: Optional[str]) -> Optional[str]:
+        """Strip NUL bytes from optional text fields, preserving ``None``."""
+        return strip_nul_bytes_optional(v)
+
+    @field_validator("original_id")
+    @classmethod
+    def validate_original_id(cls, v: Optional[Union[int, str]]) -> Optional[Union[int, str]]:
+        """Strip NUL bytes from string original IDs."""
+        if isinstance(v, str):
+            return strip_nul_bytes_optional(v)
+        return v
 
     @field_validator("year")
     @classmethod

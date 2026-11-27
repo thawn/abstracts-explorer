@@ -902,6 +902,60 @@ class TestDatabaseExportImport:
         finally:
             db.close()
 
+    def test_import_clustering_cache_strips_nul_bytes(self, tmp_path):
+        """NUL bytes in clustering JSON are removed before writing to the DB."""
+        from abstracts_explorer.db_models import ClusteringCache
+
+        db = _populate_test_db(tmp_path / "db.db")
+        try:
+            data = {
+                "entries": [
+                    {
+                        "embedding_model": "model\x00x",
+                        "reduction_method": "pca",
+                        "n_components": 2,
+                        "clustering_method": "kmeans",
+                        "n_clusters": 1,
+                        "conference": "neurips",
+                        "year": 2024,
+                        "results_json": {"points": [{"id": "p1", "title": "a\x00b"}]},
+                        "created_at": "2025-01-01T00:00:00+00:00",
+                    }
+                ]
+            }
+            db.import_clustering_cache_from_json(data, "neurips", 2024)
+            entry = db._session.query(ClusteringCache).one()
+            assert "\x00" not in entry.embedding_model
+            assert "\x00" not in entry.results_json
+        finally:
+            db.close()
+
+    def test_export_clustering_cache_strips_nul_bytes(self, tmp_path):
+        """NUL bytes stored in a legacy clustering row are removed on export."""
+        import json as _json
+
+        from abstracts_explorer.db_models import ClusteringCache
+
+        db = _populate_test_db(tmp_path / "db.db")
+        try:
+            db._session.add(
+                ClusteringCache(
+                    embedding_model="test-model",
+                    reduction_method="pca",
+                    n_components=2,
+                    clustering_method="kmeans",
+                    n_clusters=1,
+                    conference="neurips",
+                    year=2024,
+                    results_json=_json.dumps({"points": [{"id": "p1", "title": "a\x00b"}]}),
+                )
+            )
+            db._session.commit()
+            data = db.export_clustering_cache_to_json("neurips", 2024)
+            assert data["entries"][0]["results_json"]["points"][0]["title"] == "ab"
+        finally:
+            db.close()
+
     def test_import_clustering_cache_overwrites_embedding_model(self, tmp_path):
         """overwrite_embedding_model replaces the model in every imported entry.
 

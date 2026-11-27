@@ -1562,6 +1562,57 @@ class TestLightweightPaper:
                 conference="NeurIPS",
             )
 
+    def test_nul_bytes_are_stripped_from_text_fields(self):
+        """NUL bytes are removed from all text fields during validation."""
+        paper = LightweightPaper(
+            title="Ti\x00tle",
+            authors=["Jo\x00hn Doe", "Jane"],
+            abstract="Ab\x00stract",
+            session="Ses\x00sion",
+            poster_position="A\x001",
+            year=2025,
+            conference="Neur\x00IPS",
+            original_id="orig\x00id",
+            paper_pdf_url="https://example.com/p\x00.pdf",
+            poster_image_url="https://example.com/i\x00.png",
+            url="https://example.com/u\x00",
+            room_name="Room\x00 A",
+            keywords=["key\x00word", "AI"],
+            starttime="09:00\x00",
+            endtime="10:00",
+            award="Best\x00 Paper",
+            location="City\x00 Hall",
+        )
+        assert paper.title == "Title"
+        assert paper.authors == ["John Doe", "Jane"]
+        assert paper.abstract == "Abstract"
+        assert paper.session == "Session"
+        assert paper.poster_position == "A1"
+        assert paper.conference == "NeurIPS"
+        assert paper.original_id == "origid"
+        assert paper.paper_pdf_url == "https://example.com/p.pdf"
+        assert paper.poster_image_url == "https://example.com/i.png"
+        assert paper.url == "https://example.com/u"
+        assert paper.room_name == "Room A"
+        assert paper.keywords == ["keyword", "AI"]
+        assert paper.starttime == "09:00"
+        assert paper.endtime == "10:00"
+        assert paper.award == "Best Paper"
+        assert paper.location == "City Hall"
+
+    def test_nul_bytes_do_not_break_all_nul_author(self):
+        """An author entry made only of NUL bytes is filtered out."""
+        paper = LightweightPaper(
+            title="Title",
+            authors=["\x00\x00", "Alice"],
+            abstract="Abstract",
+            session="Session",
+            poster_position="A1",
+            year=2025,
+            conference="NeurIPS",
+        )
+        assert paper.authors == ["Alice"]
+
 
 # ============================================================================
 # Validation Helper Function Tests
