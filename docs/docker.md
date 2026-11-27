@@ -106,7 +106,17 @@ curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scrip
 # nginx variant (existing SSL certificate):
 curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scripts/install-podman.sh \
   | bash -s -- --variant nginx
+
+# Refresh files/config later without root (after the initial install):
+curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scripts/install-podman.sh \
+  | bash -s -- --reinstall
 ```
+
+The `--reinstall` flag re-downloads quadlet and configuration files, creates any
+missing Podman secrets, and reloads the user systemd daemon without requiring
+`sudo`. It skips the root-owned system socket units (already installed by the
+initial run) and preserves the existing `abstracts-explorer.env` by merging it
+with the new template.
 
 The script:
 1. Downloads all quadlet, configuration, and environment files. If
