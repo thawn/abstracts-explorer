@@ -646,24 +646,80 @@ class RegistryClient:
             )
 
     @staticmethod
+    def _read_artifact_embeddings_model(embeddings_file: Path) -> Optional[str]:
+        """
+        Read the embedding model name stored in an embeddings artifact JSON.
+
+        Parameters
+        ----------
+        embeddings_file : Path
+            Path to the artifacts ``embeddings-YYYY.json`` file.
+
+        Returns
+        -------
+        str or None
+            The embedding model stored in the artifact, or ``None`` when the
+            file is unreadable or has no model field (legacy artifacts).
+        """
+        try:
+            data = json.loads(embeddings_file.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.debug(
+                "Could not read embedding model from artifact JSON %s: %s: %s",
+                embeddings_file.name,
+                type(exc).__name__,
+                exc,
+            )
+            return None
+        model = data.get("model")
+        return str(model) if model else None
+
+    @staticmethod
+    def _replace_artifact_embeddings_model(embeddings_file: Path, new_model: str) -> None:
+        """
+        Overwrite the embedding model in an embeddings artifact JSON so that
+        subsequent imports do not trigger model-consistency checks.
+
+        Parameters
+        ----------
+        embeddings_file : Path
+            Path to the artifacts ``embeddings-YYYY.json`` file.
+        new_model : str
+            The model name to write.
+        """
+        try:
+            data = json.loads(embeddings_file.read_text())
+            data["model"] = new_model
+            embeddings_file.write_text(json.dumps(data))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.debug(
+                "Could not update embedding model in artifact JSON %s: %s: %s",
+                embeddings_file.name,
+                type(exc).__name__,
+                exc,
+            )
+
+    @staticmethod
     def _check_embedding_model(
         paper_db_file: Path,
         embedding_model: str,
         ignore_embedding_model_mismatch: bool,
         progress: Callable[[str], None],
+        embeddings_file: Optional[Path] = None,
     ) -> None:
         """
         Single authoritative embedding-model check for one conference/year import.
 
-        Reads the model stored in the artifact paper DB and compares it to
-        *embedding_model*.  When the models differ:
+        Reads the model stored in the artifact paper DB (and optionally in the
+        embeddings artifact JSON) and compares it to *embedding_model*.  When
+        the models differ:
 
         * If *ignore_embedding_model_mismatch* is ``False``,
           ``EmbeddingModelMismatchError`` is raised.
         * If *ignore_embedding_model_mismatch* is ``True``, the artifact
-          DB is patched in-place so that the downstream
-          ``import_papers_from_sqlite()`` consistency check will not
-          trigger again.
+          paper DB and embeddings JSON are patched in-place so that the
+          downstream ``import_papers_from_sqlite()`` and
+          ``import_embeddings()`` consistency checks will not trigger again.
 
         Parameters
         ----------
@@ -675,30 +731,46 @@ class RegistryClient:
             When ``True``, overwrite the artifact model and continue.
         progress : callable
             Status-message callback.
+        embeddings_file : Path, optional
+            Path to the artifact's ``embeddings-YYYY.json`` file.  When
+            provided, its model field is checked as well.
 
         Raises
         ------
         EmbeddingModelMismatchError
             When models differ and *ignore_embedding_model_mismatch* is ``False``.
         """
-        artifact_model = RegistryClient._read_artifact_embedding_model(paper_db_file)
-        if not artifact_model:
-            return  # Legacy artifact without metadata — nothing to check
+        paper_db_model = RegistryClient._read_artifact_embedding_model(paper_db_file)
+        embeddings_model = (
+            RegistryClient._read_artifact_embeddings_model(embeddings_file) if embeddings_file is not None else None
+        )
 
-        if _sanitize_str_for_oci_tag(artifact_model) == _sanitize_str_for_oci_tag(embedding_model):
-            return  # Models match — nothing to do
+        expected = _sanitize_str_for_oci_tag(embedding_model)
+        paper_db_mismatch = bool(paper_db_model) and _sanitize_str_for_oci_tag(str(paper_db_model)) != expected
+        embeddings_mismatch = bool(embeddings_model) and _sanitize_str_for_oci_tag(str(embeddings_model)) != expected
 
+        if not (paper_db_mismatch or embeddings_mismatch):
+            return  # Models match (or legacy artifacts without metadata)
+
+        remote_model = paper_db_model if paper_db_mismatch else embeddings_model
         if not ignore_embedding_model_mismatch:
-            raise EmbeddingModelMismatchError(local_model=embedding_model, remote_model=artifact_model)
+            raise EmbeddingModelMismatchError(local_model=embedding_model, remote_model=remote_model)  # type: ignore[arg-type]
 
         # Models differ but the user explicitly asked to proceed.
+        details = []
+        if paper_db_mismatch:
+            details.append(f"  Paper DB model:   '{paper_db_model}'")
+        if embeddings_mismatch:
+            details.append(f"  Embeddings model: '{embeddings_model}'")
         progress(
             f"⚠️  Embedding model mismatch ignored for {paper_db_file.name}:\n"
-            f"  Configured model: '{embedding_model}'\n"
-            f"  Artifact model:   '{artifact_model}'\n"
-            f"  Replacing artifact model with configured model."
+            f"  Configured model: '{embedding_model}'\n" + "\n".join(details) + "\n"
+            "  Replacing artifact model with configured model."
         )
-        RegistryClient._replace_artifact_embedding_model(paper_db_file, embedding_model)
+        if paper_db_mismatch:
+            RegistryClient._replace_artifact_embedding_model(paper_db_file, embedding_model)
+        if embeddings_mismatch and embeddings_file is not None:
+            RegistryClient._replace_artifact_embeddings_model(embeddings_file, embedding_model)
 
     def _import_year(
         self,
@@ -758,7 +830,13 @@ class RegistryClient:
 
         # --- single authoritative embedding-model check ---
         if embedding_model:
-            self._check_embedding_model(paper_db_file, embedding_model, ignore_embedding_model_mismatch, progress)
+            self._check_embedding_model(
+                paper_db_file,
+                embedding_model,
+                ignore_embedding_model_mismatch,
+                progress,
+                embeddings_file=embeddings_file,
+            )
 
         from abstracts_explorer.plugin import LightweightPaper
 
