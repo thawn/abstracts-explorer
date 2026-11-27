@@ -2820,6 +2820,76 @@ class TestCLICommands:
         updated_model = RegistryClient._read_artifact_embedding_model(paper_db_path)
         assert updated_model == "configured-model-a"
 
+    def test_import_year_ignore_mismatch_patches_embeddings_json(self, tmp_path):
+        """Regression: ignoring a mismatch must patch the embeddings artifact so the real import passes."""
+        from abstracts_explorer.embeddings import EmbeddingsManager
+
+        set_test_db(tmp_path / "target.db")
+
+        paper_db_path = tmp_path / "papers-2024.db"
+        self._make_artifact_paper_db(paper_db_path, "artifact-model-b")
+        embeddings_path = tmp_path / "embeddings-2024.json"
+        self._make_embeddings_artifact(embeddings_path, "artifact-model-b")
+        cache_path = _make_clustering_cache_file(tmp_path / "clustering-2024.json")
+
+        # A bare EmbeddingsManager whose real import_embeddings() performs the
+        # model check, without needing a live ChromaDB.
+        real_em = EmbeddingsManager.__new__(EmbeddingsManager)
+        real_em.model_name = "configured-model-a"
+        real_em._collection = MagicMock()
+        real_em._store_embeddings = MagicMock()
+        real_em._client = None
+        real_em._openai_client = None
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        with patch("abstracts_explorer.database.DatabaseManager.import_papers_from_sqlite", return_value=0):
+            with patch("abstracts_explorer.embeddings.EmbeddingsManager", return_value=real_em):
+                with patch(
+                    "abstracts_explorer.database.DatabaseManager.import_clustering_cache_from_json", return_value=0
+                ):
+                    result = client._import_year(
+                        "neurips",
+                        2024,
+                        paper_db_path,
+                        embeddings_path,
+                        lambda m: None,
+                        embedding_model="configured-model-a",
+                        ignore_embedding_model_mismatch=True,
+                        clustering_cache_file=cache_path,
+                    )
+
+        assert result["embedding_count"] == 0
+        assert RegistryClient._read_artifact_embeddings_model(embeddings_path) == "configured-model-a"
+
+    def test_import_year_raises_on_embeddings_json_mismatch(self, tmp_path):
+        """_import_year raises before importing when the embeddings JSON model differs."""
+        set_test_db(tmp_path / "target.db")
+
+        paper_db_path = tmp_path / "papers-2024.db"
+        self._make_artifact_paper_db(paper_db_path, "artifact-model-b")
+        embeddings_path = tmp_path / "embeddings-2024.json"
+        self._make_embeddings_artifact(embeddings_path, "artifact-model-b")
+        cache_path = _make_clustering_cache_file(tmp_path / "clustering-2024.json")
+
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="token")
+
+        with pytest.raises(EmbeddingModelMismatchError) as exc_info:
+            client._import_year(
+                "neurips",
+                2024,
+                paper_db_path,
+                embeddings_path,
+                lambda m: None,
+                embedding_model="configured-model-a",
+                clustering_cache_file=cache_path,
+            )
+
+        assert exc_info.value.local_model == "configured-model-a"
+        assert exc_info.value.remote_model == "artifact-model-b"
+
     def test_import_year_no_mismatch_when_models_match(self, tmp_path):
         """_import_year succeeds when models match."""
         set_test_db(tmp_path / "target.db")
@@ -2918,6 +2988,73 @@ class TestCLICommands:
 
         # Should not raise
         RegistryClient._check_embedding_model(paper_db, "config-model", False, lambda m: None)
+
+    def _make_embeddings_artifact(self, path, embedding_model: str) -> None:
+        """Write a minimal embeddings artifact JSON carrying the given model."""
+        path.write_text(
+            json.dumps(
+                {
+                    "format_version": 1,
+                    "model": embedding_model,
+                    "ids": [],
+                    "documents": [],
+                    "embeddings": [],
+                }
+            )
+        )
+
+    def test_read_artifact_embeddings_model(self, tmp_path):
+        """_read_artifact_embeddings_model returns the model from the embeddings JSON."""
+        embeddings = tmp_path / "embeddings-2024.json"
+        self._make_embeddings_artifact(embeddings, "artifact-model")
+
+        assert RegistryClient._read_artifact_embeddings_model(embeddings) == "artifact-model"
+
+    def test_read_artifact_embeddings_model_missing(self, tmp_path):
+        """_read_artifact_embeddings_model returns None when the file is absent or has no model."""
+        missing = tmp_path / "missing.json"
+        assert RegistryClient._read_artifact_embeddings_model(missing) is None
+
+        legacy = tmp_path / "legacy.json"
+        legacy.write_text(json.dumps({"format_version": 1, "ids": [], "documents": [], "embeddings": []}))
+        assert RegistryClient._read_artifact_embeddings_model(legacy) is None
+
+    def test_replace_artifact_embeddings_model(self, tmp_path):
+        """_replace_artifact_embeddings_model rewrites the model in the embeddings JSON."""
+        embeddings = tmp_path / "embeddings-2024.json"
+        self._make_embeddings_artifact(embeddings, "old-model")
+
+        RegistryClient._replace_artifact_embeddings_model(embeddings, "new-model")
+
+        assert RegistryClient._read_artifact_embeddings_model(embeddings) == "new-model"
+
+    def test_check_embedding_model_raises_on_embeddings_json_mismatch(self, tmp_path):
+        """_check_embedding_model inspects the embeddings JSON, not just the paper DB."""
+        paper_db = tmp_path / "papers.db"
+        self._make_artifact_paper_db(paper_db, "config-model")
+        embeddings = tmp_path / "embeddings-2024.json"
+        self._make_embeddings_artifact(embeddings, "artifact-model")
+
+        with pytest.raises(EmbeddingModelMismatchError) as exc_info:
+            RegistryClient._check_embedding_model(
+                paper_db, "config-model", False, lambda m: None, embeddings_file=embeddings
+            )
+
+        assert exc_info.value.local_model == "config-model"
+        assert exc_info.value.remote_model == "artifact-model"
+
+    def test_check_embedding_model_patches_embeddings_json_when_ignored(self, tmp_path):
+        """_check_embedding_model rewrites the embeddings JSON when the mismatch is ignored."""
+        paper_db = tmp_path / "papers.db"
+        self._make_artifact_paper_db(paper_db, "config-model")
+        embeddings = tmp_path / "embeddings-2024.json"
+        self._make_embeddings_artifact(embeddings, "artifact-model")
+
+        RegistryClient._check_embedding_model(
+            paper_db, "config-model", True, lambda m: None, embeddings_file=embeddings
+        )
+
+        assert RegistryClient._read_artifact_embeddings_model(embeddings) == "config-model"
 
     def test_download_raises_mismatch_when_db_empty_and_no_manifest_model(self, tmp_path):
         """download() raises EmbeddingModelMismatchError from artifact paper DB when manifest has no model label."""
