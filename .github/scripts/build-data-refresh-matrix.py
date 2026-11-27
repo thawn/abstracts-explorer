@@ -67,9 +67,7 @@ def _matching_tags(
     base = _sanitize(conference)
     model = _sanitize(embedding_model)
 
-    conference_tags = [
-        tag for tag in tags if tag.startswith(f"{base}_") and f"_{model}_" in tag
-    ]
+    conference_tags = [tag for tag in tags if tag.startswith(f"{base}_") and f"_{model}_" in tag]
     if conference_tags:
         return [max(conference_tags)]
 
@@ -169,16 +167,18 @@ def main() -> int:
     entries = []
     for plugin in plugins:
         conference = str(getattr(plugin, "conference_name", plugin.plugin_name))
+        matching_tags = _matching_tags(
+            registry_tags,
+            conference=conference,
+            embedding_model=config.embedding_model,
+            year=year,
+        )
         entries.append(
             {
                 "plugin": plugin.plugin_name,
                 "conference": conference,
-                "registry_tags": _matching_tags(
-                    registry_tags,
-                    conference=conference,
-                    embedding_model=config.embedding_model,
-                    year=year,
-                ),
+                "registry_tags": matching_tags,
+                "is_new": not matching_tags,
             }
         )
 

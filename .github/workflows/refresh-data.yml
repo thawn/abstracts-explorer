@@ -13,10 +13,15 @@ on:
                 description: "Optional conference filter (plugin or canonical name)"
                 required: false
                 type: string
+            only_new:
+                description: "Only process and upload conferences that are not yet in the registry"
+                required: false
+                default: true
+                type: boolean
             force:
                 description: "Force re-download, re-embedding, and clustering for the target year"
                 required: false
-                default: true
+                default: false
                 type: boolean
             upload:
                 description: "Upload refreshed data to the registry"
@@ -35,7 +40,7 @@ permissions:
 env:
     REGISTRY_REPOSITORY: ${{ vars.REGISTRY_REPOSITORY || 'ghcr.io/thawn/abstracts-data' }}
     EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL || 'alias-qwen3-8b-embeddings' }}
-    CHAT_MODEL: ${{ vars.CHAT_MODEL || 'alias-code' }}
+    CHAT_MODEL: ${{ vars.CHAT_MODEL || 'deepseek-v4.1-flash-at-hzdr' }}
     CLUSTER_LABEL_MODEL: ${{ vars.CLUSTER_LABEL_MODEL || 'alias-fast' }}
     LLM_BACKEND_URL: ${{ vars.LLM_BACKEND_URL || 'https://api.helmholtz-blablador.fz-juelich.de' }}
     LLM_BACKEND_AUTH_TOKEN: ${{ secrets.BLABLADOR_TOKEN }}
@@ -86,8 +91,11 @@ jobs:
             matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
         env:
             TARGET_YEAR: ${{ needs.prepare.outputs.year }}
-            FORCE: ${{ github.event_name != 'workflow_dispatch' || inputs.force }}
+            FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force }}
             UPLOAD: ${{ github.event_name != 'workflow_dispatch' || inputs.upload }}
+            ONLY_NEW: ${{ github.event_name != 'workflow_dispatch' || inputs.only_new }}
+            LLM_CONNECT_TIMEOUT: ${{ vars.LLM_CONNECT_TIMEOUT || '30' }}
+            LLM_REQUEST_TIMEOUT: ${{ vars.LLM_REQUEST_TIMEOUT || '120' }}
 
         steps:
             - name: Checkout repository
@@ -110,11 +118,39 @@ jobs:
               run: uv sync
 
             - name: Free disk space
+              if: env.ONLY_NEW != 'true' || matrix.is_new
               run: |
                   sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
 
+            - name: Verify LLM backend token is configured
+              if: env.ONLY_NEW != 'true' || matrix.is_new
+              env:
+                  LLM_BACKEND_AUTH_TOKEN: ${{ secrets.BLABLADOR_TOKEN }}
+              run: |
+                  if [ -z "$LLM_BACKEND_AUTH_TOKEN" ]; then
+                    echo "::error::LLM_BACKEND_AUTH_TOKEN is empty — check that the BLABLADOR_TOKEN repository secret exists and is shared with this repo."
+                    exit 1
+                  fi
+
+            - name: Check LLM backend connectivity
+              if: env.ONLY_NEW != 'true' || matrix.is_new
+              continue-on-error: true
+              env:
+                  LLM_BACKEND_AUTH_TOKEN: ${{ secrets.BLABLADOR_TOKEN }}
+              run: |
+                  status=$(curl -sS -o /dev/null -w '%{http_code}' \
+                    --connect-timeout 20 --max-time 60 \
+                    -H "Authorization: Bearer $LLM_BACKEND_AUTH_TOKEN" \
+                    "${LLM_BACKEND_URL}/v1/models" || true)
+                  case "$status" in
+                    200) echo "Backend reachable (HTTP $status)." ;;
+                    401|403) echo "::warning::Backend rejected the token (HTTP $status)." ;;
+                    000) echo "::warning::Backend unreachable (TLS/connect failed)." ;;
+                    *) echo "::warning::Unexpected backend response (HTTP $status)." ;;
+                  esac
+
             - name: Restore existing registry data
-              if: env.UPLOAD == 'true' && toJSON(matrix.registry_tags) != '[]'
+              if: (env.ONLY_NEW != 'true' || matrix.is_new) && env.UPLOAD == 'true' && toJSON(matrix.registry_tags) != '[]'
               env:
                   REGISTRY_TAGS: ${{ toJSON(matrix.registry_tags) }}
               run: |
@@ -127,6 +163,9 @@ jobs:
                   done < <(jq -r '.[]' <<< "$REGISTRY_TAGS")
 
             - name: Regenerate target-year data
+              if: env.ONLY_NEW != 'true' || matrix.is_new
+              env:
+                  LLM_BACKEND_AUTH_TOKEN: ${{ secrets.BLABLADOR_TOKEN }}
               run: |
                   args=(
                     pipeline
@@ -142,7 +181,40 @@ jobs:
                   uv run abstracts-explorer "${args[@]}"
 
             - name: Upload refreshed data
-              if: env.UPLOAD == 'true'
+              if: env.UPLOAD == 'true' && (env.ONLY_NEW != 'true' || matrix.is_new)
               run: |
                   uv run abstracts-explorer registry push \
                     --conference "${{ matrix.conference }}"
+
+    cleanup:
+        needs: refresh
+        if: always() && (github.event_name != 'workflow_dispatch' || inputs.upload)
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+              with:
+                  fetch-depth: 0
+
+            - name: Install uv
+              uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57
+              with:
+                  version: "latest"
+                  enable-cache: true
+
+            - name: Set up Python
+              uses: actions/setup-python@v6
+              with:
+                  python-version: "3.12"
+
+            - name: Install dependencies
+              run: uv sync
+
+            - name: Verify untagged registry versions (dry run)
+              if: startsWith(env.REGISTRY_REPOSITORY, 'ghcr.io/')
+              run: |
+                  uv run abstracts-explorer registry delete \
+                    --untagged --yes --dry-run \
+                    --repository "$REGISTRY_REPOSITORY" \
+                    --token "$GITHUB_TOKEN"

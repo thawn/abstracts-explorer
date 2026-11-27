@@ -261,31 +261,51 @@ The `Refresh Registry Data` GitHub Actions workflow
 
 It runs monthly and can also be started manually from the Actions tab. Each run:
 
-1. Restores the latest existing artifact for every supported conference.
-2. Runs `abstracts-explorer pipeline run` for the target year.
-3. Uploads the refreshed paper database, embeddings, and clustering cache.
+1. Determines which supported conferences are **new** — i.e. have no registry
+   tag for the configured embedding model.
+2. Restores the latest existing artifact for that conference (when refreshing
+   existing conferences).
+3. Runs `abstracts-explorer pipeline run` for the target year.
+4. Uploads the refreshed paper database, embeddings, and clustering cache.
 
 The target year defaults to the current UTC year. Manual runs accept optional
-`year` and `conference` filters, plus `force` and `upload` toggles. With
-`force` enabled (the default), the target year is re-downloaded, re-embedded,
-and re-clustered so the clustering cache never goes stale.
+`year` and `conference` filters, plus `only_new`, `force`, and `upload` toggles.
+
+`only_new` defaults to `true`, so both scheduled and manual runs only process
+and upload conferences that are not yet in the registry; existing conferences
+are skipped entirely (no download, embedding, clustering, or upload) to avoid
+re-uploading unchanged data. Set `only_new=false` on a manual run to refresh
+existing conferences.
+
+`force` defaults to `false`. When enabled, the target year is re-downloaded,
+re-embedded, and re-clustered instead of reusing cached data.
+
+After the refresh, a cleanup job removes orphaned untagged registry versions
+(this step runs in dry-run mode first; see `registry delete --untagged`).
 
 Plugins that require a manually supplied input file, such as CHI, are skipped
 because they cannot run unattended.
 
 The workflow authenticates to the registry with the built-in `GITHUB_TOKEN`,
-which must have `packages: write` permission. Optional repository variables:
+which must have `packages: write` permission. Model and backend settings are
+set explicitly in the workflow environment (defaults match `.env.tests`).
+Optional repository variables:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `REGISTRY_REPOSITORY` | `ghcr.io/thawn/abstracts-data` | Target OCI repository |
 | `LLM_BACKEND_URL` | `https://api.helmholtz-blablador.fz-juelich.de` | Embedding/clustering backend |
 | `EMBEDDING_MODEL` | `alias-qwen3-8b-embeddings` | Embedding model and registry tag component |
-| `CHAT_MODEL` | `alias-code` | Chat model |
+| `CHAT_MODEL` | `deepseek-v4.1-flash-at-hzdr` | Chat model |
 | `CLUSTER_LABEL_MODEL` | `alias-fast` | Cluster-label model |
 | `REQUESTS_PER_MINUTE` | `60` | Embedding API rate limit |
+| `LLM_CONNECT_TIMEOUT` | `30` | TCP/TLS connect timeout in seconds for backend requests |
+| `LLM_REQUEST_TIMEOUT` | `120` | Per-request timeout in seconds for backend requests |
 
-The Blablador token is read from the `BLABLADOR_TOKEN` repository secret.
+The Blablador token is read from the `BLABLADOR_TOKEN` repository secret and
+exposed to the pipeline as `LLM_BACKEND_AUTH_TOKEN`. The workflow fails fast if
+the secret is empty and logs a non-fatal connectivity probe before running the
+pipeline so token and network problems are distinguishable in the job output.
 
 ## Docker / Container Usage
 
