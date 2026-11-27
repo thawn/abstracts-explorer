@@ -290,6 +290,11 @@ Conferences are processed **sequentially**, one at a time. Each job has its own
 `REQUESTS_PER_MINUTE` limiter, so running conferences in parallel would
 multiply the effective request rate against the shared LLM backend.
 
+The matrix is filtered during preparation to only the conferences that need
+work, so no-op conferences do not start a job at all. When nothing needs
+updating, the `refresh` job is skipped entirely (the matrix still contains one
+inert entry because GitHub rejects an empty dynamic matrix).
+
 ### Adding a year without re-uploading earlier years
 
 When a new year is added to an existing conference, the workflow runs
@@ -302,11 +307,20 @@ If only the abstracts-explorer version changed (not the data), re-tag the
 existing artifacts without exporting or uploading data:
 
 ```bash
-abstracts-explorer registry push --conference neurips --only-tag
+# Re-tag the latest artifact for every tag base to the installed version
+abstracts-explorer registry push --only-tags
+
+# Restrict to one conference (and optionally one year)
+abstracts-explorer registry push --conference neurips --only-tags
+abstracts-explorer registry push --conference neurips --year 2024 --only-tags
 ```
 
-This pushes the per-year and summary manifests under the current version tag,
-reusing the existing data layers.
+For each tag base (for example `neurips-2024_model` or `neurips_model`), the
+highest existing version is selected and a new tag with the installed version
+is created. Only the manifest is re-pushed; existing data layers and the config
+blob are reused. Tags that already exist for the installed version are skipped.
+Use `--dry-run` to preview and `--force` to overwrite existing installed-version
+tags.
 
 After the refresh, a cleanup job removes orphaned untagged registry versions
 (this step runs in dry-run mode first; see `registry delete --untagged`).

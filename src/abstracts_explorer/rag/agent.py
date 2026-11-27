@@ -5,6 +5,7 @@ RAG agent construction and query execution.
 import asyncio
 import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -38,6 +39,8 @@ from abstracts_explorer.utils.http_utils import build_llm_timeout
 from abstracts_explorer.utils.time_utils import format_timestamp
 
 logger = logging.getLogger(__name__)
+
+_SLOW_QUERY_WARNING_SECONDS = 120.0
 
 _TOOL_EXECUTOR_LOCK = threading.Lock()
 _TOOL_EXECUTOR: Optional[ThreadPoolExecutor] = None
@@ -367,17 +370,27 @@ class AgentMixin:
         >>> print(response["response"])
         >>> print(f"Based on {len(response['papers'])} papers")
         """
-        with self._query_lock:
-            return self._query(
-                question,
-                limit,
-                system_prompt,
-                conferences,
-                years,
-                sessions,
-                available_conferences,
-                paper_priorities,
-            )
+        started = time.monotonic()
+        try:
+            with self._query_lock:
+                return self._query(
+                    question,
+                    limit,
+                    system_prompt,
+                    conferences,
+                    years,
+                    sessions,
+                    available_conferences,
+                    paper_priorities,
+                )
+        finally:
+            elapsed = time.monotonic() - started
+            if elapsed > _SLOW_QUERY_WARNING_SECONDS:
+                logger.warning(
+                    "RAG query took %.1fs (slow-query warning threshold %.0fs)",
+                    elapsed,
+                    _SLOW_QUERY_WARNING_SECONDS,
+                )
 
     def _query(
         self,

@@ -245,7 +245,8 @@ class TestConfig:
         assert config.embedding_max_input_tokens == 8192
         assert config.rag_max_parallel_tools == 8
         assert config.rag_request_limit == 50
-        assert config.rag_query_timeout == 120
+        # .env.tests raises the cap so slow multi-step e2e flows can finish.
+        assert config.rag_query_timeout == 300
         assert config.chat_history_ttl == 86400
         assert config.llm_connect_timeout == 10
         assert config.llm_request_timeout == 60

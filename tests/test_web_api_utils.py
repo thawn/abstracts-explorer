@@ -15,6 +15,12 @@ from abstracts_explorer.web_ui.api_utils import (
 )
 
 
+class RateLimitError(Exception):
+    """Fake OpenAI-style rate-limit error for error mapping tests."""
+
+    status_code = 429
+
+
 @pytest.fixture
 def app():
     """Create a Flask app with routes exercising the shared API helpers."""
@@ -54,6 +60,19 @@ def app():
     @api_error_handler
     def unavailable():
         raise httpx2.ConnectError("connection refused")
+
+    @test_app.route("/rate-limited")
+    @api_error_handler
+    def rate_limited():
+        raise RateLimitError("backend returned 429")
+
+    @test_app.route("/rate-limited-chained")
+    @api_error_handler
+    def rate_limited_chained():
+        try:
+            raise RateLimitError("backend returned 429")
+        except RateLimitError as exc:
+            raise RuntimeError("wrapped by the RAG layer") from exc
 
     @test_app.route("/hidden")
     @api_error_handler(error_message="Something failed")
@@ -177,6 +196,41 @@ class TestApiErrorHandler:
         response = client.get("/unavailable")
         assert response.status_code == 503
         assert "temporarily unavailable" in response.get_json()["error"]
+
+    def test_rate_limit_returns_429_with_backoff_details(self, client):
+        response = client.get("/rate-limited")
+        assert response.status_code == 429
+        message = response.get_json()["error"]
+        assert "rate-limit" in message
+        assert "429" in message
+        assert "backoff" in message
+        assert "shared cooldown" in message
+        assert "attempts" in message
+        assert response.headers["Retry-After"]
+
+    def test_rate_limit_detected_through_exception_chain(self, client):
+        response = client.get("/rate-limited-chained")
+        assert response.status_code == 429
+        assert "rate-limit" in response.get_json()["error"]
+
+    def test_timeout_after_recent_rate_limit_mentions_backoff(self, client):
+        from abstracts_explorer.rate_limiter import record_rate_limit
+
+        record_rate_limit(45.0)
+        response = client.get("/timeout")
+        assert response.status_code == 504
+        message = response.get_json()["error"]
+        assert "took too long" in message
+        assert "rate-limiting" in message
+        assert "45s" in message
+
+    def test_timeout_without_rate_limit_is_plain(self, client):
+        from abstracts_explorer.rate_limiter import reset_last_rate_limit
+
+        reset_last_rate_limit()
+        response = client.get("/timeout")
+        assert response.status_code == 504
+        assert "rate-limiting" not in response.get_json()["error"]
 
     def test_unexpected_exception_hides_raw_details(self, client):
         response = client.get("/boom")

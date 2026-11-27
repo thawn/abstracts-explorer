@@ -4013,59 +4013,253 @@ class TestRetagConference(_SummaryClientMixin):
         assert manifest["annotations"] == {"k": "v"}
 
 
-class TestRegistryOnlyTagCommand(_SummaryClientMixin):
-    """Tests for ``registry push --only-tag`` and ``registry update-conference-image`` CLI."""
+class TestRetagLatest(_SummaryClientMixin):
+    """Tests for RegistryClient.retag_latest."""
 
-    def test_only_tag_calls_retag(self, capsys):
+    def test_retags_latest_per_base_across_conferences(self):
+        client = self._make_client()
+        tags = [
+            "neurips-2024_model_0.3.0",
+            "neurips-2024_model_0.5.0",
+            "neurips_model_0.3.0",
+            "iclr-2025_other_0.1.0",
+        ]
+        with (
+            patch.object(client, "list_tags", return_value=tags),
+            patch.object(client, "_retag_manifest") as retag,
+        ):
+            result = client.retag_latest(version="9.9.9")
+
+        targets = sorted(call.args[1] for call in retag.call_args_list)
+        assert targets == sorted(
+            [
+                "neurips-2024_model_9.9.9",
+                "neurips_model_9.9.9",
+                "iclr-2025_other_9.9.9",
+            ]
+        )
+        sources = sorted(call.args[0] for call in retag.call_args_list)
+        assert sources == sorted(
+            [
+                "neurips-2024_model_0.5.0",
+                "neurips_model_0.3.0",
+                "iclr-2025_other_0.1.0",
+            ]
+        )
+        assert result["version"] == "9.9.9"
+        assert result["dry_run"] is False
+        assert [entry["action"] for entry in result["entries"]].count("retagged") == 3
+
+    def test_skips_existing_target_without_force(self):
+        client = self._make_client()
+        tags = ["neurips_model_2.0.0", "neurips_model_1.0.0"]
+        with (
+            patch.object(client, "list_tags", return_value=tags),
+            patch.object(client, "_retag_manifest") as retag,
+        ):
+            result = client.retag_latest(version="1.0.0")
+
+        retag.assert_not_called()
+        assert result["entries"][0]["action"] == "skipped-exists"
+        assert result["entries"][0]["source_tag"] == "neurips_model_2.0.0"
+        assert result["entries"][0]["target_tag"] == "neurips_model_1.0.0"
+
+    def test_force_retags_existing_target(self):
+        client = self._make_client()
+        tags = ["neurips_model_2.0.0", "neurips_model_1.0.0"]
+        with (
+            patch.object(client, "list_tags", return_value=tags),
+            patch.object(client, "_retag_manifest") as retag,
+        ):
+            result = client.retag_latest(version="1.0.0", force=True)
+
+        retag.assert_called_once()
+        assert retag.call_args.args[0] == "neurips_model_2.0.0"
+        assert retag.call_args.args[1] == "neurips_model_1.0.0"
+        assert result["entries"][0]["action"] == "retagged"
+
+    def test_dry_run_does_not_push(self):
+        client = self._make_client()
+        with (
+            patch.object(client, "list_tags", return_value=["neurips_model_0.3.0"]),
+            patch.object(client, "_retag_manifest") as retag,
+        ):
+            result = client.retag_latest(version="9.9.9", dry_run=True)
+
+        retag.assert_not_called()
+        assert result["dry_run"] is True
+        assert result["entries"][0]["action"] == "would-retag"
+
+    def test_conference_filter_limits_scope(self):
+        client = self._make_client()
+        tags = ["neurips_model_0.3.0", "iclr_model_0.3.0"]
+        with (
+            patch.object(client, "list_tags", return_value=tags),
+            patch.object(client, "_retag_manifest") as retag,
+        ):
+            client.retag_latest(conference="neurips", version="9.9.9")
+
+        retag.assert_called_once()
+        assert retag.call_args.args[0] == "neurips_model_0.3.0"
+
+    def test_year_filter_limits_scope(self):
+        client = self._make_client()
+        tags = ["neurips-2024_model_0.3.0", "neurips-2025_model_0.3.0"]
+        with (
+            patch.object(client, "list_tags", return_value=tags),
+            patch.object(client, "_retag_manifest") as retag,
+        ):
+            client.retag_latest(conference="neurips", year=2024, version="9.9.9")
+
+        retag.assert_called_once()
+        assert retag.call_args.args[0] == "neurips-2024_model_0.3.0"
+
+    def test_year_without_conference_raises(self):
+        client = self._make_client()
+        with pytest.raises(RegistryError, match="conference"):
+            client.retag_latest(year=2024)
+
+    def test_dev_version_is_sanitized_in_target_tag(self):
+        client = self._make_client()
+        with (
+            patch.object(client, "list_tags", return_value=["neurips_model_0.3.0"]),
+            patch.object(client, "_retag_manifest") as retag,
+        ):
+            client.retag_latest(version="0.4.6.dev16+g7005b7837")
+
+        retag.assert_called_once()
+        assert retag.call_args.args[1] == "neurips_model_0.4.6.dev16-g7005b7837"
+
+    def test_ignores_unparseable_tags(self):
+        client = self._make_client()
+        tags = ["neurips-2024", "neurips_model_0.3.0"]
+        with (
+            patch.object(client, "list_tags", return_value=tags),
+            patch.object(client, "_retag_manifest") as retag,
+        ):
+            client.retag_latest(version="9.9.9")
+
+        retag.assert_called_once()
+        assert retag.call_args.args[0] == "neurips_model_0.3.0"
+
+    def test_already_current_version_skipped(self):
+        client = self._make_client()
+        tag = _build_tag("neurips", 2024, embedding_model="model", version="9.9.9")
+        with (
+            patch.object(client, "list_tags", return_value=[tag]),
+            patch.object(client, "_retag_manifest") as retag,
+        ):
+            result = client.retag_latest(version="9.9.9")
+
+        retag.assert_not_called()
+        assert result["entries"][0]["action"] == "skipped-current"
+
+    def test_retag_manifest_updates_annotations_and_reuses_layers(self):
+        client = self._make_client()
+        client._client.get_manifest.return_value = _manifest([_layer("sha256:a", "papers-2024.db")])
+        client._client.get_container.return_value = "container"
+        client._client.upload_manifest.return_value = Mock(status_code=201)
+
+        client._retag_manifest("neurips_model_0.3.0", "neurips_model_9.9.9", "9.9.9", lambda _msg: None)
+
+        client._client.get_manifest.assert_called_once_with("ghcr.io/thawn/abstracts-data:neurips_model_0.3.0")
+        client._client.get_container.assert_called_once_with("ghcr.io/thawn/abstracts-data:neurips_model_9.9.9")
+        manifest = client._client.upload_manifest.call_args.args[0]
+        assert manifest["annotations"]["com.abstracts-explorer.version"] == "9.9.9"
+        assert manifest["layers"][0]["digest"] == "sha256:a"
+
+    def test_retag_manifest_rejects_index(self):
+        client = self._make_client()
+        client._client.get_manifest.return_value = {"manifests": [{"digest": "sha256:child"}]}
+        with pytest.raises(RegistryError, match="index"):
+            client._retag_manifest("src", "dst", "9.9.9", lambda _msg: None)
+
+
+class TestRegistryOnlyTagsCommand(_SummaryClientMixin):
+    """Tests for ``registry push --only-tags`` and ``registry update-conference-image`` CLI."""
+
+    def _args(self, **overrides):
+        base = {
+            "repository": "ghcr.io/thawn/abstracts-data",
+            "token": "test-token",
+            "conference": "all",
+            "year": None,
+            "tag": None,
+            "only_tags": True,
+            "dry_run": False,
+            "force": False,
+        }
+        base.update(overrides)
+        return argparse.Namespace(**base)
+
+    def _summary(self):
+        return {
+            "version": "9.9.9",
+            "dry_run": False,
+            "entries": [
+                {
+                    "source_tag": "neurips_model_0.3.0",
+                    "target_tag": "neurips_model_9.9.9",
+                    "source_version": "0.3.0",
+                    "action": "retagged",
+                }
+            ],
+        }
+
+    def test_only_tags_calls_retag_latest_for_all_conferences(self, capsys):
         from abstracts_explorer.cli import registry_upload_command
 
-        args = argparse.Namespace(
-            repository="ghcr.io/thawn/abstracts-data",
-            token="test-token",
-            conference="neurips",
-            year=None,
-            tag=None,
-            only_tag=True,
-        )
         with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
-            MockClient.return_value.retag_conference.return_value = {"tag": "t", "years": [2024]}
-            result = registry_upload_command(args)
+            MockClient.return_value.retag_latest.return_value = self._summary()
+            result = registry_upload_command(self._args())
 
         assert result == 0
-        MockClient.return_value.retag_conference.assert_called_once()
-        assert "Re-tag complete" in capsys.readouterr().out
+        MockClient.return_value.retag_latest.assert_called_once()
+        assert MockClient.return_value.retag_latest.call_args.kwargs["conference"] is None
+        out = capsys.readouterr().out
+        assert "Re-tag complete" in out
+        assert "neurips_model_0.3.0 -> neurips_model_9.9.9" in out
 
-    def test_only_tag_rejects_all_conferences(self, capsys):
+    def test_only_tags_passes_filters_and_flags(self, capsys):
         from abstracts_explorer.cli import registry_upload_command
 
-        args = argparse.Namespace(
-            repository="ghcr.io/thawn/abstracts-data",
-            token="test-token",
-            conference="all",
-            year=None,
-            tag=None,
-            only_tag=True,
-        )
-        result = registry_upload_command(args)
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            MockClient.return_value.retag_latest.return_value = self._summary()
+            result = registry_upload_command(self._args(conference="neurips", year=2024, dry_run=True, force=True))
 
-        assert result == 1
-        assert "requires a specific --conference" in capsys.readouterr().err
+        assert result == 0
+        kwargs = MockClient.return_value.retag_latest.call_args.kwargs
+        assert kwargs["conference"].casefold() == "neurips"
+        assert kwargs["year"] == 2024
+        assert kwargs["dry_run"] is True
+        assert kwargs["force"] is True
 
-    def test_only_tag_rejects_custom_tag(self, capsys):
+    def test_only_tags_rejects_custom_tag(self, capsys):
         from abstracts_explorer.cli import registry_upload_command
 
-        args = argparse.Namespace(
-            repository="ghcr.io/thawn/abstracts-data",
-            token="test-token",
-            conference="neurips",
-            year=None,
-            tag="custom",
-            only_tag=True,
-        )
-        result = registry_upload_command(args)
+        result = registry_upload_command(self._args(conference="neurips", tag="custom"))
 
         assert result == 1
         assert "cannot be combined with --tag" in capsys.readouterr().err
+
+    def test_only_tags_rejects_year_without_conference(self, capsys):
+        from abstracts_explorer.cli import registry_upload_command
+
+        result = registry_upload_command(self._args(year=2024))
+
+        assert result == 1
+        assert "--year requires a specific --conference" in capsys.readouterr().err
+
+    def test_only_tags_registry_error_returns_one(self, capsys):
+        from abstracts_explorer.cli import registry_upload_command
+        from abstracts_explorer.registry import RegistryError
+
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            MockClient.return_value.retag_latest.side_effect = RegistryError("boom")
+            result = registry_upload_command(self._args())
+
+        assert result == 1
+        assert "Registry error: boom" in capsys.readouterr().err
 
     def test_update_conference_image_command_success(self, capsys):
         from abstracts_explorer.cli import registry_update_conference_image_command

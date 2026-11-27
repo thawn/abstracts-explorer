@@ -8,7 +8,11 @@ from typing import Any, Callable, Dict, List, Optional, ParamSpec, Tuple, TypeVa
 from flask import Request, jsonify, request
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge, UnsupportedMediaType
 
-from abstracts_explorer.utils.http_utils import is_llm_connection_error, is_llm_timeout
+from abstracts_explorer.utils.http_utils import (
+    is_llm_connection_error,
+    is_llm_rate_limit_error,
+    is_llm_timeout,
+)
 from abstracts_explorer.utils.read_only import ReadOnlyError
 
 logger = logging.getLogger(__name__)
@@ -24,13 +28,73 @@ _UNAVAILABLE_ERROR_MESSAGE = "The AI service is temporarily unavailable. Please 
 _GENERIC_ERROR_MESSAGE = "Something went wrong while processing your request. Please try again."
 
 
+def _format_seconds(value: float) -> str:
+    """Format a duration without trailing decimals."""
+    return f"{value:.0f}s"
+
+
+def _rate_limit_details() -> Tuple[float, int, float]:
+    """
+    Return the configured rate-limit cooldown, attempt budget, and wait time.
+
+    Returns
+    -------
+    tuple
+        ``(cooldown_seconds, attempts, remaining_seconds)``.  The remaining
+        time comes from the shared cooldown and falls back to the configured
+        cooldown when no cooldown is active.
+    """
+    from abstracts_explorer.config import get_config
+    from abstracts_explorer.rate_limiter import get_global_cooldown
+
+    config = get_config()
+    cooldown = float(getattr(config, "llm_rate_limit_delay", 60.0))
+    attempts = max(1, int(getattr(config, "llm_max_attempts", 1)))
+    remaining = get_global_cooldown().remaining()
+    if remaining <= 0:
+        remaining = cooldown
+    return cooldown, attempts, remaining
+
+
+def _rate_limit_message() -> str:
+    """Build a user-facing message describing backend rate limiting and backoff."""
+    cooldown, attempts, remaining = _rate_limit_details()
+    return (
+        "The AI service is rate-limiting requests (HTTP 429). Requests were retried "
+        f"with exponential backoff and a shared cooldown of up to {_format_seconds(cooldown)} "
+        f"across at most {attempts} attempts. Please wait about {_format_seconds(remaining)} "
+        "and try again."
+    )
+
+
+def _timeout_message() -> str:
+    """Build a timeout message, including recent rate-limit backoff when relevant."""
+    from abstracts_explorer.rate_limiter import get_last_rate_limit
+
+    cooldown, attempts, _ = _rate_limit_details()
+    last = get_last_rate_limit(max_age=max(60.0, cooldown * attempts))
+    if last is None:
+        return _TIMEOUT_ERROR_MESSAGE
+    delay, _ = last
+    return (
+        f"{_TIMEOUT_ERROR_MESSAGE} The AI backend was rate-limiting requests just before "
+        f"the timeout (HTTP 429, backoff {_format_seconds(delay)}, up to {attempts} attempts), "
+        "which likely caused the delay."
+    )
+
+
 def _backend_error_response(
     exc: BaseException,
     error_message: Optional[str] = None,
 ) -> Tuple[Any, int]:
     """Map backend failures to user-friendly messages and HTTP status codes."""
+    if is_llm_rate_limit_error(exc):
+        _, _, remaining = _rate_limit_details()
+        response = jsonify({"error": _rate_limit_message()})
+        response.headers["Retry-After"] = str(max(1, math.ceil(remaining)))
+        return response, 429
     if is_llm_timeout(exc):
-        return jsonify({"error": _TIMEOUT_ERROR_MESSAGE}), 504
+        return jsonify({"error": _timeout_message()}), 504
     if is_llm_connection_error(exc):
         return jsonify({"error": _UNAVAILABLE_ERROR_MESSAGE}), 503
     return jsonify({"error": error_message or _GENERIC_ERROR_MESSAGE}), 500
@@ -100,7 +164,7 @@ def api_error_handler(func: Optional[Callable[P, R]] = None, *, error_message: O
             except ApiError as exc:
                 if exc.status_code >= 500:
                     logger.error("API error in %s: %s", request.endpoint, exc.message, exc_info=True)
-                    if is_llm_timeout(exc) or is_llm_connection_error(exc):
+                    if is_llm_timeout(exc) or is_llm_connection_error(exc) or is_llm_rate_limit_error(exc):
                         return _backend_error_response(exc)
                 response = jsonify({"error": exc.message})
                 response.status_code = exc.status_code

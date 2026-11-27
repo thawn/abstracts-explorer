@@ -191,7 +191,7 @@ abstracts-explorer papers search "graph neural networks" --read-only
 - **MAX_CONTEXT_PAPERS**: Number of papers to include in RAG context (default: `5`)
 - **RAG_MAX_PARALLEL_TOOLS**: Maximum number of tool calls executed concurrently by the RAG agent; excess calls are queued (default: `8`)
 - **RAG_REQUEST_LIMIT**: Maximum number of model requests per RAG query (default: `50`)
-- **RAG_QUERY_TIMEOUT**: Wall-clock timeout in seconds for one RAG query (default: `120`). This must not exceed the reverse proxy's `proxy_read_timeout` (nginx default used in this project: `120s`); otherwise the proxy may close the connection before the RAG query finishes. `LLM_REQUEST_TIMEOUT` is clamped to this value.
+- **RAG_QUERY_TIMEOUT**: Wall-clock timeout in seconds for one RAG query (default: `120`). This must not exceed the reverse proxy's `proxy_read_timeout` (nginx default used in this project: `120s`); otherwise the proxy may close the connection before the RAG query finishes. `LLM_REQUEST_TIMEOUT` is clamped to this value. Queries taking longer than 120 seconds log a `slow-query` warning that includes the actual duration.
 - **CHAT_HISTORY_TTL**: Idle time in seconds after which a web chat session's in-memory history is expired (default: `86400`, i.e. 24 hours). Set to `0` to disable expiry. An hourly background sweep removes idle sessions, and stale history is also discarded on next access.
 - **ENABLE_QUERY_REWRITING**: Rewrite follow-up questions into self-contained search queries before retrieval (default: `true`)
 - **QUERY_SIMILARITY_THRESHOLD**: Maximum embedding distance for a rewritten-query answer to be accepted as a hit (default: `0.7`)

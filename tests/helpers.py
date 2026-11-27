@@ -91,6 +91,31 @@ class FakeTime:
             self.current += max(seconds, 1e-6)
 
 
+def install_fake_sleep(
+    monkeypatch: pytest.MonkeyPatch,
+    target: str = "abstracts_explorer.plugin.base.time.sleep",
+) -> FakeTime:
+    """
+    Replace a ``time.sleep`` reference with a virtual clock.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Pytest monkeypatch fixture used to install and restore the fake sleep.
+    target : str, optional
+        Dotted path to the ``time.sleep`` attribute to patch, by default
+        ``"abstracts_explorer.plugin.base.time.sleep"``.
+
+    Returns
+    -------
+    FakeTime
+        Virtual clock recording the sleep durations that were requested.
+    """
+    clock = FakeTime()
+    monkeypatch.setattr(target, clock.sleep)
+    return clock
+
+
 def reset_lm_studio_availability_cache():
     """Reset the cached result of LM Studio availability check."""
     global _lm_studio_available_cache

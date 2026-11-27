@@ -881,10 +881,20 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         help="Custom tag (default: derived from conference, year and embedding model)",
     )
     registry_push_parser.add_argument(
-        "--only-tag",
+        "--only-tags",
         action="store_true",
-        help="Do not upload data; re-push existing artifacts under the current version tag. "
-        "Use when only the abstracts-explorer version changed but the data did not.",
+        help="Do not upload data; re-tag the latest existing artifact for every tag base under the "
+        "current version. Use when only the abstracts-explorer version changed but the data did not.",
+    )
+    registry_push_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="With --only-tags, preview which tags would be created without modifying the registry.",
+    )
+    registry_push_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="With --only-tags, overwrite existing tags for the installed version.",
     )
 
     registry_update_conference_image_parser = _add_leaf(

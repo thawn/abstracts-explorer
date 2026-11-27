@@ -10,9 +10,22 @@ import re
 import sys
 from typing import Any
 
+from packaging.version import Version
+
 from abstracts_explorer.config import get_config
 from abstracts_explorer.plugins import get_all_plugins
-from abstracts_explorer.registry import RegistryClient
+from abstracts_explorer.registry import RegistryClient, _parse_version_from_tag
+
+# GitHub rejects an empty dynamic matrix, so emit a single inert entry when
+# there is nothing to do. The refresh job is skipped via the `has_work` output.
+_NO_WORK_ENTRY: dict[str, Any] = {
+    "plugin": "none",
+    "conference": "none",
+    "registry_tags": [],
+    "is_new": False,
+    "target_year_present": True,
+    "needs_update": False,
+}
 
 
 def _sanitize(value: str) -> str:
@@ -33,6 +46,30 @@ def _sanitize(value: str) -> str:
     safe = re.sub(r"[^a-z0-9._-]", "-", safe)
     safe = re.sub(r"-{2,}", "-", safe)
     return safe.strip("-")
+
+
+def _newest_tag(tags: list[str]) -> str:
+    """
+    Return the tag with the highest PEP 440 version.
+
+    Parameters
+    ----------
+    tags : list of str
+        Tag strings to compare.
+
+    Returns
+    -------
+    str
+        The tag with the highest parsed version. Tags without a parseable
+        version sort before versioned tags; the tag string is used as a
+        deterministic tie-breaker.
+    """
+
+    def _sort_key(tag: str) -> tuple[int, Version, str]:
+        parsed = _parse_version_from_tag(tag)
+        return (1 if parsed is not None else 0, parsed or Version("0"), tag)
+
+    return max(tags, key=_sort_key)
 
 
 def _matching_tags(
@@ -69,7 +106,7 @@ def _matching_tags(
 
     conference_tags = [tag for tag in tags if tag.startswith(f"{base}_") and f"_{model}_" in tag]
     if conference_tags:
-        return [max(conference_tags)]
+        return [_newest_tag(conference_tags)]
 
     year_tags: dict[int, list[str]] = {}
     pattern = re.compile(rf"^{re.escape(base)}-(\d{{4}})_")
@@ -83,7 +120,7 @@ def _matching_tags(
         if tag_year <= year:
             year_tags.setdefault(tag_year, []).append(tag)
 
-    return [max(candidates) for _, candidates in sorted(year_tags.items())]
+    return [_newest_tag(candidates) for _, candidates in sorted(year_tags.items())]
 
 
 def _target_year_present(
@@ -123,7 +160,7 @@ def _target_year_present(
     conference_tags = [tag for tag in matching_tags if not year_pattern.match(tag)]
 
     if conference_tags:
-        tag = max(conference_tags)
+        tag = _newest_tag(conference_tags)
         try:
             info = client.get_artifact_info(tag)
         except Exception:
@@ -179,6 +216,7 @@ def main() -> int:
     target_year = os.environ.get("TARGET_YEAR", "").strip()
     year = int(target_year) if target_year else dt.datetime.now(dt.timezone.utc).year
     conference_filter = os.environ.get("CONFERENCE_FILTER", "").strip()
+    only_new = os.environ.get("ONLY_NEW", "true").strip().lower() != "false"
 
     repository = os.environ.get("REGISTRY_REPOSITORY") or config.registry_repository
     if not repository:
@@ -241,12 +279,16 @@ def main() -> int:
             }
         )
 
-    matrix = {"include": entries}
+    selected = [entry for entry in entries if (not only_new) or entry["needs_update"]]
+    has_work = bool(selected)
+    matrix = {"include": selected if has_work else [_NO_WORK_ENTRY]}
+
     output = os.environ.get("GITHUB_OUTPUT")
     if output:
         with open(output, "a", encoding="utf-8") as handle:
             handle.write(f"matrix={json.dumps(matrix)}\n")
             handle.write(f"year={year}\n")
+            handle.write(f"has_work={'true' if has_work else 'false'}\n")
     else:
         print(json.dumps(matrix, indent=2))
 
