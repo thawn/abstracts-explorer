@@ -880,6 +880,34 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         default=None,
         help="Custom tag (default: derived from conference, year and embedding model)",
     )
+    registry_push_parser.add_argument(
+        "--only-tag",
+        action="store_true",
+        help="Do not upload data; re-push existing artifacts under the current version tag. "
+        "Use when only the abstracts-explorer version changed but the data did not.",
+    )
+
+    registry_update_summary_parser = _add_leaf(
+        registry_subparsers,
+        "update-summary",
+        "registry_update_summary_command",
+        ("registry", "update-summary"),
+        help="Rebuild a conference-level tag from existing per-year artifacts without re-uploading data",
+    )
+    _add_registry_args(registry_update_summary_parser)
+    registry_update_summary_parser.add_argument(
+        "--conference",
+        "-c",
+        type=str,
+        required=True,
+        help="Conference name (e.g., neurips). A specific conference is required.",
+    )
+    registry_update_summary_parser.add_argument(
+        "--embedding-model",
+        type=str,
+        default=None,
+        help="Embedding model name (defaults to the model stored in the local database).",
+    )
 
     registry_pull_parser = _add_leaf(
         registry_subparsers,

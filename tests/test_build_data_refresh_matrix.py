@@ -43,7 +43,34 @@ class FakePlugin:
         return {"parameters": self._parameters}
 
 
-def _run_main(monkeypatch, tmp_path, module, *, plugins, tags, model="model", target_year="2026"):
+class FakeRegistryClient:
+    """Minimal registry client fake for the matrix builder."""
+
+    def __init__(self, tags, artifact_years=None):
+        self._tags = tags
+        self._artifact_years = artifact_years or {}
+
+    def list_tags(self):
+        """Return the configured tags."""
+        return self._tags
+
+    def get_artifact_info(self, tag):
+        """Return a manifest annotation with the configured years."""
+        years = self._artifact_years.get(tag, [])
+        return {"annotations": {"com.abstracts-explorer.years": ",".join(str(y) for y in years)}}
+
+
+def _run_main(
+    monkeypatch,
+    tmp_path,
+    module,
+    *,
+    plugins,
+    tags,
+    model="model",
+    target_year="2026",
+    artifact_years=None,
+):
     """Run ``main`` with fakes and return the parsed matrix and year."""
     output = tmp_path / "output.txt"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
@@ -62,7 +89,7 @@ def _run_main(monkeypatch, tmp_path, module, *, plugins, tags, model="model", ta
     monkeypatch.setattr(
         module,
         "RegistryClient",
-        lambda repository, token: SimpleNamespace(list_tags=lambda: tags),
+        lambda repository, token: FakeRegistryClient(tags, artifact_years),
     )
 
     assert module.main() == 0
@@ -149,3 +176,60 @@ def test_main_errors_when_no_supported_plugins(matrix_module, monkeypatch, tmp_p
     )
 
     assert matrix_module.main() == 1
+
+
+def test_target_year_present_in_summary(matrix_module, monkeypatch, tmp_path):
+    matrix, _ = _run_main(
+        monkeypatch,
+        tmp_path,
+        matrix_module,
+        plugins=[FakePlugin("neurips", "neurips")],
+        tags=["neurips_model_0.4.0"],
+        artifact_years={"neurips_model_0.4.0": [2024, 2025, 2026]},
+    )
+    entry = matrix["include"][0]
+    assert entry["target_year_present"] is True
+    assert entry["needs_update"] is False
+
+
+def test_target_year_missing_marks_needs_update(matrix_module, monkeypatch, tmp_path):
+    matrix, _ = _run_main(
+        monkeypatch,
+        tmp_path,
+        matrix_module,
+        plugins=[FakePlugin("neurips", "neurips")],
+        tags=["neurips_model_0.4.0"],
+        artifact_years={"neurips_model_0.4.0": [2024, 2025]},
+    )
+    entry = matrix["include"][0]
+    assert entry["is_new"] is False
+    assert entry["target_year_present"] is False
+    assert entry["needs_update"] is True
+
+
+def test_target_year_present_via_year_tag(matrix_module, monkeypatch, tmp_path):
+    matrix, _ = _run_main(
+        monkeypatch,
+        tmp_path,
+        matrix_module,
+        plugins=[FakePlugin("neurips", "neurips", supported_years=(2025,))],
+        tags=["neurips-2024_model_0.4.0", "neurips-2025_model_0.4.0"],
+        target_year="2025",
+    )
+    entry = matrix["include"][0]
+    assert entry["target_year_present"] is True
+    assert entry["needs_update"] is False
+
+
+def test_new_conference_needs_update(matrix_module, monkeypatch, tmp_path):
+    matrix, _ = _run_main(
+        monkeypatch,
+        tmp_path,
+        matrix_module,
+        plugins=[FakePlugin("iclr", "iclr")],
+        tags=[],
+    )
+    entry = matrix["include"][0]
+    assert entry["is_new"] is True
+    assert entry["target_year_present"] is False
+    assert entry["needs_update"] is True

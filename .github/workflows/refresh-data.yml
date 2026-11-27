@@ -58,6 +58,10 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@v6
               with:
+                  # Use the released main branch so registry tags carry a stable
+                  # version. Override with the REFRESH_REF repository variable
+                  # (e.g. for testing) if needed.
+                  ref: ${{ vars.REFRESH_REF || 'main' }}
                   fetch-depth: 0
 
             - name: Install uv
@@ -104,6 +108,10 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@v6
               with:
+                  # Use the released main branch so registry tags carry a stable
+                  # version. Override with the REFRESH_REF repository variable
+                  # (e.g. for testing) if needed.
+                  ref: ${{ vars.REFRESH_REF || 'main' }}
                   fetch-depth: 0
 
             - name: Install uv
@@ -121,12 +129,12 @@ jobs:
               run: uv sync
 
             - name: Free disk space
-              if: env.ONLY_NEW != 'true' || matrix.is_new
+              if: env.ONLY_NEW != 'true' || matrix.needs_update
               run: |
                   sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
 
             - name: Verify LLM backend token is configured
-              if: env.ONLY_NEW != 'true' || matrix.is_new
+              if: env.ONLY_NEW != 'true' || matrix.needs_update
               env:
                   LLM_BACKEND_AUTH_TOKEN: ${{ secrets.BLABLADOR_TOKEN }}
               run: |
@@ -136,7 +144,7 @@ jobs:
                   fi
 
             - name: Check LLM backend connectivity
-              if: env.ONLY_NEW != 'true' || matrix.is_new
+              if: env.ONLY_NEW != 'true' || matrix.needs_update
               continue-on-error: true
               env:
                   LLM_BACKEND_AUTH_TOKEN: ${{ secrets.BLABLADOR_TOKEN }}
@@ -153,7 +161,7 @@ jobs:
                   esac
 
             - name: Restore existing registry data
-              if: (env.ONLY_NEW != 'true' || matrix.is_new) && env.UPLOAD == 'true' && toJSON(matrix.registry_tags) != '[]'
+              if: (env.ONLY_NEW != 'true' || matrix.needs_update) && env.UPLOAD == 'true' && toJSON(matrix.registry_tags) != '[]'
               env:
                   REGISTRY_TAGS: ${{ toJSON(matrix.registry_tags) }}
               run: |
@@ -166,7 +174,7 @@ jobs:
                   done < <(jq -r '.[]' <<< "$REGISTRY_TAGS")
 
             - name: Regenerate target-year data
-              if: env.ONLY_NEW != 'true' || matrix.is_new
+              if: env.ONLY_NEW != 'true' || matrix.needs_update
               env:
                   LLM_BACKEND_AUTH_TOKEN: ${{ secrets.BLABLADOR_TOKEN }}
               run: |
@@ -183,10 +191,23 @@ jobs:
                   fi
                   uv run abstracts-explorer "${args[@]}"
 
-            - name: Upload refreshed data
+            - name: Upload full conference (new conference or manual refresh)
               if: env.UPLOAD == 'true' && (env.ONLY_NEW != 'true' || matrix.is_new)
               run: |
                   uv run abstracts-explorer registry push \
+                    --conference "${{ matrix.conference }}"
+
+            - name: Upload new year data
+              if: env.UPLOAD == 'true' && env.ONLY_NEW == 'true' && !matrix.is_new && matrix.needs_update
+              run: |
+                  uv run abstracts-explorer registry push \
+                    --conference "${{ matrix.conference }}" \
+                    --year "$TARGET_YEAR"
+
+            - name: Update conference summary
+              if: env.UPLOAD == 'true' && env.ONLY_NEW == 'true' && !matrix.is_new && matrix.needs_update
+              run: |
+                  uv run abstracts-explorer registry update-summary \
                     --conference "${{ matrix.conference }}"
 
     cleanup:
@@ -198,6 +219,10 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@v6
               with:
+                  # Use the released main branch so registry tags carry a stable
+                  # version. Override with the REFRESH_REF repository variable
+                  # (e.g. for testing) if needed.
+                  ref: ${{ vars.REFRESH_REF || 'main' }}
                   fetch-depth: 0
 
             - name: Install uv

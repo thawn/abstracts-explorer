@@ -67,15 +67,28 @@ def registry_upload_command(args: argparse.Namespace) -> int:
         )
         return 1
 
+    only_tag = getattr(args, "only_tag", False)
+
     _print_header(
-        "Registry Upload",
+        "Registry Re-tag" if only_tag else "Registry Upload",
         f"Repository: {repository}",
         f"Conference: {conference}",
         f"Year: {args.year if args.year else 'all'}",
         f"Tag: {args.tag}" if args.tag else None,
+        "Only tag (no data upload)" if only_tag else None,
     )
 
-    if conference == "all" and (args.year is not None or args.tag):
+    if only_tag:
+        if conference == "all":
+            print(
+                "❌ --only-tag requires a specific --conference (not 'all').",
+                file=sys.stderr,
+            )
+            return 1
+        if args.tag:
+            print("❌ --only-tag cannot be combined with --tag.", file=sys.stderr)
+            return 1
+    elif conference == "all" and (args.year is not None or args.tag):
         print(
             "❌ --year and --tag cannot be combined with --conference all.",
             file=sys.stderr,
@@ -84,6 +97,17 @@ def registry_upload_command(args: argparse.Namespace) -> int:
 
     try:
         client = RegistryClient(repository=repository, token=token)
+
+        if only_tag:
+            summary = client.retag_conference(
+                conference=conference,
+                years=[args.year] if args.year is not None else None,
+                progress_callback=lambda msg: print(f"  {msg}"),
+            )
+            print("\n✅ Re-tag complete!")
+            print(f"  📅 Years:      {summary.get('years', [])}")
+            print(f"  🏷️  Tag:        {summary.get('tag', '')}")
+            return 0
 
         if conference == "all":
             summaries = client.upload_all(
@@ -117,6 +141,79 @@ def registry_upload_command(args: argparse.Namespace) -> int:
         return 1
     except Exception as e:
         return _unexpected_error(e, log_message="Upload failed")
+
+
+def registry_update_summary_command(args: argparse.Namespace) -> int:
+    """
+    Rebuild a conference-level registry tag from existing per-year artifacts.
+
+    Only a small config blob and the summary manifest are uploaded; existing
+    per-year data layers are reused by digest, so no data is re-uploaded.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+        - repository: OCI repository path
+        - token: Authentication token
+        - conference: Conference name (required)
+        - embedding_model: Optional embedding model override
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure)
+    """
+    from abstracts_explorer.registry import RegistryClient, RegistryError
+
+    repository, token = _resolve_registry_auth(args)
+
+    if not repository:
+        print(
+            "❌ Repository not specified. Use --repository or set REGISTRY_REPOSITORY env var.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if not token:
+        print(
+            "❌ Authentication token not specified. Use --token or set GITHUB_TOKEN env var.",
+            file=sys.stderr,
+        )
+        return 1
+
+    raw_conf = getattr(args, "conference", None)
+    if not raw_conf or raw_conf.lower() == "all":
+        print("❌ --conference is required (a specific conference).", file=sys.stderr)
+        return 1
+    conference = _resolve_conference_arg(raw_conf) or raw_conf
+
+    _print_header(
+        "Registry Update Summary",
+        f"Repository: {repository}",
+        f"Conference: {conference}",
+        f"Embedding model: {args.embedding_model}" if args.embedding_model else None,
+    )
+
+    try:
+        client = RegistryClient(repository=repository, token=token)
+        summary = client.update_conference_summary(
+            conference=conference,
+            embedding_model=args.embedding_model,
+            progress_callback=lambda msg: print(f"  {msg}"),
+        )
+        print("\n✅ Summary updated!")
+        print(f"  📄 Papers:     {summary.get('paper_count', 0)}")
+        print(f"  🧮 Embeddings: {summary.get('embedding_count', 0)}")
+        print(f"  📅 Years:      {summary.get('years', [])}")
+        print(f"  🏷️  Tag:        {summary.get('tag', '')}")
+        return 0
+
+    except RegistryError as e:
+        print(f"\n❌ Registry error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        return _unexpected_error(e, log_message="Update summary failed")
 
 
 def _registry_download_has_existing_data(conference: str, year: Optional[int]) -> bool:

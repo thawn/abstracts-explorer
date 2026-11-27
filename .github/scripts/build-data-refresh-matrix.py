@@ -86,6 +86,56 @@ def _matching_tags(
     return [max(candidates) for _, candidates in sorted(year_tags.items())]
 
 
+def _target_year_present(
+    client: RegistryClient,
+    matching_tags: list[str],
+    conference: str,
+    year: int,
+) -> bool:
+    """
+    Return whether the registry already contains data for *year* in a conference.
+
+    For a conference-level tag the ``com.abstracts-explorer.years`` manifest
+    annotation is consulted; otherwise the presence of a matching year-specific
+    tag is used.
+
+    Parameters
+    ----------
+    client : RegistryClient
+        Registry client used to inspect manifests.
+    matching_tags : list of str
+        Tags already matched for the conference (conference-level or year tags).
+    conference : str
+        Canonical conference name.
+    year : int
+        Target conference year.
+
+    Returns
+    -------
+    bool
+        True when the target year is already covered by the registry.
+    """
+    if not matching_tags:
+        return False
+
+    base = _sanitize(conference)
+    year_pattern = re.compile(rf"^{re.escape(base)}-(\d{{4}})_")
+    conference_tags = [tag for tag in matching_tags if not year_pattern.match(tag)]
+
+    if conference_tags:
+        tag = max(conference_tags)
+        try:
+            info = client.get_artifact_info(tag)
+        except Exception:
+            return False
+        annotations = info.get("annotations", {})
+        years_value = str(annotations.get("com.abstracts-explorer.years", ""))
+        present = {part.strip() for part in years_value.split(",") if part.strip()}
+        return str(year) in present
+
+    return any(tag.startswith(f"{base}-{year}_") for tag in matching_tags)
+
+
 def _conference_filter_matches(plugin: Any, value: str) -> bool:
     """
     Return whether a plugin matches a user-supplied conference filter.
@@ -138,7 +188,8 @@ def main() -> int:
     token = os.environ.get("GITHUB_TOKEN") or config.github_token
 
     try:
-        registry_tags = RegistryClient(repository=repository, token=token).list_tags()
+        registry_client = RegistryClient(repository=repository, token=token)
+        registry_tags = registry_client.list_tags()
     except Exception as exc:
         print(f"::error::Could not list registry tags in {repository}: {exc}", file=sys.stderr)
         return 1
@@ -173,12 +224,20 @@ def main() -> int:
             embedding_model=config.embedding_model,
             year=year,
         )
+        target_year_present = _target_year_present(
+            registry_client,
+            matching_tags,
+            conference=conference,
+            year=year,
+        )
         entries.append(
             {
                 "plugin": plugin.plugin_name,
                 "conference": conference,
                 "registry_tags": matching_tags,
                 "is_new": not matching_tags,
+                "target_year_present": target_year_present,
+                "needs_update": (not matching_tags) or (not target_year_present),
             }
         )
 

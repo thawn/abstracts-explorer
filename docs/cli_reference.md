@@ -23,7 +23,7 @@ resource. Every top-level command is a noun group; subcommands are verbs.
 | `pipeline run` | Run the full pipeline (download → embeddings → clustering cache) |
 | `serve web` | Start the web interface |
 | `serve mcp` | Start the MCP server for cluster analysis |
-| `registry push/pull/list/delete` | Push/pull data to/from OCI-compatible container registries |
+| `registry push/pull/list/update-summary/delete` | Push/pull data to/from OCI-compatible container registries |
 | `eval generate/verify/run/list/clear-pairs/clear-results` | Automatic evaluation of the RAG system |
 | `feedback stats/list/browse/clear` | Explore user feedback |
 
@@ -641,7 +641,7 @@ is always transferred as a complete unit per conference and year. Use
 `--conference all` to process all conferences at once.
 
 ```text
-usage: abstracts-explorer registry [-h] {push,pull,list,delete} ...
+usage: abstracts-explorer registry [-h] {push,pull,list,update-summary,delete} ...
 ```
 
 ### registry push
@@ -649,7 +649,7 @@ usage: abstracts-explorer registry [-h] {push,pull,list,delete} ...
 ```text
 usage: abstracts-explorer registry push [-h] [--repository REPOSITORY]
                                         [--token TOKEN] [--conference CONFERENCE]
-                                        [--year YEAR] [--tag TAG]
+                                        [--year YEAR] [--tag TAG] [--only-tag]
 ```
 
 | Option | Description |
@@ -659,9 +659,38 @@ usage: abstracts-explorer registry push [-h] [--repository REPOSITORY]
 | `--conference, -c CONFERENCE` | Conference name or `all` (default: all) |
 | `--year YEAR` | Conference year (default: all available years) |
 | `--tag TAG` | Custom tag (default: derived from conference, year and embedding model) |
+| `--only-tag` | Do not upload data; re-push existing artifacts under the current version tag |
 
 ```bash
 abstracts-explorer registry push --conference neurips --year 2024 \
+  --repository ghcr.io/thawn/abstracts-data
+
+# Only the version changed (data unchanged): update tags without uploading
+abstracts-explorer registry push --conference neurips --only-tag \
+  --repository ghcr.io/thawn/abstracts-data
+```
+
+### registry update-summary
+
+Rebuild a conference-level tag from the existing per-year artifacts. Only a
+small config blob and the summary manifest are uploaded; existing per-year data
+layers are reused by digest, so no data is re-uploaded. Use this after pushing a
+new year to add it to the whole-conference image.
+
+```text
+usage: abstracts-explorer registry update-summary [-h] [--repository REPOSITORY]
+                                                  [--token TOKEN] --conference CONFERENCE
+                                                  [--embedding-model EMBEDDING_MODEL]
+```
+
+| Option | Description |
+| ------ | ----------- |
+| `--repository, -r REPOSITORY` / `--token TOKEN` | Registry location and auth |
+| `--conference, -c CONFERENCE` | Conference name (required) |
+| `--embedding-model EMBEDDING_MODEL` | Embedding model (defaults to local DB metadata) |
+
+```bash
+abstracts-explorer registry update-summary --conference neurips \
   --repository ghcr.io/thawn/abstracts-data
 ```
 

@@ -67,6 +67,7 @@ if TYPE_CHECKING:
         registry_delete_command,
         registry_download_command,
         registry_list_command,
+        registry_update_summary_command,
         registry_upload_command,
     )
     from abstracts_explorer.cli.search_chat import chat_command, search_command
@@ -115,6 +116,7 @@ _LAZY_IMPORTS = {
     "registry_delete_command": "abstracts_explorer.cli.registry",
     "registry_download_command": "abstracts_explorer.cli.registry",
     "registry_list_command": "abstracts_explorer.cli.registry",
+    "registry_update_summary_command": "abstracts_explorer.cli.registry",
     "registry_upload_command": "abstracts_explorer.cli.registry",
     "chat_command": "abstracts_explorer.cli.search_chat",
     "search_command": "abstracts_explorer.cli.search_chat",
@@ -184,6 +186,7 @@ __all__ = [
     "registry_delete_command",
     "registry_download_command",
     "registry_list_command",
+    "registry_update_summary_command",
     "registry_upload_command",
     "search_command",
     "setup_logging",

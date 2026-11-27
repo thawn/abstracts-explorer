@@ -3851,3 +3851,253 @@ class TestRegistryDeleteCommand:
 
         assert result == 0
         mock_cmd.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Tests for incremental summary update / retag
+# ---------------------------------------------------------------------------
+
+
+def _layer(digest, title):
+    """Build a minimal OCI layer descriptor."""
+    return {
+        "mediaType": "application/octet-stream",
+        "digest": digest,
+        "size": 10,
+        "annotations": {"org.opencontainers.image.title": title},
+    }
+
+
+def _manifest(layers, paper=0, embedding=0, years=None):
+    """Build a minimal manifest dict with abstracts-explorer annotations."""
+    annotations = {
+        "com.abstracts-explorer.paper-count": str(paper),
+        "com.abstracts-explorer.embedding-count": str(embedding),
+        "com.abstracts-explorer.embedding-model": "model",
+    }
+    if years is not None:
+        annotations["com.abstracts-explorer.years"] = ",".join(str(y) for y in years)
+    return {"layers": layers, "annotations": annotations}
+
+
+class _SummaryClientMixin:
+    def _make_client(self, model="model"):
+        with patch("oras.client.OrasClient"):
+            client = RegistryClient("ghcr.io/thawn/abstracts-data", token="test-token")
+        client._get_embedding_model_database = Mock(return_value=model)
+        return client
+
+
+class TestUpdateConferenceSummary(_SummaryClientMixin):
+    """Tests for RegistryClient.update_conference_summary."""
+
+    def test_reuses_year_layers_and_sums_counts(self):
+        client = self._make_client()
+        tags = ["neurips-2024_model_0.3.0", "neurips-2025_model_0.4.0"]
+        manifests = {
+            "ghcr.io/thawn/abstracts-data:neurips-2024_model_0.3.0": _manifest(
+                [_layer("sha256:a", "papers-2024.db")], paper=10, embedding=11
+            ),
+            "ghcr.io/thawn/abstracts-data:neurips-2025_model_0.4.0": _manifest(
+                [_layer("sha256:b", "papers-2025.db")], paper=5, embedding=6
+            ),
+        }
+        client._client.get_manifest.side_effect = lambda target: manifests[target]
+
+        with (
+            patch.object(client, "list_tags", return_value=tags),
+            patch.object(client, "_push_manifest_only") as push,
+        ):
+            summary = client.update_conference_summary("neurips", years=[2024, 2025])
+
+        tag, layers, annotations, config, _ = push.call_args.args
+        assert tag == _build_tag("neurips", None, embedding_model="model")
+        assert [layer["digest"] for layer in layers] == ["sha256:a", "sha256:b"]
+        assert annotations["com.abstracts-explorer.years"] == "2024,2025"
+        assert config["years"] == [2024, 2025]
+        assert summary["paper_count"] == 15
+        assert summary["embedding_count"] == 17
+        assert summary["year_tags"] == tags
+
+    def test_missing_year_raises(self):
+        client = self._make_client()
+        client._client.get_manifest.return_value = _manifest([_layer("sha256:a", "papers-2024.db")])
+        with patch.object(client, "list_tags", return_value=["neurips-2024_model_0.3.0"]):
+            with pytest.raises(RegistryError, match="2025"):
+                client.update_conference_summary("neurips", years=[2024, 2025])
+
+    def test_uses_newest_year_tag_version(self):
+        client = self._make_client()
+        tags = ["neurips-2024_model_0.3.0", "neurips-2024_model_0.5.0"]
+        client._client.get_manifest.return_value = _manifest([_layer("sha256:new", "papers-2024.db")])
+
+        with (
+            patch.object(client, "list_tags", return_value=tags),
+            patch.object(client, "_push_manifest_only") as push,
+        ):
+            client.update_conference_summary("neurips", years=[2024])
+
+        _, layers, _, _, _ = push.call_args.args
+        assert layers[0]["digest"] == "sha256:new"
+        client._client.get_manifest.assert_called_once_with("ghcr.io/thawn/abstracts-data:neurips-2024_model_0.5.0")
+
+    def test_defaults_to_local_years(self):
+        client = self._make_client()
+        client._client.get_manifest.return_value = _manifest([_layer("sha256:a", "papers-2024.db")])
+
+        with (
+            patch.object(client, "_get_years_for_conference", return_value=[2024]),
+            patch.object(client, "list_tags", return_value=["neurips-2024_model_0.3.0"]),
+            patch.object(client, "_push_manifest_only") as push,
+        ):
+            summary = client.update_conference_summary("neurips")
+
+        assert summary["years"] == [2024]
+        push.assert_called_once()
+
+
+class TestRetagConference(_SummaryClientMixin):
+    """Tests for RegistryClient.retag_conference."""
+
+    def test_retags_old_version_without_data_upload(self):
+        client = self._make_client()
+        old_tag = "neurips-2024_model_0.3.0"
+        client._client.get_manifest.return_value = _manifest([_layer("sha256:a", "papers-2024.db")])
+
+        with (
+            patch.object(client, "list_tags", return_value=[old_tag]),
+            patch.object(client, "_push_manifest_only") as push,
+            patch.object(client, "update_conference_summary", return_value={"tag": "summary"}) as update,
+        ):
+            summary = client.retag_conference("neurips")
+
+        new_tag = _build_tag("neurips", 2024, embedding_model="model")
+        assert push.call_args.args[0] == new_tag
+        assert push.call_args.args[1][0]["digest"] == "sha256:a"
+        update.assert_called_once()
+        assert summary["year_tags"] == [new_tag]
+
+    def test_skips_when_already_current_version(self):
+        client = self._make_client()
+        current_tag = _build_tag("neurips", 2024, embedding_model="model")
+        client._client.get_manifest.return_value = _manifest([_layer("sha256:a", "papers-2024.db")])
+
+        with (
+            patch.object(client, "list_tags", return_value=[current_tag]),
+            patch.object(client, "_push_manifest_only") as push,
+            patch.object(client, "update_conference_summary", return_value={"tag": "summary"}),
+        ):
+            client.retag_conference("neurips")
+
+        push.assert_not_called()
+
+    def test_no_artifacts_raises(self):
+        client = self._make_client()
+        with patch.object(client, "list_tags", return_value=["other_model_1.0.0"]):
+            with pytest.raises(RegistryError, match="No year artifacts"):
+                client.retag_conference("neurips")
+
+    def test_push_manifest_only_uploads_only_config_and_manifest(self):
+        client = self._make_client()
+        client._client.get_container.return_value = Mock()
+        client._client.upload_blob.return_value = Mock(status_code=201)
+        client._client.upload_manifest.return_value = Mock(status_code=201)
+        layers = [_layer("sha256:a", "papers-2024.db")]
+
+        client._push_manifest_only("neurips_model_x", layers, {"k": "v"}, {"c": 1}, lambda _msg: None)
+
+        client._client.upload_blob.assert_called_once()
+        client._client.upload_manifest.assert_called_once()
+        manifest = client._client.upload_manifest.call_args.args[0]
+        assert manifest["layers"] == layers
+        assert manifest["annotations"] == {"k": "v"}
+
+
+class TestRegistryOnlyTagCommand(_SummaryClientMixin):
+    """Tests for ``registry push --only-tag`` and ``registry update-summary`` CLI."""
+
+    def test_only_tag_calls_retag(self, capsys):
+        from abstracts_explorer.cli import registry_upload_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            conference="neurips",
+            year=None,
+            tag=None,
+            only_tag=True,
+        )
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            MockClient.return_value.retag_conference.return_value = {"tag": "t", "years": [2024]}
+            result = registry_upload_command(args)
+
+        assert result == 0
+        MockClient.return_value.retag_conference.assert_called_once()
+        assert "Re-tag complete" in capsys.readouterr().out
+
+    def test_only_tag_rejects_all_conferences(self, capsys):
+        from abstracts_explorer.cli import registry_upload_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            conference="all",
+            year=None,
+            tag=None,
+            only_tag=True,
+        )
+        result = registry_upload_command(args)
+
+        assert result == 1
+        assert "requires a specific --conference" in capsys.readouterr().err
+
+    def test_only_tag_rejects_custom_tag(self, capsys):
+        from abstracts_explorer.cli import registry_upload_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            conference="neurips",
+            year=None,
+            tag="custom",
+            only_tag=True,
+        )
+        result = registry_upload_command(args)
+
+        assert result == 1
+        assert "cannot be combined with --tag" in capsys.readouterr().err
+
+    def test_update_summary_command_success(self, capsys):
+        from abstracts_explorer.cli import registry_update_summary_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            conference="neurips",
+            embedding_model=None,
+        )
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            MockClient.return_value.update_conference_summary.return_value = {
+                "tag": "t",
+                "years": [2024],
+                "paper_count": 1,
+                "embedding_count": 1,
+            }
+            result = registry_update_summary_command(args)
+
+        assert result == 0
+        assert "Summary updated" in capsys.readouterr().out
+
+    def test_update_summary_requires_conference(self, capsys):
+        from abstracts_explorer.cli import registry_update_summary_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            conference=None,
+            embedding_model=None,
+        )
+        result = registry_update_summary_command(args)
+
+        assert result == 1
+        assert "conference is required" in capsys.readouterr().err

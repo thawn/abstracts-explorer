@@ -956,6 +956,279 @@ class RegistryClient:
         )
         progress(f"Successfully pushed {target}")
 
+    @staticmethod
+    def _tag_prefix(conference: str, year: Optional[int], embedding_model: str) -> str:
+        """Return the tag prefix shared by all versions of a conference/year artifact."""
+        safe_name = conference.lower().replace(" ", "-").replace("/", "-").replace("@", "-")
+        base = f"{safe_name}-{year}" if year is not None else safe_name
+        return f"{base}_{_sanitize_str_for_oci_tag(embedding_model)}_"
+
+    @staticmethod
+    def _latest_tag_with_prefix(tags: List[str], prefix: str) -> Optional[str]:
+        """Return the highest-version tag among *tags* starting with *prefix*."""
+        candidates = [tag for tag in tags if tag.startswith(prefix)]
+        if not candidates:
+            return None
+
+        def sort_key(tag: str) -> Tuple[int, Version]:
+            parsed = _parse_version_from_tag(tag)
+            return (1 if parsed is not None else 0, parsed if parsed is not None else Version("0"))
+
+        return max(candidates, key=sort_key)
+
+    def _push_manifest_only(
+        self,
+        tag: str,
+        layers: List[Dict[str, Any]],
+        annotations: Dict[str, str],
+        config_data: Dict[str, Any],
+        progress: Callable[[str], None],
+    ) -> None:
+        """Push a manifest that references existing layer blobs.
+
+        Only the small config blob and the manifest are uploaded; the data
+        layers are reused by digest and never re-uploaded.
+        """
+        temp_dir = Path(tempfile.mkdtemp())
+        try:
+            config_path = temp_dir / "config.json"
+            config_path.write_text(json.dumps(config_data, indent=2))
+            target = f"{self.repository}:{tag}"
+            container = self._client.get_container(target)
+
+            conf, conf_path = oras.oci.ManifestConfig(str(config_path))
+            if conf_path is None:
+                raise RegistryError(f"Failed to prepare config for {target}")
+            response = self._client.upload_blob(conf_path, container, conf)
+            if response.status_code not in (200, 201, 202):
+                raise RegistryError(f"Failed to upload config for {target}: HTTP {response.status_code}")
+
+            manifest = oras.oci.NewManifest()
+            manifest["layers"] = layers
+            manifest["config"] = conf
+            manifest["annotations"] = annotations
+
+            response = self._client.upload_manifest(manifest, container)
+            if response.status_code not in (200, 201):
+                raise RegistryError(f"Failed to push manifest for {target}: HTTP {response.status_code}")
+
+            progress(f"Successfully pushed {target} (reused existing data layers)")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def update_conference_summary(
+        self,
+        conference: str,
+        years: Optional[List[int]] = None,
+        embedding_model: Optional[str] = None,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Rebuild a conference-level tag from existing per-year artifacts.
+
+        The summary manifest is assembled from the layer descriptors of the
+        existing per-year tags, so no data blobs are uploaded — only a small
+        config blob and the manifest.  This allows adding a year to a
+        conference image without re-uploading earlier years.
+
+        Parameters
+        ----------
+        conference : str
+            Conference name.
+        years : list of int, optional
+            Years to include.  Defaults to all years present in the local
+            database.
+        embedding_model : str, optional
+            Embedding model name.  Defaults to the model stored in the local
+            database.
+        progress_callback : callable, optional
+            Function called with status messages during the operation.
+
+        Returns
+        -------
+        dict
+            Summary with ``tag``, ``conference``, ``years``,
+            ``paper_count``, ``embedding_count``, and ``year_tags``.
+
+        Raises
+        ------
+        RegistryError
+            If the embedding model is unknown, no years are found, or a
+            required per-year artifact is missing.
+        """
+        _progress = _make_progress_callback(progress_callback)
+
+        model = embedding_model or self._get_embedding_model_database()
+        if not model:
+            raise RegistryError(
+                "No embedding model found in local database. "
+                "Create embeddings first or pass an explicit embedding model."
+            )
+
+        if years is None:
+            years = self._get_years_for_conference(conference)
+        selected_years = sorted(set(years))
+        if not selected_years:
+            raise RegistryError(f"No years found for conference '{conference}'.")
+
+        tags = self.list_tags()
+        all_layers: List[Dict[str, Any]] = []
+        total_papers = 0
+        total_embeddings = 0
+        year_tags: List[str] = []
+
+        for yr in selected_years:
+            prefix = self._tag_prefix(conference, yr, model)
+            year_tag = self._latest_tag_with_prefix(tags, prefix)
+            if year_tag is None:
+                raise RegistryError(
+                    f"No registry artifact found for {conference}/{yr} "
+                    f"(embedding model '{model}'). Upload the year first."
+                )
+
+            _progress(f"Reusing layers from {year_tag}...")
+            manifest = self._client.get_manifest(f"{self.repository}:{year_tag}")
+            layers = list(manifest.get("layers", []))
+            if not layers:
+                raise RegistryError(f"Artifact {year_tag} has no layers.")
+            all_layers.extend(layers)
+            year_tags.append(year_tag)
+
+            year_annotations = manifest.get("annotations") or {}
+            total_papers += int(year_annotations.get("com.abstracts-explorer.paper-count", 0) or 0)
+            total_embeddings += int(year_annotations.get("com.abstracts-explorer.embedding-count", 0) or 0)
+
+        summary_tag = _build_tag(conference, None, embedding_model=model)
+        manifest_annotations = {
+            "com.abstracts-explorer.version": __version__,
+            "com.abstracts-explorer.conference": conference,
+            "com.abstracts-explorer.years": ",".join(str(y) for y in selected_years),
+            "com.abstracts-explorer.paper-count": str(total_papers),
+            "com.abstracts-explorer.embedding-count": str(total_embeddings),
+            "com.abstracts-explorer.embedding-model": model,
+        }
+        config_data = {
+            "version": __version__,
+            "conference": conference,
+            "years": selected_years,
+            "paper_count": total_papers,
+            "embedding_count": total_embeddings,
+            "embedding_model": model,
+        }
+        self._push_manifest_only(summary_tag, all_layers, manifest_annotations, config_data, _progress)
+
+        return {
+            "tag": summary_tag,
+            "conference": conference,
+            "years": selected_years,
+            "paper_count": total_papers,
+            "embedding_count": total_embeddings,
+            "year_tags": year_tags,
+        }
+
+    def retag_conference(
+        self,
+        conference: str,
+        years: Optional[List[int]] = None,
+        embedding_model: Optional[str] = None,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Re-push existing artifacts under the current package version tag.
+
+        Use this when only the abstracts-explorer version changed but the data
+        did not: each year manifest is re-pushed under the current version tag
+        with the same data layers (no blob uploads), then the conference
+        summary is rebuilt.
+
+        Parameters
+        ----------
+        conference : str
+            Conference name.
+        years : list of int, optional
+            Years to retag.  Defaults to the years discovered from existing
+            per-year tags in the registry.
+        embedding_model : str, optional
+            Embedding model name.  Defaults to the model stored in the local
+            database.
+        progress_callback : callable, optional
+            Function called with status messages during the operation.
+
+        Returns
+        -------
+        dict
+            Summary from :meth:`update_conference_summary` with an extra
+            ``year_tags`` list of the current-version year tags.
+
+        Raises
+        ------
+        RegistryError
+            If the embedding model is unknown or no year artifacts are found.
+        """
+        _progress = _make_progress_callback(progress_callback)
+
+        model = embedding_model or self._get_embedding_model_database()
+        if not model:
+            raise RegistryError(
+                "No embedding model found in local database. "
+                "Create embeddings first or pass an explicit embedding model."
+            )
+
+        tags = self.list_tags()
+
+        if years is None:
+            safe_name = conference.lower().replace(" ", "-").replace("/", "-").replace("@", "-")
+            safe_model = _sanitize_str_for_oci_tag(model)
+            pattern = re.compile(rf"^{re.escape(safe_name)}-(\d{{4}})_{re.escape(safe_model)}_")
+            discovered = {int(match.group(1)) for tag in tags if (match := pattern.match(tag))}
+            years = sorted(discovered)
+        selected_years = sorted(set(years))
+        if not selected_years:
+            raise RegistryError(f"No year artifacts found for conference '{conference}' (embedding model '{model}').")
+
+        current_year_tags: List[str] = []
+        for yr in selected_years:
+            prefix = self._tag_prefix(conference, yr, model)
+            source_tag = self._latest_tag_with_prefix(tags, prefix)
+            if source_tag is None:
+                raise RegistryError(
+                    f"No registry artifact found for {conference}/{yr} "
+                    f"(embedding model '{model}'). Upload the year first."
+                )
+
+            source_manifest = self._client.get_manifest(f"{self.repository}:{source_tag}")
+            layers = list(source_manifest.get("layers", []))
+            if not layers:
+                raise RegistryError(f"Artifact {source_tag} has no layers.")
+            source_annotations = dict(source_manifest.get("annotations") or {})
+            new_tag = _build_tag(conference, yr, embedding_model=model)
+
+            if new_tag == source_tag:
+                _progress(f"{new_tag} already uses the current version; keeping as is.")
+            else:
+                new_annotations = dict(source_annotations)
+                new_annotations["com.abstracts-explorer.version"] = __version__
+                config_data = {
+                    "version": __version__,
+                    "conference": conference,
+                    "years": [yr],
+                    "paper_count": int(source_annotations.get("com.abstracts-explorer.paper-count", 0) or 0),
+                    "embedding_count": int(source_annotations.get("com.abstracts-explorer.embedding-count", 0) or 0),
+                    "embedding_model": model,
+                }
+                self._push_manifest_only(new_tag, layers, new_annotations, config_data, _progress)
+
+            current_year_tags.append(new_tag)
+
+        summary = self.update_conference_summary(
+            conference=conference,
+            years=selected_years,
+            embedding_model=model,
+            progress_callback=progress_callback,
+        )
+        summary["year_tags"] = current_year_tags
+        return summary
+
     def upload(
         self,
         conference: str,
