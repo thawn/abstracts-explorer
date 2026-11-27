@@ -857,3 +857,56 @@ class TestAdaptiveTransportWiring:
         for _ in range(30):
             success.handle_request(httpx2.Request("GET", "http://test"))
         assert limiter.effective_requests_per_minute > 30.0
+
+
+class TestRecentRateLimitRecord:
+    """Tests for the most-recent rate-limit record used by error messages."""
+
+    def test_records_delay_and_age(self, fake_time):
+        from abstracts_explorer.rate_limiter import get_last_rate_limit, record_rate_limit
+
+        record_rate_limit(45.0)
+        last = get_last_rate_limit()
+        assert last is not None
+        delay, age = last
+        assert delay == pytest.approx(45.0)
+        assert age == pytest.approx(0.0)
+
+        fake_time.sleep(5.0)
+        last = get_last_rate_limit()
+        assert last is not None
+        assert last[1] == pytest.approx(5.0)
+
+    def test_max_age_filters_stale_events(self, fake_time):
+        from abstracts_explorer.rate_limiter import get_last_rate_limit, record_rate_limit
+
+        record_rate_limit(10.0)
+        fake_time.sleep(120.0)
+        assert get_last_rate_limit(max_age=60.0) is None
+        assert get_last_rate_limit(max_age=180.0) is not None
+
+    def test_reset_clears_record(self):
+        from abstracts_explorer.rate_limiter import (
+            get_last_rate_limit,
+            record_rate_limit,
+            reset_last_rate_limit,
+        )
+
+        record_rate_limit(10.0)
+        reset_last_rate_limit()
+        assert get_last_rate_limit() is None
+
+    def test_transport_records_applied_delay(self):
+        from abstracts_explorer.rate_limiter import (
+            CooldownAwareTransport,
+            get_last_rate_limit,
+            reset_last_rate_limit,
+        )
+
+        reset_last_rate_limit()
+        transport = CooldownAwareTransport(_SyncInner(_response(429, {"retry-after": "12"})))
+        transport.handle_request(httpx2.Request("POST", "http://test"))
+
+        last = get_last_rate_limit()
+        assert last is not None
+        assert last[0] == pytest.approx(12.0)

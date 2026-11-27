@@ -25,6 +25,10 @@ _global_rate_limiter: Optional["TokenBucketRateLimiter"] = None
 _global_cooldown: Optional["RateLimitCooldown"] = None
 _global_lock = threading.Lock()
 
+_last_rate_limit_lock = threading.Lock()
+_last_rate_limit_at: Optional[float] = None
+_last_rate_limit_delay: float = 0.0
+
 
 def _get_or_create_global_rate_limiter(
     requests_per_minute: int,
@@ -562,6 +566,7 @@ class CooldownAwareTransport(httpx2.BaseTransport, httpx2.AsyncBaseTransport):
             if delay is None:
                 delay = self._rate_limit_delay
             self._cooldown.defer(delay)
+            record_rate_limit(delay)
             if self._rate_limiter is not None:
                 self._rate_limiter.note_rate_limited()
             logger.warning(
@@ -615,3 +620,54 @@ def set_global_cooldown(cooldown: Optional[RateLimitCooldown]) -> None:
     """Replace or reset the process-global LLM rate-limit cooldown."""
     global _global_cooldown
     _global_cooldown = cooldown or RateLimitCooldown()
+
+
+def record_rate_limit(delay: float) -> None:
+    """
+    Remember the most recent backend rate-limit response.
+
+    The web API uses this to explain timeouts that were caused by prolonged
+    ``429`` backoff, instead of reporting a bare timeout.
+
+    Parameters
+    ----------
+    delay : float
+        Cooldown in seconds applied for this rate-limit response.
+    """
+    global _last_rate_limit_at, _last_rate_limit_delay
+    with _last_rate_limit_lock:
+        _last_rate_limit_at = time.monotonic()
+        _last_rate_limit_delay = max(0.0, float(delay))
+
+
+def get_last_rate_limit(max_age: Optional[float] = None) -> Optional[tuple[float, float]]:
+    """
+    Return the most recent rate-limit delay and its age.
+
+    Parameters
+    ----------
+    max_age : float, optional
+        When given, return ``None`` if the recorded event is older than this
+        many seconds.
+
+    Returns
+    -------
+    tuple of (float, float) or None
+        ``(delay_seconds, age_seconds)`` for the most recent ``429`` response,
+        or ``None`` when nothing was recorded (or it is too old).
+    """
+    with _last_rate_limit_lock:
+        if _last_rate_limit_at is None:
+            return None
+        age = time.monotonic() - _last_rate_limit_at
+        if max_age is not None and age > max_age:
+            return None
+        return _last_rate_limit_delay, age
+
+
+def reset_last_rate_limit() -> None:
+    """Clear the most recent rate-limit record (used by tests)."""
+    global _last_rate_limit_at, _last_rate_limit_delay
+    with _last_rate_limit_lock:
+        _last_rate_limit_at = None
+        _last_rate_limit_delay = 0.0

@@ -414,14 +414,15 @@ class TestRAGToolQueue:
         finally:
             chat.close()
 
+        config = get_config()
         kwargs = run_sync.call_args.kwargs
         assert kwargs["usage_limits"].tool_calls_limit is None
         assert kwargs["usage_limits"].request_limit == 50
-        assert kwargs["timeout"] == 120
-        assert kwargs["model_settings"]["timeout"] == 60
-        assert kwargs["model_settings"]["request_timeout"] == 120
-        assert kwargs["model_settings"]["max_retries"] == get_config().llm_max_attempts - 1
-        assert chat.query_timeout == 120
+        assert kwargs["timeout"] == config.rag_query_timeout
+        assert kwargs["model_settings"]["timeout"] == config.llm_request_timeout
+        assert kwargs["model_settings"]["request_timeout"] == config.rag_query_timeout
+        assert kwargs["model_settings"]["max_retries"] == config.llm_max_attempts - 1
+        assert chat.query_timeout == config.rag_query_timeout
 
     def test_duplicate_tool_call_is_reused(self):
         """Identical calls execute once and the second result is marked cached."""
@@ -2609,3 +2610,47 @@ def test_suggest_search_terms_from_orcid_in_agent_tools(mock_embeddings_manager,
     chat_without_mcp = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=False)
     tool_names_without_mcp = list(chat_without_mcp.agent._function_toolset.tools.keys())
     assert "suggest_search_terms_from_orcid" not in tool_names_without_mcp
+
+
+class TestSlowQueryWarning:
+    """RAG queries slower than the warning threshold are logged with their duration."""
+
+    @staticmethod
+    def _fake_clock(monkeypatch, times):
+        import abstracts_explorer.rag.agent as agent_module
+
+        values = iter(times)
+
+        class _FakeTime:
+            @staticmethod
+            def monotonic() -> float:
+                return next(values)
+
+        monkeypatch.setattr(agent_module, "time", _FakeTime)
+
+    def test_slow_query_logs_warning(self, mock_embeddings_manager, mock_database, monkeypatch, caplog):
+        import logging
+
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        monkeypatch.setattr(chat, "_query", lambda *args, **kwargs: {"response": "ok"})
+        self._fake_clock(monkeypatch, [100.0, 245.5])
+
+        with caplog.at_level(logging.WARNING, logger="abstracts_explorer.rag.agent"):
+            result = chat.query("hello")
+
+        assert result == {"response": "ok"}
+        assert "slow-query" in caplog.text
+        assert "145.5" in caplog.text
+        assert "120" in caplog.text
+
+    def test_fast_query_does_not_warn(self, mock_embeddings_manager, mock_database, monkeypatch, caplog):
+        import logging
+
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        monkeypatch.setattr(chat, "_query", lambda *args, **kwargs: {"response": "ok"})
+        self._fake_clock(monkeypatch, [10.0, 20.0])
+
+        with caplog.at_level(logging.WARNING, logger="abstracts_explorer.rag.agent"):
+            chat.query("hello")
+
+        assert "slow-query" not in caplog.text
