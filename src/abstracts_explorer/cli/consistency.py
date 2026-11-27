@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from abstracts_explorer.cli._common import _print_header, _resolve_conference_arg
 from abstracts_explorer.config import get_config
-from abstracts_explorer.consistency import apply_cache_fixes, check_consistency
+from abstracts_explorer.consistency import apply_cache_fixes, apply_embedding_fixes, check_consistency
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
 
@@ -120,10 +120,16 @@ def consistency_check_command(args: argparse.Namespace) -> int:
             )
 
             deleted = 0
-            if should_fix and report.fix_cache_ids:
-                if not as_json:
-                    print(f"🧹 Removing {len(report.fix_cache_ids)} stale/duplicate cache entry/entries...")
-                deleted = apply_cache_fixes(db, report)
+            deleted_embeddings = 0
+            if should_fix:
+                if report.fix_cache_ids:
+                    if not as_json:
+                        print(f"🧹 Removing {len(report.fix_cache_ids)} stale/duplicate cache entry/entries...")
+                    deleted = apply_cache_fixes(db, report)
+                if report.fix_embedding_ids:
+                    if not as_json:
+                        print(f"🧹 Removing {len(report.fix_embedding_ids)} orphan embedding(s)...")
+                    deleted_embeddings = apply_embedding_fixes(em, report)
     finally:
         if progress is not None:
             progress.close()
@@ -132,6 +138,7 @@ def consistency_check_command(args: argparse.Namespace) -> int:
         payload = report.to_dict()
         if should_fix:
             payload["fix_deleted"] = deleted
+            payload["fix_embeddings_deleted"] = deleted_embeddings
         print(json.dumps(payload, indent=2))
         return 1 if report.errors else 0
 
@@ -156,8 +163,10 @@ def consistency_check_command(args: argparse.Namespace) -> int:
     if should_fix:
         if deleted:
             print(f"\n🧹 Deleted {deleted} duplicate/stale clustering cache entry/entries.")
-        else:
-            print("\n🧹 No clustering cache entries needed fixing.")
+        if deleted_embeddings:
+            print(f"🧹 Deleted {deleted_embeddings} orphan embedding(s).")
+        if not deleted and not deleted_embeddings:
+            print("\n🧹 Nothing needed fixing.")
 
     print(
         f"\n{len(report.errors)} error(s), {len(report.warnings)} warning(s), "

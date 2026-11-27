@@ -385,9 +385,9 @@ The command reports:
 - ChromaDB collections other than the active `COLLECTION_NAME`
 
 Use `--fix` to delete duplicate clustering cache rows (keeping the newest row
-per scope) and cache rows for scopes without papers. Embeddings and missing
-caches are never modified automatically; each finding includes a suggested
-command.
+per scope), cache rows for scopes without papers, and orphan embeddings without
+a matching paper row. Missing embeddings, stale embeddings, and missing caches
+are never modified automatically; each finding includes a suggested command.
 
 ```text
 usage: abstracts-explorer check-consistency [-h] [--conference CONFERENCE]
@@ -399,7 +399,7 @@ usage: abstracts-explorer check-consistency [-h] [--conference CONFERENCE]
 | `--conference CONFERENCE` | Only check one conference. Case-insensitive. |
 | `--year YEAR` | Only check one year. |
 | `--json` | Print the report as JSON instead of human-readable text. |
-| `--fix` | Delete duplicate/stale clustering cache rows. |
+| `--fix` | Delete duplicate/stale clustering cache rows and orphan embeddings. |
 
 Exit code is `0` when no errors remain and `1` when errors were found.
 

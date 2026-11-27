@@ -47,6 +47,11 @@ def runtime(monkeypatch):
 
     monkeypatch.setattr(consistency_cli, "apply_cache_fixes", fix)
 
+    def fix_embeddings(em, rep):
+        return 2
+
+    monkeypatch.setattr(consistency_cli, "apply_embedding_fixes", fix_embeddings)
+
     return SimpleNamespace(report=report, config=config, database=database)
 
 
@@ -96,3 +101,16 @@ class TestConsistencyCommand:
         assert consistency_cli.consistency_check_command(_args(fix=True, json=True)) == 0
         payload = json.loads(capsys.readouterr().out)
         assert payload["fix_deleted"] == 3
+
+    def test_fix_deletes_orphan_embeddings(self, runtime, capsys):
+        runtime.report.fix_embedding_ids = ["orphan"]
+
+        assert consistency_cli.consistency_check_command(_args(fix=True)) == 0
+        assert "orphan embedding" in capsys.readouterr().out
+
+    def test_fix_json_reports_deleted_embeddings(self, runtime, capsys):
+        runtime.report.fix_embedding_ids = ["orphan"]
+
+        assert consistency_cli.consistency_check_command(_args(fix=True, json=True)) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["fix_embeddings_deleted"] == 2

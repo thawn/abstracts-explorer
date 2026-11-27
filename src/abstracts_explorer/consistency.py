@@ -68,6 +68,9 @@ class ConsistencyReport:
     fix_cache_ids : list of int
         Clustering cache row IDs that :func:`apply_cache_fixes` may safely
         delete (duplicates and cache rows for scopes without papers).
+    fix_embedding_ids : list of str
+        Orphan embedding IDs that :func:`apply_embedding_fixes` may safely
+        delete (embeddings without a matching paper row).
     scopes_checked : int
         Number of conference/year scopes examined.
     papers_checked : int
@@ -78,6 +81,7 @@ class ConsistencyReport:
 
     issues: List[ConsistencyIssue] = field(default_factory=list)
     fix_cache_ids: List[int] = field(default_factory=list)
+    fix_embedding_ids: List[str] = field(default_factory=list)
     scopes_checked: int = 0
     papers_checked: int = 0
     embeddings_checked: int = 0
@@ -119,6 +123,7 @@ class ConsistencyReport:
                 "warnings": len(self.warnings),
                 "info": len(self.infos),
                 "fix_cache_ids": list(self.fix_cache_ids),
+                "fix_embedding_ids": list(self.fix_embedding_ids),
             },
             "issues": [
                 {
@@ -228,13 +233,14 @@ def _check_embeddings(
 
     orphans = [uid for uid in records if uid not in all_paper_uids]
     if orphans:
+        report.fix_embedding_ids.extend(orphans)
         sample = ", ".join(orphans[:5])
         report.add(
             ConsistencyIssue(
                 category="embeddings",
                 severity=ERROR,
                 message=f"{len(orphans)} orphan embedding(s) have no matching paper row (e.g. {sample})",
-                fix="Re-create embeddings after verifying the paper database, or remove the orphan rows",
+                fix="abstracts-explorer check-consistency --fix",
             )
         )
 
@@ -588,3 +594,28 @@ def apply_cache_fixes(database: Any, report: ConsistencyReport) -> int:
     if not ids:
         return 0
     return database.delete_clustering_cache_ids(ids)
+
+
+def apply_embedding_fixes(embeddings_manager: Any, report: ConsistencyReport) -> int:
+    """
+    Delete embedding records flagged as orphans.
+
+    Only embeddings without a matching paper row are deleted. Paper rows and
+    valid embeddings are never touched.
+
+    Parameters
+    ----------
+    embeddings_manager : EmbeddingsManager
+        Connected embeddings manager with an initialized collection.
+    report : ConsistencyReport
+        Report produced by :func:`check_consistency`.
+
+    Returns
+    -------
+    int
+        Number of orphan embeddings deleted.
+    """
+    ids = sorted({str(embedding_id) for embedding_id in report.fix_embedding_ids})
+    if not ids:
+        return 0
+    return embeddings_manager.delete_embeddings_by_ids(ids)
