@@ -109,6 +109,24 @@ def test_matching_tags_prefers_conference_level(matrix_module):
     assert result == ["neurips_model_0.4.0"]
 
 
+def test_matching_tags_uses_semantic_version_for_conference_level(matrix_module):
+    tags = ["neurips_model_0.9.0", "neurips_model_0.10.0"]
+    result = matrix_module._matching_tags(tags, "neurips", "model", 2026)
+    assert result == ["neurips_model_0.10.0"]
+
+
+def test_matching_tags_uses_semantic_version_per_year(matrix_module):
+    tags = ["neurips-2024_model_0.9.0", "neurips-2024_model_0.10.0"]
+    result = matrix_module._matching_tags(tags, "neurips", "model", 2026)
+    assert result == ["neurips-2024_model_0.10.0"]
+
+
+def test_matching_tags_orders_dev_version_after_older_release(matrix_module):
+    tags = ["neurips_model_0.4.5", "neurips_model_0.4.6.dev16-g7005b7837"]
+    result = matrix_module._matching_tags(tags, "neurips", "model", 2026)
+    assert result == ["neurips_model_0.4.6.dev16-g7005b7837"]
+
+
 def test_matching_tags_collects_years_without_conference_tag(matrix_module):
     tags = [
         "neurips-2024_model_0.3.0",

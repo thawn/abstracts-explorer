@@ -10,9 +10,11 @@ import re
 import sys
 from typing import Any
 
+from packaging.version import Version
+
 from abstracts_explorer.config import get_config
 from abstracts_explorer.plugins import get_all_plugins
-from abstracts_explorer.registry import RegistryClient
+from abstracts_explorer.registry import RegistryClient, _parse_version_from_tag
 
 # GitHub rejects an empty dynamic matrix, so emit a single inert entry when
 # there is nothing to do. The refresh job is skipped via the `has_work` output.
@@ -44,6 +46,30 @@ def _sanitize(value: str) -> str:
     safe = re.sub(r"[^a-z0-9._-]", "-", safe)
     safe = re.sub(r"-{2,}", "-", safe)
     return safe.strip("-")
+
+
+def _newest_tag(tags: list[str]) -> str:
+    """
+    Return the tag with the highest PEP 440 version.
+
+    Parameters
+    ----------
+    tags : list of str
+        Tag strings to compare.
+
+    Returns
+    -------
+    str
+        The tag with the highest parsed version. Tags without a parseable
+        version sort before versioned tags; the tag string is used as a
+        deterministic tie-breaker.
+    """
+
+    def _sort_key(tag: str) -> tuple[int, Version, str]:
+        parsed = _parse_version_from_tag(tag)
+        return (1 if parsed is not None else 0, parsed or Version("0"), tag)
+
+    return max(tags, key=_sort_key)
 
 
 def _matching_tags(
@@ -80,7 +106,7 @@ def _matching_tags(
 
     conference_tags = [tag for tag in tags if tag.startswith(f"{base}_") and f"_{model}_" in tag]
     if conference_tags:
-        return [max(conference_tags)]
+        return [_newest_tag(conference_tags)]
 
     year_tags: dict[int, list[str]] = {}
     pattern = re.compile(rf"^{re.escape(base)}-(\d{{4}})_")
@@ -94,7 +120,7 @@ def _matching_tags(
         if tag_year <= year:
             year_tags.setdefault(tag_year, []).append(tag)
 
-    return [max(candidates) for _, candidates in sorted(year_tags.items())]
+    return [_newest_tag(candidates) for _, candidates in sorted(year_tags.items())]
 
 
 def _target_year_present(
@@ -134,7 +160,7 @@ def _target_year_present(
     conference_tags = [tag for tag in matching_tags if not year_pattern.match(tag)]
 
     if conference_tags:
-        tag = max(conference_tags)
+        tag = _newest_tag(conference_tags)
         try:
             info = client.get_artifact_info(tag)
         except Exception:
