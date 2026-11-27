@@ -8,7 +8,7 @@ are either backfilled or regenerated.
 
 This idempotent migration adds the configured collection to unscoped rows.
 Rows whose ``clustering_params`` is ``NULL`` cannot be mapped safely and are
-reported so they can be regenerated with ``clustering pre-generate --force``.
+reported so they can be regenerated with ``clustering cache populate --force``.
 
 Usage::
 
@@ -160,7 +160,7 @@ def main() -> int:
     if null_params:
         print(
             f"Skipped {null_params} row(s) with NULL clustering_params. "
-            "Regenerate those with 'abstracts-explorer clustering pre-generate --force'.",
+            "Regenerate those with 'abstracts-explorer clustering cache populate --force'.",
             file=sys.stderr,
         )
     if malformed:

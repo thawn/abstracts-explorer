@@ -53,6 +53,27 @@ class _HttpRequestLogFilter(logging.Filter):
         return self.allow_info or record.levelno > logging.INFO
 
 
+_WRITE_COMMAND_PATHS: frozenset[tuple[str, ...]] = frozenset(
+    {
+        ("data", "download"),
+        ("data", "delete"),
+        ("embeddings", "create"),
+        ("clustering", "run"),
+        ("clustering", "cache", "populate"),
+        ("clustering", "cache", "clear"),
+        ("pipeline", "run"),
+        ("registry", "pull"),
+        ("registry", "delete"),
+        ("eval", "generate"),
+        ("eval", "verify"),
+        ("eval", "run"),
+        ("eval", "clear-pairs"),
+        ("eval", "clear-results"),
+        ("feedback", "clear"),
+    }
+)
+
+
 def _command_writes_storage(args: Any) -> bool:
     """
     Return whether the selected command may write to the paper or embedding store.
@@ -67,18 +88,10 @@ def _command_writes_storage(args: Any) -> bool:
     bool
         ``True`` when the command is known to perform database/embedding writes.
     """
-    command = getattr(args, "command", None)
-    if command in {"download", "create-embeddings", "pre-process", "delete-data"}:
+    path = tuple(getattr(args, "_command_path", ()))
+    if path in _WRITE_COMMAND_PATHS:
         return True
-    if command == "clustering":
-        return getattr(args, "clustering_command", None) in {"run", "pre-generate", "clear-cache"}
-    if command == "eval":
-        return getattr(args, "eval_command", None) in {"generate", "verify", "run", "clear"}
-    if command == "registry":
-        return getattr(args, "registry_command", None) in {"download", "delete"}
-    if command == "feedback":
-        return getattr(args, "feedback_command", None) == "clear"
-    if command == "check-consistency":
+    if path == ("data", "check"):
         return bool(getattr(args, "fix", False))
     return False
 
@@ -255,6 +268,7 @@ def add_conference_year_args(parser: argparse.ArgumentParser) -> None:
     """
     parser.add_argument(
         "--conference",
+        "-c",
         type=str,
         default=None,
         help="Conference to use (default: all conferences). Case-insensitive.",
@@ -357,6 +371,6 @@ def _validate_embeddings_db(config: Config) -> bool:
     if not embeddings_path.exists():
         print(f"❌ Error: Embeddings database not found: {embeddings_path}", file=sys.stderr)
         print("\nYou can create embeddings using:", file=sys.stderr)
-        print("  abstracts-explorer create-embeddings", file=sys.stderr)
+        print("  abstracts-explorer embeddings create", file=sys.stderr)
         return False
     return True

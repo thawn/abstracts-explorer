@@ -60,7 +60,7 @@ class HAICONDownloaderPlugin(HTTPDownloaderPlugin):
     -----
     ::
 
-        abstracts-explorer download --plugin haicon --year 2026
+        abstracts-explorer data download --conference haicon --year 2026
     """
 
     plugin_name = "haicon"

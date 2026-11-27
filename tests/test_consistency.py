@@ -223,7 +223,7 @@ class TestCacheCoverage:
 
         assert any(issue.category == "cache-coverage" for issue in report.issues)
         assert report.fix_cache_ids == []
-        assert any("clustering pre-generate" in (issue.fix or "") for issue in report.issues)
+        assert any("clustering cache populate" in (issue.fix or "") for issue in report.issues)
 
 
 class TestCacheIntegrity:

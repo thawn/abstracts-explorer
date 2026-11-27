@@ -184,9 +184,9 @@ class CatalogMixin(PapersMixin):
                     "available_conferences": available_conferences,
                     "available_years": [],
                     "guidance": (
-                        "Populate the database with 'abstracts-explorer registry download "
-                        "--conference <name>' or run 'abstracts-explorer download --conference <name>' "
-                        "followed by 'abstracts-explorer create-embeddings', or configure a different "
+                        "Populate the database with 'abstracts-explorer registry pull "
+                        "--conference <name>' or run 'abstracts-explorer data download --conference <name>' "
+                        "followed by 'abstracts-explorer embeddings create', or configure a different "
                         "default with DEFAULT_CONFERENCE and DEFAULT_YEAR."
                     ),
                 },
@@ -208,9 +208,9 @@ class CatalogMixin(PapersMixin):
                         "available_years": available_years,
                         "guidance": (
                             "Choose an available year with DEFAULT_YEAR or populate this year with "
-                            "'abstracts-explorer registry download --conference <name> --year <year>' "
-                            "or 'abstracts-explorer download --conference <name> --year <year>' followed "
-                            "by 'abstracts-explorer create-embeddings'."
+                            "'abstracts-explorer registry pull --conference <name> --year <year>' "
+                            "or 'abstracts-explorer data download --conference <name> --year <year>' followed "
+                            "by 'abstracts-explorer embeddings create'."
                         ),
                     },
                 }

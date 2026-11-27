@@ -1,5 +1,5 @@
 """
-``create-embeddings`` command
+``embeddings create`` command
 
 """
 
@@ -39,8 +39,8 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
     args : argparse.Namespace
         Command-line arguments containing:
         - collection: Name for the ChromaDB collection
-        - backend_url: URL for OpenAI-compatible API
-        - model: Name of the embedding model
+        - embedding_backend_url: URL for OpenAI-compatible embedding API
+        - embedding_model: Name of the embedding model
         - force: Whether to reset existing collection
         - conference: Conference name to filter by (optional)
         - year: Year to filter by (optional)
@@ -66,8 +66,8 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         f"Database: {config.masked_database_url}",
         f"Embedding DB: {config.embedding_db}",
         f"Collection: {args.collection}",
-        f"Model: {args.model}",
-        f"API URL: {args.backend_url}",
+        f"Model: {args.embedding_model}",
+        f"API URL: {args.embedding_backend_url}",
         f"Rate limit: {rate_limit_str}",
         f"Conference: {conference}" if conference else None,
         f"Year: {year}" if year is not None else None,
@@ -87,8 +87,8 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
         print("\n🔧 Initializing embeddings manager...")
         with closing(
             EmbeddingsManager(
-                backend_url=args.backend_url,
-                model_name=args.model,
+                backend_url=args.embedding_backend_url,
+                model_name=args.embedding_model,
                 collection_name=args.collection,
                 requests_per_minute=args.requests_per_minute,
             )
@@ -190,7 +190,9 @@ def create_embeddings_command(args: argparse.Namespace) -> int:
             print(f"   Count: {stats['count']:,} documents")
 
         print(f"\n💾 Vector database saved to: {config.embedding_db}")
-        print("\nYou can now use the 'search' command or the search_similar() method to find relevant abstracts!")
+        print(
+            "\nYou can now use the 'papers search' command or the search_similar() method to find relevant abstracts!"
+        )
 
         return 0
 

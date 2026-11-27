@@ -121,7 +121,7 @@ def registry_upload_command(args: argparse.Namespace) -> int:
 
 def _registry_download_has_existing_data(conference: str, year: Optional[int]) -> bool:
     """
-    Check whether the local database contains data for a registry download scope.
+    Check whether the local database contains data for a registry pull scope.
 
     Parameters
     ----------
@@ -142,7 +142,7 @@ def _registry_download_has_existing_data(conference: str, year: Optional[int]) -
             db.create_tables()
             conference_years = db.get_conference_years_from_db()
     except Exception as e:
-        logger.warning("Could not inspect local data before registry download: %s", e)
+        logger.warning("Could not inspect local data before registry pull: %s", e)
         return True
 
     if conference == "all":

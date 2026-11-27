@@ -22,7 +22,7 @@ Data for all years of a conference is bundled into a single tag (e.g. `neurips_m
 
 ## Authentication
 
-Downloading from a public registry requires **no authentication**. You can run `registry download` and `registry list` without a token.
+Downloading from a public registry requires **no authentication**. You can run `registry pull` and `registry list` without a token.
 
 Uploading and deleting data requires a GitHub Personal Access Token (PAT) with the `write:packages` scope.
 
@@ -44,19 +44,19 @@ export GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 **3. CLI flag**
 
 ```bash
-abstracts-explorer registry upload --token $GITHUB_TOKEN -r ghcr.io/thawn/abstracts-data ...
+abstracts-explorer registry push --token $GITHUB_TOKEN -r ghcr.io/thawn/abstracts-data ...
 ```
 
 ## Commands
 
-### `registry upload`
+### `registry push`
 
 Upload paper database and embeddings for a conference/year to the registry.
 
 **Usage:**
 
 ```bash
-abstracts-explorer registry upload [OPTIONS]
+abstracts-explorer registry push [OPTIONS]
 ```
 
 **Options:**
@@ -66,47 +66,45 @@ abstracts-explorer registry upload [OPTIONS]
 | `-r, --repository TEXT` | OCI repository (e.g. `ghcr.io/thawn/abstracts-data`). Falls back to `REGISTRY_REPOSITORY` env var. |
 | `--token TEXT` | Registry authentication token. Falls back to `GITHUB_TOKEN` env var. |
 | `-c, --conference TEXT` | Conference name to upload (e.g. `neurips`). Use `all` to upload every conference. Case-insensitive. |
-| `-y, --year INTEGER` | Year to upload. When omitted, all available years are uploaded. |
-| `--yes` | Skip confirmation prompts (for CI/non-interactive use). |
+| `--year INTEGER` | Year to upload. When omitted, all available years are uploaded. |
 
 **Upload validation:**
 
 - Raises an error if no papers exist for the specified conference/year
 - Raises an error if no embeddings exist for the specified conference/year
-- Raises an error if no embedding model is recorded in the local database (run `create-embeddings` first)
+- Raises an error if no embedding model is recorded in the local database (run `embeddings create` first)
 
 **Examples:**
 
 ```bash
 # Upload NeurIPS 2024 (tag derived automatically from embedding model)
-abstracts-explorer registry upload \
+abstracts-explorer registry push \
   -r ghcr.io/thawn/abstracts-data \
   --token $GITHUB_TOKEN \
   --conference neurips \
   --year 2024
 
 # Upload all available NeurIPS years (pushes individual year tags then an all-years tag)
-abstracts-explorer registry upload \
+abstracts-explorer registry push \
   -r ghcr.io/thawn/abstracts-data \
   --token $GITHUB_TOKEN \
   --conference neurips
 
-# Upload all conferences (non-interactive, for CI)
-abstracts-explorer registry upload \
+# Upload all conferences
+abstracts-explorer registry push \
   -r ghcr.io/thawn/abstracts-data \
   --token $GITHUB_TOKEN \
-  --conference all \
-  --yes
+  --conference all
 ```
 
-### `registry download`
+### `registry pull`
 
 Download paper database and embeddings for a conference/year from the registry.
 
 **Usage:**
 
 ```bash
-abstracts-explorer registry download [OPTIONS]
+abstracts-explorer registry pull [OPTIONS]
 ```
 
 **Options:**
@@ -116,9 +114,9 @@ abstracts-explorer registry download [OPTIONS]
 | `-r, --repository TEXT` | OCI repository. Falls back to `REGISTRY_REPOSITORY` env var. |
 | `--token TEXT` | Registry authentication token. Falls back to `GITHUB_TOKEN` env var. |
 | `-c, --conference TEXT` | Conference name to download (e.g. `neurips`). Use `all` to download every available conference. Case-insensitive. |
-| `-y, --year INTEGER` | Year to download. When omitted, all available years are downloaded. |
+| `--year INTEGER` | Year to download. When omitted, all available years are downloaded. |
 | `--embedding-model TEXT` | Embedding model name, used to derive the correct tag when no local data exists. Falls back to local DB metadata or `EMBEDDING_MODEL` env var. |
-| `--yes` | Skip confirmation prompts (for CI/non-interactive use). |
+| `--yes, -y` | Skip confirmation prompts (for CI/non-interactive use). |
 
 **Download behavior:**
 
@@ -151,14 +149,14 @@ With `--yes`, this clear-and-retry happens automatically without prompting.
 
 ```bash
 # Download NeurIPS 2024
-abstracts-explorer registry download \
+abstracts-explorer registry pull \
   -r ghcr.io/thawn/abstracts-data \
   --token $GITHUB_TOKEN \
   --conference neurips \
   --year 2024
 
 # Download when no local data exists (specify embedding model explicitly)
-abstracts-explorer registry download \
+abstracts-explorer registry pull \
   -r ghcr.io/thawn/abstracts-data \
   --token $GITHUB_TOKEN \
   --conference neurips \
@@ -166,11 +164,10 @@ abstracts-explorer registry download \
   --embedding-model text-embedding-qwen3-embedding-4b
 
 # Download all available conferences (non-interactive, for CI)
-abstracts-explorer registry download \
+abstracts-explorer registry pull \
   -r ghcr.io/thawn/abstracts-data \
   --token $GITHUB_TOKEN \
-  --conference all \
-  --yes
+  --conference all
 ```
 
 ### `registry list`
@@ -220,16 +217,16 @@ The embedding model name is sanitized for OCI tag compatibility (lowercased, spe
 
 ```bash
 # 1. Download papers
-abstracts-explorer download --conference neurips --year 2025
+abstracts-explorer data download --conference neurips --year 2025
 
 # 2. Generate embeddings
-abstracts-explorer create-embeddings
+abstracts-explorer embeddings create
 
 # 3. (Optional) cluster embeddings to pre-populate the cache
 abstracts-explorer clustering run
 
 # 4. Upload to registry
-abstracts-explorer registry upload \
+abstracts-explorer registry push \
   -r ghcr.io/thawn/abstracts-data \
   --token $GITHUB_TOKEN \
   --conference neurips \
@@ -240,7 +237,7 @@ abstracts-explorer registry upload \
 
 ```bash
 # Download and import NeurIPS 2025 (no download/embedding generation needed!)
-abstracts-explorer registry download \
+abstracts-explorer registry pull \
   -r ghcr.io/thawn/abstracts-data \
   --token $GITHUB_TOKEN \
   --conference neurips \
@@ -265,7 +262,7 @@ The `Refresh Registry Data` GitHub Actions workflow
 It runs monthly and can also be started manually from the Actions tab. Each run:
 
 1. Restores the latest existing artifact for every supported conference.
-2. Runs `abstracts-explorer pre-process` for the target year.
+2. Runs `abstracts-explorer pipeline run` for the target year.
 3. Uploads the refreshed paper database, embeddings, and clustering cache.
 
 The target year defaults to the current UTC year. Manual runs accept optional

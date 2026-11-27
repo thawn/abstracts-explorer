@@ -88,7 +88,7 @@ def find_hierarchy_clusters_missing_descriptions(results: Mapping[str, Any]) -> 
     if "tree" not in hierarchy:
         raise ClusteringError(
             "Cached clustering results are missing their hierarchy tree; "
-            "regenerate them with 'abstracts-explorer clustering pre-generate --force'."
+            "regenerate them with 'abstracts-explorer clustering cache populate --force'."
         )
 
     missing: Dict[int, frozenset[int]] = {}
@@ -285,7 +285,7 @@ def _apply_hierarchy_labels(
     if "tree" not in hierarchy:
         raise ClusteringError(
             "Cached clustering results are missing their hierarchy tree; "
-            "regenerate them with 'abstracts-explorer clustering pre-generate --force'."
+            "regenerate them with 'abstracts-explorer clustering cache populate --force'."
         )
 
     updated = 0

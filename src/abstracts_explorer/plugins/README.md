@@ -331,7 +331,7 @@ Then use it:
 python -c "from abstracts_explorer.plugins import my_workshop_plugin"
 
 # Or via CLI
-abstracts-explorer download --conference myworkshop --year 2025
+abstracts-explorer data download --conference myworkshop --year 2025
 ```
 
 ## Plugin Interface Requirements

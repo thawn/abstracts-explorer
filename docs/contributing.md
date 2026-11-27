@@ -143,7 +143,7 @@ docker compose up -d
 
 ```bash
 # Execute CLI commands
-podman-compose exec abstracts-explorer abstracts-explorer download --year 2025
+podman-compose exec abstracts-explorer abstracts-explorer data download --year 2025
 
 # Run tests
 podman-compose exec abstracts-explorer pytest
@@ -788,13 +788,13 @@ The web UI uses a production-ready WSGI server (Waitress) by default to avoid se
 **Example:**
 ```bash
 # Production (secure, default)
-abstracts-explorer web-ui
+abstracts-explorer serve web
 
 # Development with debug mode  
-abstracts-explorer web-ui --dev -vv
+abstracts-explorer serve web --dev -vv
 
 # Production with debug logging (still secure)
-abstracts-explorer web-ui -vv
+abstracts-explorer serve web -vv
 ```
 
 **Security Note:** Flask's debug mode includes an interactive debugger that could allow arbitrary code execution if exposed. The production server (Waitress) is always recommended for deployed applications, even when debugging is needed.

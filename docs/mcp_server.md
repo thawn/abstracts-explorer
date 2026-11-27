@@ -222,7 +222,7 @@ The ORCID record must be public; private works are not returned by the API.
 Start the server with default settings:
 
 ```bash
-abstracts-explorer mcp-server
+abstracts-explorer serve mcp
 ```
 
 This starts the server on `http://127.0.0.1:8000/mcp` with streamable HTTP transport.
@@ -232,7 +232,7 @@ This starts the server on `http://127.0.0.1:8000/mcp` with streamable HTTP trans
 Start on a custom host and port:
 
 ```bash
-abstracts-explorer mcp-server --host 0.0.0.0 --port 8080
+abstracts-explorer serve mcp --host 0.0.0.0 --port 8080
 ```
 
 ### STDIO Transport
@@ -240,7 +240,7 @@ abstracts-explorer mcp-server --host 0.0.0.0 --port 8080
 For local CLI integration, use stdio transport:
 
 ```bash
-abstracts-explorer mcp-server --transport stdio
+abstracts-explorer serve mcp --transport stdio
 ```
 
 ## Configuration
@@ -298,7 +298,7 @@ Add to Claude Desktop MCP configuration:
   "mcpServers": {
     "abstracts-explorer": {
       "command": "abstracts-explorer",
-      "args": ["mcp-server", "--transport", "stdio"]
+      "args": ["serve", "mcp", "--transport", "stdio"]
     }
   }
 }
@@ -367,8 +367,8 @@ If an error occurs, tools return JSON with an error field:
 
 Before using the MCP server, ensure:
 
-1. **Embeddings are created**: Run `abstracts-explorer create-embeddings` first
-2. **Database exists**: Download papers with `abstracts-explorer download`
+1. **Embeddings are created**: Run `abstracts-explorer embeddings create` first
+2. **Database exists**: Download papers with `abstracts-explorer data download`
 3. **MCP package installed**: `uv sync` or `pip install "mcp>=2.0.0,<3"`
 
 ## Troubleshooting
@@ -378,7 +378,7 @@ Before using the MCP server, ensure:
 Make sure to create embeddings first:
 
 ```bash
-abstracts-explorer create-embeddings
+abstracts-explorer embeddings create
 ```
 
 ### "Failed to connect to database"
@@ -396,7 +396,7 @@ EMBEDDING_DB=chroma_db
 Change the port:
 
 ```bash
-abstracts-explorer mcp-server --port 8001
+abstracts-explorer serve mcp --port 8001
 ```
 
 ## Advanced Usage
@@ -410,7 +410,7 @@ distance threshold 0.5) on 5-D UMAP embeddings and 2-D UMAP visualization.
 levels); the web UI defaults to level 4. Generate the cache with:
 
 ```bash
-abstracts-explorer clustering pre-generate --conference NeurIPS
+abstracts-explorer clustering cache populate --conference NeurIPS
 ```
 
 ### Filtering by Conference

@@ -44,7 +44,7 @@ print(len(levels["levels"]))
 
 Use `compute_clusters_with_cache()` for the CLI/web/MCP workflow. Old
 Agglomerative + t-SNE caches are invalid; regenerate them with
-`abstracts-explorer clustering pre-generate`.
+`abstracts-explorer clustering cache populate`.
 
 Hierarchy presentation settings (`nr_levels` and `level_scale`) are not part
 of the clustering cache key. The web API and MCP tools derive levels from the
@@ -57,7 +57,7 @@ MCP tools read these centers directly instead of recomputing them per request.
 Caches without a tree or centers are considered outdated and rejected; run
 `python scripts/backfill_cluster_centers_median.py` to add median centers to
 existing rows, or regenerate them with
-`abstracts-explorer clustering pre-generate --force`.
+`abstracts-explorer clustering cache populate --force`.
 
 ## API Reference
 

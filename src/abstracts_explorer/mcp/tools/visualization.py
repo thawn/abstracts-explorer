@@ -55,7 +55,7 @@ def _select_visualization_level(cached: Dict[str, Any]) -> Dict[str, Any]:
     if not levels:
         raise ToolError(
             "No hierarchy levels available in the cached clustering data. "
-            "Regenerate it with 'abstracts-explorer clustering pre-generate --force'."
+            "Regenerate it with 'abstracts-explorer clustering cache populate --force'."
         )
     return levels[min(VISUALIZATION_HIERARCHY_LEVEL, len(levels) - 1)]
 
@@ -258,7 +258,7 @@ def get_cluster_visualization(
     """
     Retrieve pre-computed visualization data for clustered embeddings.
 
-    This tool looks up cached clustering results (pre-generated via CLI)
+    This tool looks up cached clustering results (populated via CLI)
     and returns data suitable for visualization.  A conference must be
     specified.
 
@@ -316,7 +316,7 @@ def get_cluster_visualization(
                     f"No pre-computed clustering data available for conference "
                     f"'{parsed_conf}'"
                     + (f" years={vis_years}" if vis_years else "")
-                    + ". Run 'abstracts-explorer clustering pre-generate' first."
+                    + ". Run 'abstracts-explorer clustering cache populate' first."
                 )
 
             payloads.append(_apply_hierarchy_level(cached, _select_visualization_level(cached)))

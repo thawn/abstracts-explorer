@@ -206,7 +206,7 @@ printf '%s' 'NEW_VALUE' | podman secret create --replace SECRET_NAME -
 systemctl --user restart abstracts-explorer  # pick up the new value
 ```
 
-**GitHub token (optional):** To enable OCI registry downloads, create the
+**GitHub token (optional):** To enable OCI registry pulls, create the
 secret and then uncomment the `Secret=github-token` line in
 `~/.config/containers/systemd/abstracts-explorer.container`:
 
@@ -263,7 +263,7 @@ After the services are running, use the CLI to [download pre-generated data from
 
 ```bash
 podman exec abstracts-explorer \
-  abstracts-explorer registry download
+  abstracts-explorer registry pull
 ```
 
 #### Run the full pipeline inside the container
@@ -272,11 +272,11 @@ Alternatively, you can run the full [download and embedding pipeline](cli_refere
 
 ```bash
 podman exec abstracts-explorer \
-  abstracts-explorer download
+  abstracts-explorer data download
 podman exec abstracts-explorer \
-  abstracts-explorer create-embeddings
+  abstracts-explorer embeddings create
 podman exec abstracts-explorer \
-  abstracts-explorer clustering pre-generate
+  abstracts-explorer clustering cache populate
 ```
 
 #### Migrate existing data
