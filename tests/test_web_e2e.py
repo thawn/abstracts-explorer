@@ -1141,9 +1141,15 @@ class TestWebUIE2E:
         chat_input = page.locator("#chat-input")
         chat_input.fill(f"Find papers that are interesting to me based on my ORCID record {_ORCID_ID}.")
 
+        from abstracts_explorer.config import get_config
+        from tests.conftest import get_env_test_path
+
+        config = get_config(reload=True, env_path=get_env_test_path())
+        response_timeout_ms = (config.rag_query_timeout + 60) * 1000
+
         with page.expect_response(
             lambda response: response.url.endswith("/api/chat") and response.request.method == "POST",
-            timeout=180000,
+            timeout=response_timeout_ms,
         ) as response_info:
             chat_input.press("Enter")
 

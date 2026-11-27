@@ -2609,3 +2609,47 @@ def test_suggest_search_terms_from_orcid_in_agent_tools(mock_embeddings_manager,
     chat_without_mcp = RAGChat(mock_embeddings_manager, mock_database, enable_mcp_tools=False)
     tool_names_without_mcp = list(chat_without_mcp.agent._function_toolset.tools.keys())
     assert "suggest_search_terms_from_orcid" not in tool_names_without_mcp
+
+
+class TestSlowQueryWarning:
+    """RAG queries slower than the warning threshold are logged with their duration."""
+
+    @staticmethod
+    def _fake_clock(monkeypatch, times):
+        import abstracts_explorer.rag.agent as agent_module
+
+        values = iter(times)
+
+        class _FakeTime:
+            @staticmethod
+            def monotonic() -> float:
+                return next(values)
+
+        monkeypatch.setattr(agent_module, "time", _FakeTime)
+
+    def test_slow_query_logs_warning(self, mock_embeddings_manager, mock_database, monkeypatch, caplog):
+        import logging
+
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        monkeypatch.setattr(chat, "_query", lambda *args, **kwargs: {"response": "ok"})
+        self._fake_clock(monkeypatch, [100.0, 245.5])
+
+        with caplog.at_level(logging.WARNING, logger="abstracts_explorer.rag.agent"):
+            result = chat.query("hello")
+
+        assert result == {"response": "ok"}
+        assert "slow-query" in caplog.text
+        assert "145.5" in caplog.text
+        assert "120" in caplog.text
+
+    def test_fast_query_does_not_warn(self, mock_embeddings_manager, mock_database, monkeypatch, caplog):
+        import logging
+
+        chat = RAGChat(mock_embeddings_manager, mock_database)
+        monkeypatch.setattr(chat, "_query", lambda *args, **kwargs: {"response": "ok"})
+        self._fake_clock(monkeypatch, [10.0, 20.0])
+
+        with caplog.at_level(logging.WARNING, logger="abstracts_explorer.rag.agent"):
+            chat.query("hello")
+
+        assert "slow-query" not in caplog.text
