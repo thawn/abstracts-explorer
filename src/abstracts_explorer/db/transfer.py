@@ -30,14 +30,26 @@ from abstracts_explorer.db.errors import (
 )
 from abstracts_explorer.db.session import SessionMixin
 
+from abstracts_explorer.utils.hashing import paper_content_hash
 from abstracts_explorer.utils.read_only import require_writable
+from abstracts_explorer.utils.text_utils import sanitize_json_strings
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_value(value: Any) -> Any:
+    """Remove NUL bytes from string values, leaving other types untouched."""
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    return value
 
 
 def _row_to_dict(model: Any, obj: Any) -> Dict[str, Any]:
     """
     Serialize an ORM instance into a dict of its column values.
+
+    String values have NUL (0x00) bytes removed because PostgreSQL text
+    columns reject them.
 
     Parameters
     ----------
@@ -52,7 +64,36 @@ def _row_to_dict(model: Any, obj: Any) -> Dict[str, Any]:
     dict
         Mapping of column name to value.
     """
-    return {c.name: getattr(obj, c.name) for c in model.__table__.columns}
+    return {c.name: _sanitize_value(getattr(obj, c.name)) for c in model.__table__.columns}
+
+
+def _apply_content_hash(
+    paper: Any,
+    paper_dict: Dict[str, Any],
+    hash_overrides: Optional[Dict[str, str]],
+) -> None:
+    """
+    Recompute a paper's content hash when NUL removal changed its text.
+
+    Parameters
+    ----------
+    paper : Any
+        Source ORM instance, used to detect whether title or abstract changed.
+    paper_dict : dict
+        Sanitized paper row that will be written to the destination.
+    hash_overrides : dict or None
+        Optional mapping populated as ``uid -> new content_hash`` so callers
+        (the registry) can keep embedding document hashes in sync.
+    """
+    title_changed = getattr(paper, "title", None) != paper_dict.get("title")
+    abstract_changed = getattr(paper, "abstract", None) != paper_dict.get("abstract")
+    if not (title_changed or abstract_changed):
+        return
+
+    new_hash = paper_content_hash(paper_dict.get("title"), paper_dict.get("abstract"))
+    paper_dict["content_hash"] = new_hash
+    if hash_overrides is not None:
+        hash_overrides[str(paper_dict["uid"])] = new_hash
 
 
 class TransferMixin(SessionMixin):
@@ -67,6 +108,7 @@ class TransferMixin(SessionMixin):
         output_path: "Path",
         conference: str,
         year: int,
+        hash_overrides: Optional[Dict[str, str]] = None,
     ) -> int:
         """
         Export papers for a given conference and year to a standalone SQLite file.
@@ -83,6 +125,9 @@ class TransferMixin(SessionMixin):
             Conference name to export.
         year : int
             Year to export.
+        hash_overrides : dict, optional
+            When provided, populated with ``uid -> content_hash`` for papers
+            whose content hash was recomputed after NUL bytes were removed.
 
         Returns
         -------
@@ -109,6 +154,7 @@ class TransferMixin(SessionMixin):
                 query = select(Paper).where(and_(Paper.conference == conference, Paper.year == year))
                 for paper in self.session.execute(query).scalars():
                     paper_dict = _row_to_dict(Paper, paper)
+                    _apply_content_hash(paper, paper_dict, hash_overrides)
                     export_session.add(Paper(**paper_dict))
                     paper_count += 1
 
@@ -138,6 +184,7 @@ class TransferMixin(SessionMixin):
         sqlite_path: "Path",
         conference: str,
         year: int,
+        hash_overrides: Optional[Dict[str, str]] = None,
     ) -> int:
         """
         Import papers for a given conference and year from a SQLite file.
@@ -155,6 +202,10 @@ class TransferMixin(SessionMixin):
             Conference name being imported.
         year : int
             Year being imported.
+        hash_overrides : dict, optional
+            When provided, populated with ``uid -> content_hash`` for papers
+            whose content hash was recomputed after NUL bytes were removed.
+            Callers can use this to keep embedding document hashes in sync.
 
         Returns
         -------
@@ -218,6 +269,7 @@ class TransferMixin(SessionMixin):
                     select(Paper).where(and_(Paper.conference == conference, Paper.year == year))
                 ).scalars():
                     paper_dict = _row_to_dict(Paper, paper)
+                    _apply_content_hash(paper, paper_dict, hash_overrides)
                     self.session.merge(Paper(**paper_dict))
                     paper_count += 1
 
@@ -287,7 +339,7 @@ class TransferMixin(SessionMixin):
                         val = json.loads(val)
                     elif col.name == "created_at" and val is not None:
                         val = val.isoformat()
-                    row[col.name] = val
+                    row[col.name] = sanitize_json_strings(val)
                 entries.append(row)
 
             return {"entries": entries}
@@ -372,7 +424,7 @@ class TransferMixin(SessionMixin):
 
             count = 0
             for item in data.get("entries", []):
-                row = dict(item)  # shallow copy
+                row = sanitize_json_strings(dict(item))  # shallow copy, NUL-free
 
                 # Re-serialise parsed JSON fields back to strings for DB storage
                 if "clustering_params" in row and row["clustering_params"] is not None:

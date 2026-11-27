@@ -55,8 +55,74 @@ from packaging.version import InvalidVersion, Version
 
 from abstracts_explorer._version import __version__
 from abstracts_explorer.config import get_config
+from abstracts_explorer.utils.hashing import paper_content_hash
+from abstracts_explorer.utils.text_utils import strip_nul_bytes
 
 logger = logging.getLogger(__name__)
+
+
+def _apply_hash_overrides(
+    embeddings_data: Dict[str, Any],
+    hash_overrides: Optional[Dict[str, str]],
+) -> int:
+    """
+    Rewrite embedding document hashes to match recomputed paper content hashes.
+
+    Parameters
+    ----------
+    embeddings_data : dict
+        Embeddings artifact with ``ids``, ``documents``, and ``embeddings``
+        lists.  Modified in place.
+    hash_overrides : dict or None
+        Mapping of paper UID to the content hash that should be stored as the
+        embedding document.  ``None`` or an empty mapping is a no-op.
+
+    Returns
+    -------
+    int
+        Number of document hashes that were rewritten.
+    """
+    if not hash_overrides:
+        return 0
+
+    ids = embeddings_data.get("ids", [])
+    documents = embeddings_data.get("documents", [])
+    updated = 0
+    for index, uid in enumerate(ids):
+        new_hash = hash_overrides.get(str(uid))
+        if new_hash is not None and index < len(documents):
+            documents[index] = new_hash
+            updated += 1
+    if updated:
+        embeddings_data["documents"] = documents
+    return updated
+
+
+def _hash_overrides_from_papers(papers: List[Dict[str, Any]]) -> Dict[str, str]:
+    """
+    Compute content-hash overrides for papers whose text contains NUL bytes.
+
+    Parameters
+    ----------
+    papers : list of dict
+        Paper dictionaries with ``uid``, ``title``, and ``abstract`` keys.
+
+    Returns
+    -------
+    dict
+        Mapping of ``uid -> recomputed content hash`` for every paper whose
+        title or abstract contains a NUL byte.
+    """
+    overrides: Dict[str, str] = {}
+    for paper in papers:
+        title = paper.get("title") or ""
+        abstract = paper.get("abstract") or ""
+        if "\x00" in title or "\x00" in abstract:
+            overrides[str(paper["uid"])] = paper_content_hash(
+                strip_nul_bytes(title),
+                strip_nul_bytes(abstract),
+            )
+    return overrides
 
 
 def _make_progress_callback(
@@ -528,9 +594,15 @@ class RegistryClient:
         # --- paper DB (without clustering cache — it goes into a separate layer) ---
         progress(f"Exporting paper database for {conference}/{year}...")
         paper_db_path = temp_dir / f"papers-{year}.db"
+        hash_overrides: Dict[str, str] = {}
         with DatabaseManager() as db:
             db.create_tables()
-            exported_rows = db.export_papers_to_sqlite(paper_db_path, conference, year)
+            exported_rows = db.export_papers_to_sqlite(
+                paper_db_path,
+                conference,
+                year,
+                hash_overrides=hash_overrides,
+            )
             filters = {"conference": conference, "year": year}
             paper_count = db.get_paper_count(filters)
             paper_uids = db.get_paper_uids(filters)
@@ -547,6 +619,7 @@ class RegistryClient:
             embeddings_data = em.export_embeddings(paper_uids)
         finally:
             em.close()
+        _apply_hash_overrides(embeddings_data, hash_overrides)
         embedding_count = len(embeddings_data.get("ids", []))
 
         if embedding_count == 0:
@@ -845,7 +918,7 @@ class RegistryClient:
         old_embedding_backup: Optional[Dict[str, Any]] = None
         old_cache_backup: Dict[str, Any] = {}
         imported_embedding_ids: List[str] = []
-        embeddings_data: Optional[Dict[str, Any]] = None
+        embeddings_data: Dict[str, Any] = {}
 
         try:
             with DatabaseManager() as db:
@@ -891,6 +964,7 @@ class RegistryClient:
                     if imported_embedding_ids:
                         em.delete_embeddings_by_ids(imported_embedding_ids)
                     if old_embedding_backup and old_embedding_backup.get("ids"):
+                        _apply_hash_overrides(old_embedding_backup, _hash_overrides_from_papers(old_papers))
                         em.import_embeddings(old_embedding_backup)
                 finally:
                     em.close()
@@ -919,10 +993,16 @@ class RegistryClient:
 
         # --- import paper DB first ---
         progress(f"Importing paper database for {conference}/{year}...")
+        hash_overrides: Dict[str, str] = {}
         try:
             with DatabaseManager() as db:
                 db.create_tables()
-                db.import_papers_from_sqlite(paper_db_file, conference, year)
+                db.import_papers_from_sqlite(
+                    paper_db_file,
+                    conference,
+                    year,
+                    hash_overrides=hash_overrides,
+                )
                 paper_count = db.get_paper_count({"conference": conference, "year": year})
         except Exception as db_err:
             from abstracts_explorer.database import EmbeddingModelConflictError
@@ -936,6 +1016,7 @@ class RegistryClient:
         try:
             progress(f"Importing embeddings for {conference}/{year}...")
             embeddings_data = json.loads(embeddings_file.read_text())
+            _apply_hash_overrides(embeddings_data, hash_overrides)
             imported_embedding_ids = [str(uid) for uid in embeddings_data.get("ids", [])]
             em = EmbeddingsManager()
             try:

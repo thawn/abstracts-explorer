@@ -21,6 +21,7 @@ push/pull operations are mocked.  They test:
 """
 
 import json
+import sqlite3
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -32,9 +33,11 @@ from abstracts_explorer.registry import (
     EmbeddingModelMismatchError,
     RegistryClient,
     RegistryError,
+    _apply_hash_overrides,
     _build_tag,
     _sanitize_str_for_oci_tag,
 )
+from abstracts_explorer.utils.hashing import paper_content_hash
 from tests.conftest import set_test_db, set_test_embedding_db
 
 pytestmark = pytest.mark.integration
@@ -248,6 +251,84 @@ class TestExportImportRoundTrip:
             count = db.import_papers_from_sqlite(export_file, "neurips", 2024)
 
         assert count == 3
+
+
+class TestNulByteSanitization:
+    """NUL bytes in legacy artifacts are stripped on export/import."""
+
+    def _export_with_nul(self, tmp_path):
+        source_db = tmp_path / "source.db"
+        export_file = tmp_path / "export.db"
+        _setup_db_with_papers(source_db, count=1)
+
+        set_test_db(source_db)
+        with DatabaseManager() as db:
+            db.create_tables()
+            db.export_papers_to_sqlite(export_file, "neurips", 2024)
+
+        with sqlite3.connect(export_file) as conn:
+            conn.execute("UPDATE papers SET title = title || char(0), abstract = char(0) || abstract")
+            conn.commit()
+        return export_file
+
+    def test_import_strips_nul_bytes_and_recomputes_hash(self, tmp_path):
+        """Importing a legacy artifact removes NUL bytes and fixes the hash."""
+        export_file = self._export_with_nul(tmp_path)
+        dest_db = tmp_path / "dest.db"
+
+        overrides = {}
+        set_test_db(dest_db)
+        with DatabaseManager() as db:
+            db.create_tables()
+            imported = db.import_papers_from_sqlite(export_file, "neurips", 2024, hash_overrides=overrides)
+
+        assert imported == 1
+
+        with DatabaseManager() as db:
+            db.create_tables()
+            paper = db.get_paper({"conference": "neurips", "year": 2024}, limit=1)[0]
+
+        assert "\x00" not in paper["title"]
+        assert "\x00" not in paper["abstract"]
+        expected_hash = paper_content_hash(paper["title"], paper["abstract"])
+        assert paper["content_hash"] == expected_hash
+        assert overrides[str(paper["uid"])] == expected_hash
+
+    def test_export_strips_nul_bytes_and_reports_overrides(self, tmp_path):
+        """Export removes NULs from a dirty local DB and reports new hashes."""
+        source_db = tmp_path / "source.db"
+        export_file = tmp_path / "export.db"
+        _setup_db_with_papers(source_db, count=1)
+
+        with sqlite3.connect(source_db) as conn:
+            conn.execute("UPDATE papers SET title = title || char(0), abstract = char(0) || abstract")
+            conn.commit()
+
+        overrides = {}
+        set_test_db(source_db)
+        with DatabaseManager() as db:
+            db.create_tables()
+            db.export_papers_to_sqlite(export_file, "neurips", 2024, hash_overrides=overrides)
+
+        with sqlite3.connect(export_file) as conn:
+            row = conn.execute("SELECT uid, title, abstract, content_hash FROM papers").fetchone()
+
+        assert "\x00" not in row[1]
+        assert "\x00" not in row[2]
+        assert row[3] == paper_content_hash(row[1], row[2])
+        assert overrides[str(row[0])] == row[3]
+
+    def test_apply_hash_overrides_rewrites_documents(self):
+        """Embedding document hashes are replaced by the new content hashes."""
+        data = {"ids": ["a", "b"], "documents": ["old-a", "old-b"], "embeddings": [[], []]}
+        updated = _apply_hash_overrides(data, {"a": "new-a"})
+        assert updated == 1
+        assert data["documents"] == ["new-a", "old-b"]
+
+    def test_apply_hash_overrides_noop_without_mapping(self):
+        data = {"ids": ["a"], "documents": ["old"], "embeddings": [[]]}
+        assert _apply_hash_overrides(data, None) == 0
+        assert data["documents"] == ["old"]
 
 
 # ---------------------------------------------------------------------------

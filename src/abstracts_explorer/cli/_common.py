@@ -16,43 +16,6 @@ from abstracts_explorer.config import Config, get_config
 logger = logging.getLogger(__name__)
 
 
-class _HttpRequestLogFilter(logging.Filter):
-    """
-    Drop HTTP client request logs unless DEBUG verbosity is enabled.
-
-    ``httpx2`` emits one INFO record per HTTP request. Those records are
-    useful when debugging the LLM/embedding backend but noisy during normal
-    operation, so they are filtered out unless DEBUG is active. The logger's
-    level is left untouched so its own warnings and errors still propagate.
-
-    Attributes
-    ----------
-    allow_info : bool
-        When ``True``, INFO records are allowed through; when ``False`` they
-        are dropped. Records above INFO always pass.
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.allow_info = False
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        """
-        Decide whether a log record should be emitted.
-
-        Parameters
-        ----------
-        record : logging.LogRecord
-            The record being evaluated.
-
-        Returns
-        -------
-        bool
-            ``True`` if the record should be emitted, ``False`` otherwise.
-        """
-        return self.allow_info or record.levelno > logging.INFO
-
-
 _WRITE_COMMAND_PATHS: frozenset[tuple[str, ...]] = frozenset(
     {
         ("data", "download"),
@@ -145,14 +108,9 @@ def setup_logging(verbosity: int) -> None:
     # This overrides the level set at import time by _configure_package_logging().
     logging.getLogger("abstracts_explorer").setLevel(logging.NOTSET)
 
-    # Gate httpx2 request logs behind DEBUG without altering its log level.
-    httpx_logger = logging.getLogger("httpx2")
-    for existing in list(httpx_logger.filters):
-        if isinstance(existing, _HttpRequestLogFilter):
-            httpx_logger.removeFilter(existing)
-    request_filter = _HttpRequestLogFilter()
-    request_filter.allow_info = level == logging.DEBUG
-    httpx_logger.addFilter(request_filter)
+    # Suppress per-request INFO logs from both HTTP client libraries.
+    for name in ("httpx", "httpx2"):
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 def _print_header(title: str, *lines: Optional[str]) -> None:
