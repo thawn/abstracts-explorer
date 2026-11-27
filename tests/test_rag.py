@@ -414,14 +414,15 @@ class TestRAGToolQueue:
         finally:
             chat.close()
 
+        config = get_config()
         kwargs = run_sync.call_args.kwargs
         assert kwargs["usage_limits"].tool_calls_limit is None
         assert kwargs["usage_limits"].request_limit == 50
-        assert kwargs["timeout"] == 120
-        assert kwargs["model_settings"]["timeout"] == 60
-        assert kwargs["model_settings"]["request_timeout"] == 120
-        assert kwargs["model_settings"]["max_retries"] == get_config().llm_max_attempts - 1
-        assert chat.query_timeout == 120
+        assert kwargs["timeout"] == config.rag_query_timeout
+        assert kwargs["model_settings"]["timeout"] == config.llm_request_timeout
+        assert kwargs["model_settings"]["request_timeout"] == config.rag_query_timeout
+        assert kwargs["model_settings"]["max_retries"] == config.llm_max_attempts - 1
+        assert chat.query_timeout == config.rag_query_timeout
 
     def test_duplicate_tool_call_is_reused(self):
         """Identical calls execute once and the second result is marked cached."""
