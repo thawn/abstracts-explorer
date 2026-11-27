@@ -53,6 +53,7 @@ jobs:
         outputs:
             matrix: ${{ steps.matrix.outputs.matrix }}
             year: ${{ steps.matrix.outputs.year }}
+            has_work: ${{ steps.matrix.outputs.has_work }}
 
         steps:
             - name: Checkout repository
@@ -83,10 +84,15 @@ jobs:
               env:
                   TARGET_YEAR: ${{ inputs.year }}
                   CONFERENCE_FILTER: ${{ inputs.conference }}
+                  ONLY_NEW: ${{ github.event_name != 'workflow_dispatch' || inputs.only_new }}
               run: uv run python .github/scripts/build-data-refresh-matrix.py
 
     refresh:
         needs: prepare
+        # Skip the whole matrix when the prepare job found nothing to update.
+        # The matrix still contains one inert entry because GitHub rejects an
+        # empty dynamic matrix.
+        if: needs.prepare.outputs.has_work == 'true'
         runs-on: ubuntu-latest
         timeout-minutes: 350
         strategy:

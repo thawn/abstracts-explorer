@@ -70,12 +70,14 @@ def _run_main(
     model="model",
     target_year="2026",
     artifact_years=None,
+    only_new="true",
 ):
-    """Run ``main`` with fakes and return the parsed matrix and year."""
+    """Run ``main`` with fakes and return the parsed matrix, year, and has_work."""
     output = tmp_path / "output.txt"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     monkeypatch.setenv("TARGET_YEAR", target_year)
     monkeypatch.setenv("CONFERENCE_FILTER", "")
+    monkeypatch.setenv("ONLY_NEW", only_new)
     monkeypatch.setattr(
         module,
         "get_config",
@@ -98,7 +100,7 @@ def _run_main(
     for line in output.read_text().splitlines():
         key, value = line.split("=", 1)
         values[key] = value
-    return json.loads(values["matrix"]), int(values["year"])
+    return json.loads(values["matrix"]), int(values["year"]), values["has_work"] == "true"
 
 
 def test_matching_tags_prefers_conference_level(matrix_module):
@@ -129,7 +131,7 @@ def test_matching_tags_ignores_other_embedding_models(matrix_module):
 
 def test_main_marks_new_and_existing_conferences(matrix_module, monkeypatch, tmp_path):
     plugins = [FakePlugin("neurips", "neurips"), FakePlugin("iclr", "iclr")]
-    matrix, year = _run_main(
+    matrix, year, has_work = _run_main(
         monkeypatch,
         tmp_path,
         matrix_module,
@@ -139,6 +141,7 @@ def test_main_marks_new_and_existing_conferences(matrix_module, monkeypatch, tmp
 
     entries = {entry["conference"]: entry for entry in matrix["include"]}
     assert year == 2026
+    assert has_work is True
     assert entries["neurips"]["is_new"] is False
     assert entries["neurips"]["registry_tags"] == ["neurips_model_0.4.0"]
     assert entries["iclr"]["is_new"] is True
@@ -150,9 +153,10 @@ def test_main_skips_plugins_requiring_input_file(matrix_module, monkeypatch, tmp
         FakePlugin("chi", "chi", parameters={"input_path": {"type": "string"}}),
         FakePlugin("iclr", "iclr"),
     ]
-    matrix, _ = _run_main(monkeypatch, tmp_path, matrix_module, plugins=plugins, tags=[])
+    matrix, _, has_work = _run_main(monkeypatch, tmp_path, matrix_module, plugins=plugins, tags=[])
 
     assert [entry["plugin"] for entry in matrix["include"]] == ["iclr"]
+    assert has_work is True
 
 
 def test_main_errors_when_no_supported_plugins(matrix_module, monkeypatch, tmp_path):
@@ -179,21 +183,23 @@ def test_main_errors_when_no_supported_plugins(matrix_module, monkeypatch, tmp_p
 
 
 def test_target_year_present_in_summary(matrix_module, monkeypatch, tmp_path):
-    matrix, _ = _run_main(
+    matrix, _, has_work = _run_main(
         monkeypatch,
         tmp_path,
         matrix_module,
         plugins=[FakePlugin("neurips", "neurips")],
         tags=["neurips_model_0.4.0"],
         artifact_years={"neurips_model_0.4.0": [2024, 2025, 2026]},
+        only_new="false",
     )
     entry = matrix["include"][0]
     assert entry["target_year_present"] is True
     assert entry["needs_update"] is False
+    assert has_work is True
 
 
 def test_target_year_missing_marks_needs_update(matrix_module, monkeypatch, tmp_path):
-    matrix, _ = _run_main(
+    matrix, _, has_work = _run_main(
         monkeypatch,
         tmp_path,
         matrix_module,
@@ -205,24 +211,27 @@ def test_target_year_missing_marks_needs_update(matrix_module, monkeypatch, tmp_
     assert entry["is_new"] is False
     assert entry["target_year_present"] is False
     assert entry["needs_update"] is True
+    assert has_work is True
 
 
 def test_target_year_present_via_year_tag(matrix_module, monkeypatch, tmp_path):
-    matrix, _ = _run_main(
+    matrix, _, has_work = _run_main(
         monkeypatch,
         tmp_path,
         matrix_module,
         plugins=[FakePlugin("neurips", "neurips", supported_years=(2025,))],
         tags=["neurips-2024_model_0.4.0", "neurips-2025_model_0.4.0"],
         target_year="2025",
+        only_new="false",
     )
     entry = matrix["include"][0]
     assert entry["target_year_present"] is True
     assert entry["needs_update"] is False
+    assert has_work is True
 
 
 def test_new_conference_needs_update(matrix_module, monkeypatch, tmp_path):
-    matrix, _ = _run_main(
+    matrix, _, has_work = _run_main(
         monkeypatch,
         tmp_path,
         matrix_module,
@@ -233,3 +242,46 @@ def test_new_conference_needs_update(matrix_module, monkeypatch, tmp_path):
     assert entry["is_new"] is True
     assert entry["target_year_present"] is False
     assert entry["needs_update"] is True
+    assert has_work is True
+
+
+def test_only_new_filters_up_to_date_conferences(matrix_module, monkeypatch, tmp_path):
+    matrix, _, has_work = _run_main(
+        monkeypatch,
+        tmp_path,
+        matrix_module,
+        plugins=[FakePlugin("neurips", "neurips"), FakePlugin("iclr", "iclr")],
+        tags=["neurips_model_0.4.0"],
+        artifact_years={"neurips_model_0.4.0": [2024, 2025, 2026]},
+    )
+    assert [entry["conference"] for entry in matrix["include"]] == ["iclr"]
+    assert has_work is True
+
+
+def test_no_work_emits_inert_matrix(matrix_module, monkeypatch, tmp_path):
+    matrix, _, has_work = _run_main(
+        monkeypatch,
+        tmp_path,
+        matrix_module,
+        plugins=[FakePlugin("neurips", "neurips")],
+        tags=["neurips_model_0.4.0"],
+        artifact_years={"neurips_model_0.4.0": [2024, 2025, 2026]},
+    )
+    assert has_work is False
+    assert len(matrix["include"]) == 1
+    assert matrix["include"][0]["plugin"] == "none"
+    assert matrix["include"][0]["needs_update"] is False
+
+
+def test_only_new_false_includes_up_to_date_conferences(matrix_module, monkeypatch, tmp_path):
+    matrix, _, has_work = _run_main(
+        monkeypatch,
+        tmp_path,
+        matrix_module,
+        plugins=[FakePlugin("neurips", "neurips")],
+        tags=["neurips_model_0.4.0"],
+        artifact_years={"neurips_model_0.4.0": [2024, 2025, 2026]},
+        only_new="false",
+    )
+    assert [entry["conference"] for entry in matrix["include"]] == ["neurips"]
+    assert has_work is True

@@ -14,6 +14,17 @@ from abstracts_explorer.config import get_config
 from abstracts_explorer.plugins import get_all_plugins
 from abstracts_explorer.registry import RegistryClient
 
+# GitHub rejects an empty dynamic matrix, so emit a single inert entry when
+# there is nothing to do. The refresh job is skipped via the `has_work` output.
+_NO_WORK_ENTRY: dict[str, Any] = {
+    "plugin": "none",
+    "conference": "none",
+    "registry_tags": [],
+    "is_new": False,
+    "target_year_present": True,
+    "needs_update": False,
+}
+
 
 def _sanitize(value: str) -> str:
     """
@@ -179,6 +190,7 @@ def main() -> int:
     target_year = os.environ.get("TARGET_YEAR", "").strip()
     year = int(target_year) if target_year else dt.datetime.now(dt.timezone.utc).year
     conference_filter = os.environ.get("CONFERENCE_FILTER", "").strip()
+    only_new = os.environ.get("ONLY_NEW", "true").strip().lower() != "false"
 
     repository = os.environ.get("REGISTRY_REPOSITORY") or config.registry_repository
     if not repository:
@@ -241,12 +253,16 @@ def main() -> int:
             }
         )
 
-    matrix = {"include": entries}
+    selected = [entry for entry in entries if (not only_new) or entry["needs_update"]]
+    has_work = bool(selected)
+    matrix = {"include": selected if has_work else [_NO_WORK_ENTRY]}
+
     output = os.environ.get("GITHUB_OUTPUT")
     if output:
         with open(output, "a", encoding="utf-8") as handle:
             handle.write(f"matrix={json.dumps(matrix)}\n")
             handle.write(f"year={year}\n")
+            handle.write(f"has_work={'true' if has_work else 'false'}\n")
     else:
         print(json.dumps(matrix, indent=2))
 

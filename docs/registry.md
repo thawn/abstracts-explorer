@@ -290,6 +290,11 @@ Conferences are processed **sequentially**, one at a time. Each job has its own
 `REQUESTS_PER_MINUTE` limiter, so running conferences in parallel would
 multiply the effective request rate against the shared LLM backend.
 
+The matrix is filtered during preparation to only the conferences that need
+work, so no-op conferences do not start a job at all. When nothing needs
+updating, the `refresh` job is skipped entirely (the matrix still contains one
+inert entry because GitHub rejects an empty dynamic matrix).
+
 ### Adding a year without re-uploading earlier years
 
 When a new year is added to an existing conference, the workflow runs
