@@ -649,7 +649,8 @@ usage: abstracts-explorer registry [-h] {push,pull,list,update-conference-image,
 ```text
 usage: abstracts-explorer registry push [-h] [--repository REPOSITORY]
                                         [--token TOKEN] [--conference CONFERENCE]
-                                        [--year YEAR] [--tag TAG] [--only-tag]
+                                        [--year YEAR] [--tag TAG] [--only-tags]
+                                        [--dry-run] [--force]
 ```
 
 | Option | Description |
@@ -659,14 +660,18 @@ usage: abstracts-explorer registry push [-h] [--repository REPOSITORY]
 | `--conference, -c CONFERENCE` | Conference name or `all` (default: all) |
 | `--year YEAR` | Conference year (default: all available years) |
 | `--tag TAG` | Custom tag (default: derived from conference, year and embedding model) |
-| `--only-tag` | Do not upload data; re-push existing artifacts under the current version tag |
+| `--only-tags` | Do not upload data; re-tag the latest artifact for each tag base under the installed version |
+| `--dry-run` | With `--only-tags`, preview re-tags without changing the registry |
+| `--force` | With `--only-tags`, overwrite existing installed-version tags |
 
 ```bash
 abstracts-explorer registry push --conference neurips --year 2024 \
   --repository ghcr.io/thawn/abstracts-data
 
 # Only the version changed (data unchanged): update tags without uploading
-abstracts-explorer registry push --conference neurips --only-tag \
+abstracts-explorer registry push --only-tags \
+  --repository ghcr.io/thawn/abstracts-data
+abstracts-explorer registry push --conference neurips --only-tags --dry-run \
   --repository ghcr.io/thawn/abstracts-data
 ```
 

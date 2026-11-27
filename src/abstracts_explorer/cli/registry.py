@@ -37,6 +37,9 @@ def registry_upload_command(args: argparse.Namespace) -> int:
         - conference: Conference name
         - year: Conference year (optional; all years if omitted)
         - tag: Optional custom tag
+        - only_tags: Re-tag latest artifacts instead of uploading data
+        - dry_run: Preview re-tags without modifying the registry
+        - force: Overwrite existing installed-version tags when re-tagging
 
     Returns
     -------
@@ -67,26 +70,30 @@ def registry_upload_command(args: argparse.Namespace) -> int:
         )
         return 1
 
-    only_tag = getattr(args, "only_tag", False)
+    only_tags = getattr(args, "only_tags", False)
+    dry_run = getattr(args, "dry_run", False)
+    force = getattr(args, "force", False)
 
     _print_header(
-        "Registry Re-tag" if only_tag else "Registry Upload",
+        "Registry Re-tag" if only_tags else "Registry Upload",
         f"Repository: {repository}",
         f"Conference: {conference}",
         f"Year: {args.year if args.year else 'all'}",
         f"Tag: {args.tag}" if args.tag else None,
-        "Only tag (no data upload)" if only_tag else None,
+        "Only tags (no data upload)" if only_tags else None,
+        "Dry-run" if only_tags and dry_run else None,
+        "Force overwrite" if only_tags and force else None,
     )
 
-    if only_tag:
-        if conference == "all":
+    if only_tags:
+        if args.tag:
+            print("❌ --only-tags cannot be combined with --tag.", file=sys.stderr)
+            return 1
+        if args.year is not None and conference == "all":
             print(
-                "❌ --only-tag requires a specific --conference (not 'all').",
+                "❌ --year requires a specific --conference with --only-tags.",
                 file=sys.stderr,
             )
-            return 1
-        if args.tag:
-            print("❌ --only-tag cannot be combined with --tag.", file=sys.stderr)
             return 1
     elif conference == "all" and (args.year is not None or args.tag):
         print(
@@ -98,15 +105,23 @@ def registry_upload_command(args: argparse.Namespace) -> int:
     try:
         client = RegistryClient(repository=repository, token=token)
 
-        if only_tag:
-            summary = client.retag_conference(
-                conference=conference,
-                years=[args.year] if args.year is not None else None,
+        if only_tags:
+            summary = client.retag_latest(
+                conference=None if conference == "all" else conference,
+                year=args.year,
+                dry_run=dry_run,
+                force=force,
                 progress_callback=lambda msg: print(f"  {msg}"),
             )
             print("\n✅ Re-tag complete!")
-            print(f"  📅 Years:      {summary.get('years', [])}")
-            print(f"  🏷️  Tag:        {summary.get('tag', '')}")
+            print(f"  🏷️  Version:    {summary.get('version', '')}")
+            for entry in summary.get("entries", []):
+                action = entry.get("action", "")
+                prefix = "[dry-run] " if action == "would-retag" else ""
+                if action.startswith("skipped"):
+                    print(f"  ⏭️  {entry.get('source_tag', '')} -> " f"{entry.get('target_tag', '')} ({action})")
+                else:
+                    print(f"  {prefix}🏷️  {entry.get('source_tag', '')} -> " f"{entry.get('target_tag', '')}")
             return 0
 
         if conference == "all":

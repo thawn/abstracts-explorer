@@ -307,11 +307,20 @@ If only the abstracts-explorer version changed (not the data), re-tag the
 existing artifacts without exporting or uploading data:
 
 ```bash
-abstracts-explorer registry push --conference neurips --only-tag
+# Re-tag the latest artifact for every tag base to the installed version
+abstracts-explorer registry push --only-tags
+
+# Restrict to one conference (and optionally one year)
+abstracts-explorer registry push --conference neurips --only-tags
+abstracts-explorer registry push --conference neurips --year 2024 --only-tags
 ```
 
-This pushes the per-year and summary manifests under the current version tag,
-reusing the existing data layers.
+For each tag base (for example `neurips-2024_model` or `neurips_model`), the
+highest existing version is selected and a new tag with the installed version
+is created. Only the manifest is re-pushed; existing data layers and the config
+blob are reused. Tags that already exist for the installed version are skipped.
+Use `--dry-run` to preview and `--force` to overwrite existing installed-version
+tags.
 
 After the refresh, a cleanup job removes orphaned untagged registry versions
 (this step runs in dry-run mode first; see `registry delete --untagged`).

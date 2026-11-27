@@ -1229,6 +1229,175 @@ class RegistryClient:
         summary["year_tags"] = current_year_tags
         return summary
 
+    def _retag_manifest(
+        self,
+        source_tag: str,
+        target_tag: str,
+        version: str,
+        progress: Callable[[str], None],
+    ) -> None:
+        """
+        Re-push an existing manifest under a new tag without uploading data blobs.
+
+        Parameters
+        ----------
+        source_tag : str
+            Existing tag whose manifest should be reused.
+        target_tag : str
+            New tag to create.
+        version : str
+            abstracts-explorer version to store in the manifest annotations.
+        progress : callable
+            Progress message callback.
+
+        Raises
+        ------
+        RegistryError
+            If the source artifact is an OCI index, the manifest cannot be
+            fetched, or the manifest upload fails.
+        """
+        source_ref = f"{self.repository}:{source_tag}"
+        target_ref = f"{self.repository}:{target_tag}"
+        manifest = self._client.get_manifest(source_ref)
+        if "layers" not in manifest:
+            raise RegistryError(f"Artifact {source_tag} is an OCI index or has no layers and cannot be re-tagged.")
+
+        annotations = dict(manifest.get("annotations") or {})
+        annotations["com.abstracts-explorer.version"] = version
+        manifest["annotations"] = annotations
+
+        container = self._client.get_container(target_ref)
+        response = self._client.upload_manifest(manifest, container)
+        if response.status_code not in (200, 201):
+            raise RegistryError(f"Failed to push manifest for {target_ref}: HTTP {response.status_code}")
+        progress(f"Successfully re-tagged {source_tag} as {target_tag}")
+
+    def retag_latest(
+        self,
+        conference: Optional[str] = None,
+        year: Optional[int] = None,
+        version: Optional[str] = None,
+        dry_run: bool = False,
+        force: bool = False,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Re-tag the latest artifact for every tag base under the current version.
+
+        Each tag base is the part of a tag before the final ``_version``
+        component, e.g. ``neurips-2024_model`` for
+        ``neurips-2024_model_0.3.0``.  For every base, the highest existing
+        version is selected and a new tag is created with *version* (the
+        installed package version by default).  Existing data layers and the
+        config blob are reused; only the manifest is re-pushed.
+
+        Parameters
+        ----------
+        conference : str, optional
+            Limit re-tagging to tags for this conference.  When ``None``, all
+            conferences are processed.
+        year : int, optional
+            Limit re-tagging to tags for this conference year.  Requires
+            *conference*.
+        version : str, optional
+            Version to append to the new tags.  Defaults to the installed
+            package version.
+        dry_run : bool, optional
+            When ``True``, report which tags would be created without pushing
+            anything (default: ``False``).
+        force : bool, optional
+            When ``True``, overwrite tags that already exist for *version*
+            (default: ``False``).
+        progress_callback : callable, optional
+            Function called with status messages during the operation.
+
+        Returns
+        -------
+        dict
+            Summary with ``version``, ``dry_run``, and an ``entries`` list.
+            Each entry contains ``source_tag``, ``target_tag``,
+            ``source_version``, and ``action`` (``retagged``,
+            ``would-retag``, ``skipped-current``, or ``skipped-exists``).
+
+        Raises
+        ------
+        RegistryError
+            If *year* is given without *conference*, listing tags fails, or a
+            manifest cannot be re-tagged.
+        """
+        _progress = _make_progress_callback(progress_callback)
+        target_version = version or __version__
+        safe_target_version = _sanitize_str_for_oci_tag(target_version)
+
+        if year is not None and not conference:
+            raise RegistryError("Re-tagging a specific --year requires a specific --conference.")
+
+        tags = self.list_tags()
+        tag_set = set(tags)
+
+        safe_conf = _sanitize_str_for_oci_tag(conference) if conference else None
+        year_base = f"{safe_conf}-{year}" if safe_conf is not None and year is not None else None
+
+        groups: Dict[str, List[Tuple[Version, str]]] = {}
+        for tag in tags:
+            parsed = _parse_version_from_tag(tag)
+            if parsed is None:
+                continue
+            prefix, separator, _ = tag.rpartition("_")
+            if not separator or not prefix:
+                continue
+
+            base = tag.split("_", 1)[0]
+            if year_base is not None:
+                if base != year_base:
+                    continue
+            elif safe_conf is not None:
+                if not (base == safe_conf or base.startswith(safe_conf + "-")):
+                    continue
+
+            groups.setdefault(prefix, []).append((parsed, tag))
+
+        entries: List[Dict[str, Any]] = []
+        retagged_count = 0
+        for prefix in sorted(groups):
+            source_version, source_tag = max(groups[prefix], key=lambda item: item[0])
+            target_tag = f"{prefix}_{safe_target_version}"
+            entry: Dict[str, Any] = {
+                "source_tag": source_tag,
+                "target_tag": target_tag,
+                "source_version": str(source_version),
+                "action": "",
+            }
+
+            if target_tag == source_tag:
+                _progress(f"{source_tag} already uses version {target_version}; skipping.")
+                entry["action"] = "skipped-current"
+                entries.append(entry)
+                continue
+
+            if target_tag in tag_set and not force:
+                _progress(f"{target_tag} already exists; skipping (use --force to overwrite).")
+                entry["action"] = "skipped-exists"
+                entries.append(entry)
+                continue
+
+            if dry_run:
+                _progress(f"[dry-run] Would re-tag {source_tag} as {target_tag}.")
+                entry["action"] = "would-retag"
+                entries.append(entry)
+                continue
+
+            _progress(f"Re-tagging {source_tag} as {target_tag}...")
+            self._retag_manifest(source_tag, target_tag, target_version, _progress)
+            entry["action"] = "retagged"
+            entries.append(entry)
+            retagged_count += 1
+
+        _progress(
+            f"Re-tag complete: {retagged_count} artifact(s) re-tagged, " f"{len(entries) - retagged_count} skipped."
+        )
+        return {"version": target_version, "dry_run": dry_run, "entries": entries}
+
     def upload(
         self,
         conference: str,
