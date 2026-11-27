@@ -1,5 +1,5 @@
 """
-``search`` and ``chat`` commands
+``papers search`` and ``papers chat`` commands
 
 """
 
@@ -40,8 +40,8 @@ def search_command(args: argparse.Namespace) -> int:
         - limit: Number of results to return
         - where: Metadata filter conditions
         - show_abstract: Whether to show paper abstracts
-        - backend_url: URL for OpenAI-compatible API
-        - model: Name of the embedding model
+        - embedding_backend_url: URL for OpenAI-compatible embedding API
+        - embedding_model: Name of the embedding model
 
     Returns
     -------
@@ -74,8 +74,8 @@ def search_command(args: argparse.Namespace) -> int:
         # Initialize embeddings manager
         with closing(
             EmbeddingsManager(
-                backend_url=args.backend_url,
-                model_name=args.model,
+                backend_url=args.embedding_backend_url,
+                model_name=args.embedding_model,
                 collection_name=args.collection,
             )
         ) as em:
@@ -177,7 +177,7 @@ def chat_command(args: argparse.Namespace) -> int:
     args : argparse.Namespace
         Command-line arguments containing:
         - collection: Name of the collection
-        - backend_url: OpenAI-compatible API URL
+        - llm_backend_url: OpenAI-compatible LLM API URL
         - model: Language model name for chat
         - embedding_model: Embedding model name
         - max_context: Maximum papers to use as context
@@ -204,7 +204,7 @@ def chat_command(args: argparse.Namespace) -> int:
             f"Collection: {args.collection}",
             f"Chat Model: {args.model}",
             f"Embedding Model: {args.embedding_model}",
-            f"API URL: {args.backend_url}",
+            f"API URL: {args.llm_backend_url}",
             f"Conference: {conference}" if conference else None,
             f"Year: {year}" if year is not None else None,
         )
@@ -217,7 +217,7 @@ def chat_command(args: argparse.Namespace) -> int:
         with closing(
             EmbeddingsManager(
                 collection_name=args.collection,
-                backend_url=args.backend_url,
+                backend_url=args.llm_backend_url,
                 model_name=args.embedding_model,
             )
         ) as em:
@@ -243,7 +243,7 @@ def chat_command(args: argparse.Namespace) -> int:
                 chat = RAGChat(
                     embeddings_manager=em,
                     database=db,
-                    backend_url=args.backend_url,
+                    backend_url=args.llm_backend_url,
                     model=args.model,
                     max_context_papers=args.max_context,
                     temperature=args.temperature,

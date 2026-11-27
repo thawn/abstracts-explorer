@@ -81,9 +81,9 @@ for details.
 
 ```bash
 uv sync --all-extras
-uv run abstracts-explorer download --conference haicon --year 2026
-uv run abstracts-explorer create-embeddings
-uv run abstracts-explorer web-ui   # → http://localhost:5001
+uv run abstracts-explorer data download --conference haicon --year 2026
+uv run abstracts-explorer embeddings create
+uv run abstracts-explorer serve web   # → http://localhost:5001
 ```
 
 ### Option C — Docker Compose

@@ -117,7 +117,7 @@ For container deployments, see [Docker: Create PostgreSQL search indexes](docker
   conference/year mapping (default: `86400`).
   - Set to `0` to disable caching.
   - Applies only to PostgreSQL; SQLite always queries directly.
-  - The cache is process-local. Restart web-ui after external imports so it
+  - The cache is process-local. Restart `serve web` after external imports so it
     reloads metadata immediately; otherwise entries expire after the TTL.
 
 #### Embedding Database
@@ -133,13 +133,13 @@ The configuration automatically detects the type based on the format:
 
 - **MIN_FREE_DISK_MB**: Minimum free disk space in MiB required before writing
   embeddings to a local ChromaDB store (default: `4096`). If the filesystem has
-  less space available, `create-embeddings` fails fast instead of risking a
+  less space available, `embeddings create` fails fast instead of risking a
   corrupted vector index. Set to `0` to disable the check. Ignored for HTTP
   `EMBEDDING_DB` values.
 
 !!! warning "Local ChromaDB is single-process"
     A local ChromaDB (`EMBEDDING_DB` file path) is locked for the lifetime of
-    the process using it. Do **not** run multiple `create-embeddings`,
+    the process using it. Do **not** run multiple `embeddings create` jobs,
     clustering, web UI, or MCP processes against the same local store
     simultaneously: each process persists its own copy of the HNSW index, and
     concurrent writers can corrupt the store. A second process fails fast with
@@ -149,7 +149,7 @@ The configuration automatically detects the type based on the format:
     an HTTP ChromaDB server (`EMBEDDING_DB=http://...`).
 
     If a local store was corrupted by concurrent writers, stop all processes,
-    move the store aside, and rebuild it with `create-embeddings` (the paper
+    move the store aside, and rebuild it with `embeddings create` (the paper
     database is unaffected).
 
 ### Read-Only Mode
@@ -168,10 +168,11 @@ In read-only mode:
 - Embedding writes (ingestion, imports, deletes, and collection creation)
   raise `ReadOnlyError`; the existing ChromaDB collection is opened without
   being created.
-- Write-capable CLI commands (`download`, `create-embeddings`, `pre-process`,
-  `delete-data`, clustering `run`/`pre-generate`/`clear-cache`, evaluation
-  writes, feedback `clear`, registry install/delete, and
-  `check-consistency --fix`) exit with an error before doing any work.
+- Write-capable CLI commands (`data download`, `data delete`,
+  `embeddings create`, `pipeline run`, clustering `run` and
+  `cache populate/clear`, evaluation writes, feedback `clear`, registry
+  `pull`/`delete`, and `data check --fix`) exit with an error before doing any
+  work.
 - Web API write endpoints return HTTP `403`.
 
 Multiple read-only instances may run concurrently against the same data. A
@@ -180,8 +181,8 @@ cannot start while readers are active (and vice versa). For concurrent readers
 and writers, use an HTTP ChromaDB server (`EMBEDDING_DB=http://...`).
 
 ```bash
-READ_ONLY=true abstracts-explorer web-ui --host 0.0.0.0 --port 5000
-abstracts-explorer search "graph neural networks" --read-only
+READ_ONLY=true abstracts-explorer serve web --host 0.0.0.0 --port 5000
+abstracts-explorer papers search "graph neural networks" --read-only
 ```
 
 ### RAG Settings
@@ -243,7 +244,7 @@ For the containerized stack, Ollaya is reached over the internal network at
 - **DEFAULT_CONFERENCE**: Pre-selected conference in the web UI (default: `ML4PS`)
 - **DEFAULT_YEAR**: Pre-selected year in the web UI; `0` disables the default (default: `0`)
 - **IMPRINT_LINK**: Optional URL of a legal notice/imprint shown in the web UI footer (default: empty = not shown)
-- **WEB_UI_THREADS**: Number of Waitress worker threads for the web UI (default: `6`). Values below `1` are clamped to `1`. Ignored when the Flask development server is used (`--dev`). The `web-ui --threads` option overrides this setting.
+- **WEB_UI_THREADS**: Number of Waitress worker threads for the web UI (default: `6`). Values below `1` are clamped to `1`. Ignored when the Flask development server is used (`--dev`). The `serve web --threads` option overrides this setting.
 
 ### Reverse Proxy Header Handling
 
@@ -399,7 +400,7 @@ You can also set configuration via environment variables:
 ```bash
 export CHAT_MODEL=llama-3.2-3b-instruct
 export LLM_BACKEND_URL=http://localhost:8080
-abstracts-explorer chat
+abstracts-explorer papers chat
 ```
 
 ## Security Best Practices

@@ -151,7 +151,7 @@ class TestValidateEmbeddingsDB:
         assert _validate_embeddings_db(config) is False
         captured = capsys.readouterr()
         assert "Embeddings database not found" in captured.err
-        assert "create-embeddings" in captured.err
+        assert "embeddings create" in captured.err
 
     def test_existing_local_path(self, tmp_path, capsys):
         """Existing local embeddings path returns True without output."""
@@ -236,7 +236,7 @@ class TestCLI:
 
             captured = capsys.readouterr()
             assert "usage:" in captured.out
-            assert "create-embeddings" in captured.out
+            assert "embeddings" in captured.out
 
     def test_argcomplete_autocomplete_called(self):
         """Test that argcomplete.autocomplete is called during CLI startup."""
@@ -291,6 +291,7 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
+                    "data",
                     "download",
                     "--conference",
                     "neurips",
@@ -407,6 +408,7 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
+                    "data",
                     "download",
                     "--conference",
                     "aaai",
@@ -445,7 +447,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "download", "--conference", "neurips", "--output", str(output_db)],
+                ["abstracts-explorer", "data", "download", "--conference", "neurips", "--output", str(output_db)],
             ):
                 exit_code = main()
 
@@ -487,6 +489,7 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
+                    "data",
                     "download",
                     "--conference",
                     "neurips",
@@ -547,7 +550,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "download", "--output", str(output_db)],
+                ["abstracts-explorer", "data", "download", "--output", str(output_db)],
             ):
                 exit_code = main()
 
@@ -589,7 +592,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "download", "--conference", "neurips", "--output", str(output_db)],
+                ["abstracts-explorer", "data", "download", "--conference", "neurips", "--output", str(output_db)],
             ):
                 exit_code = main()
 
@@ -628,6 +631,7 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
+                    "data",
                     "download",
                     "--conference",
                     "neurips",
@@ -672,7 +676,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "download", "--conference", "neurips", "--output", str(output_db)],
+                ["abstracts-explorer", "data", "download", "--conference", "neurips", "--output", str(output_db)],
             ):
                 exit_code = main()
 
@@ -712,6 +716,7 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
+                    "data",
                     "download",
                     "--conference",
                     "NeurIPS",
@@ -817,7 +822,8 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "pre-process",
+                    "pipeline",
+                    "run",
                     "--conference",
                     "iclr",
                     "--year",
@@ -860,8 +866,8 @@ class TestCLI:
                 force=False,
                 verbose=0,
                 collection="custom-collection",
-                backend_url="http://example.test:1234/v1",
-                model="custom-embedding-model",
+                embedding_backend_url="http://example.test:1234/v1",
+                embedding_model="custom-embedding-model",
                 where="year = 2024",
                 requests_per_minute=42,
                 ignore_embedding_model_mismatch=True,
@@ -871,8 +877,8 @@ class TestCLI:
         assert rc == 0
         embed_args = mock_embed.call_args[0][0]
         assert embed_args.collection == "custom-collection"
-        assert embed_args.backend_url == "http://example.test:1234/v1"
-        assert embed_args.model == "custom-embedding-model"
+        assert embed_args.embedding_backend_url == "http://example.test:1234/v1"
+        assert embed_args.embedding_model == "custom-embedding-model"
         assert embed_args.where == "year = 2024"
         assert embed_args.requests_per_minute == 42
         assert embed_args.ignore_embedding_model_mismatch is True
@@ -914,7 +920,7 @@ class TestCLI:
         mock_cluster.assert_called_once()
         assert mock_cluster.call_args[0][0].conference == "ICLR"
         captured = capsys.readouterr()
-        assert "NeurIPS 2024: create-embeddings" in captured.err
+        assert "NeurIPS 2024: embeddings create" in captured.err
         assert "1 succeeded, 1 failed" in captured.out
 
     def test_pre_process_zero_paper_units_are_skipped(self, tmp_path, capsys, monkeypatch):
@@ -989,7 +995,7 @@ class TestCLI:
         assert overlap_observed.get("value") is True
 
     def test_pre_process_no_overlap_flag_serializes_post_processing(self, tmp_path, monkeypatch):
-        """--no-overlap-post-process runs embeddings and clustering in one worker."""
+        """--serial-post-process runs embeddings and clustering in one worker."""
         patch_get_config_for_test(monkeypatch, tmp_path / "embeddings")
 
         embed_second_started = threading.Event()
@@ -1026,7 +1032,7 @@ class TestCLI:
                 year=None,
                 force=False,
                 verbose=0,
-                no_overlap_post_process=True,
+                serial_post_process=True,
             )
             rc = pre_process_command(args)
 
@@ -1065,7 +1071,7 @@ class TestCLI:
         assert mock_cluster.call_count == 2
         captured = capsys.readouterr()
         assert "Clustering: 1 succeeded, 1 failed" in captured.out
-        assert "NeurIPS 2024: clustering pre-generate" in captured.err
+        assert "NeurIPS 2024: clustering cache populate" in captured.err
 
     def test_create_embeddings_missing_database_auto_creates(self, tmp_path, capsys, monkeypatch):
         """create-embeddings auto-creates a missing database."""
@@ -1081,7 +1087,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "create-embeddings"],
+                ["abstracts-explorer", "embeddings", "create"],
             ):
                 exit_code = main()
 
@@ -1126,7 +1132,8 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "create-embeddings",
+                    "embeddings",
+                    "create",
                 ],
             ):
                 exit_code = main()
@@ -1185,7 +1192,8 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "create-embeddings",
+                    "embeddings",
+                    "create",
                 ],
             ):
                 exit_code = main()
@@ -1239,7 +1247,8 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "create-embeddings",
+                    "embeddings",
+                    "create",
                     "--force",
                 ],
             ):
@@ -1257,8 +1266,8 @@ class TestCLI:
             conference=None,
             year=None,
             collection="test",
-            backend_url="http://localhost:1234/v1",
-            model="new-model",
+            embedding_backend_url="http://localhost:1234/v1",
+            embedding_model="new-model",
             force=False,
             where=None,
             requests_per_minute=0,
@@ -1300,7 +1309,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "create-embeddings", "--ignore-embedding-model-mismatch"],
+                ["abstracts-explorer", "embeddings", "create", "--ignore-embedding-model-mismatch"],
             ):
                 rc = main()
 
@@ -1388,7 +1397,8 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "create-embeddings",
+                    "embeddings",
+                    "create",
                     "--force",
                     "--conference",
                     "NeurIPS",
@@ -1448,7 +1458,8 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "create-embeddings",
+                    "embeddings",
+                    "create",
                     "--force",
                     "--year",
                     "2024",
@@ -1506,7 +1517,8 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "create-embeddings",
+                    "embeddings",
+                    "create",
                     "--force",
                     "--conference",
                     "NeurIPS",
@@ -1564,7 +1576,8 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "create-embeddings",
+                    "embeddings",
+                    "create",
                     "--requests-per-minute",
                     "30",
                 ],
@@ -1618,7 +1631,8 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "create-embeddings",
+                    "embeddings",
+                    "create",
                     "--requests-per-minute",
                     "0",
                 ],
@@ -1674,10 +1688,11 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "create-embeddings",
-                    "--backend-url",
+                    "embeddings",
+                    "create",
+                    "--embedding-backend-url",
                     custom_url,
-                    "--model",
+                    "--embedding-model",
                     custom_model,
                 ],
             ):
@@ -1725,7 +1740,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "create-embeddings"],
+                ["abstracts-explorer", "embeddings", "create"],
             ):
                 exit_code = main()
 
@@ -1780,7 +1795,8 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "create-embeddings",
+                    "embeddings",
+                    "create",
                     "--conference",
                     "NeurIPS",
                 ],
@@ -1843,7 +1859,8 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "create-embeddings",
+                    "embeddings",
+                    "create",
                     "--year",
                     "2024",
                 ],
@@ -1914,7 +1931,8 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "create-embeddings",
+                    "embeddings",
+                    "create",
                     "--conference",
                     "NeurIPS",
                     "--year",
@@ -1981,7 +1999,8 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "create-embeddings",
+                    "embeddings",
+                    "create",
                 ],
             ):
                 exit_code = main()
@@ -2004,6 +2023,7 @@ class TestCLI:
             "argv",
             [
                 "abstracts-explorer",
+                "papers",
                 "search",
                 "test query",
             ],
@@ -2034,6 +2054,7 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
+                    "papers",
                     "search",
                     "test query",
                 ],
@@ -2119,6 +2140,7 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
+                    "papers",
                     "search",
                     "test query",
                     "--limit",
@@ -2182,6 +2204,7 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
+                    "papers",
                     "search",
                     "machine learning",
                     "--show-abstract",
@@ -2251,6 +2274,7 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
+                    "papers",
                     "search",
                     "neural networks",
                     "--where",
@@ -2293,6 +2317,7 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
+                    "papers",
                     "search",
                     "nonexistent topic",
                 ],
@@ -2387,6 +2412,7 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
+                    "papers",
                     "search",
                     "test",
                 ],
@@ -2450,6 +2476,7 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
+                    "papers",
                     "search",
                     "test",
                 ],
@@ -2513,6 +2540,7 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
+                    "papers",
                     "search",
                     "test",
                 ],
@@ -2546,6 +2574,7 @@ class TestCLI:
                 "argv",
                 [
                     "abstracts-explorer",
+                    "papers",
                     "search",
                     "test",
                 ],
@@ -2596,7 +2625,7 @@ class TestCLI:
         with patch.object(
             sys,
             "argv",
-            ["abstracts-explorer", "clustering", "clear-cache"],
+            ["abstracts-explorer", "clustering", "cache", "clear"],
         ):
             exit_code = main()
 
@@ -2657,7 +2686,7 @@ class TestCLI:
         with patch.object(
             sys,
             "argv",
-            ["abstracts-explorer", "clustering", "clear-cache", "--embedding-model", "model1"],
+            ["abstracts-explorer", "clustering", "cache", "clear", "--embedding-model", "model1"],
         ):
             exit_code = main()
 
@@ -2702,7 +2731,7 @@ class TestCLI:
         with patch.object(
             sys,
             "argv",
-            ["abstracts-explorer", "clustering", "clear-cache"],
+            ["abstracts-explorer", "clustering", "cache", "clear"],
         ):
             exit_code = main()
 
@@ -2721,7 +2750,7 @@ class TestCLI:
         with patch.object(
             sys,
             "argv",
-            ["abstracts-explorer", "clustering", "clear-cache"],
+            ["abstracts-explorer", "clustering", "cache", "clear"],
         ):
             exit_code = main()
 
@@ -2777,7 +2806,7 @@ class TestCLI:
         with patch.object(
             sys,
             "argv",
-            ["abstracts-explorer", "clustering", "pre-generate"],
+            ["abstracts-explorer", "clustering", "cache", "populate"],
         ):
             exit_code = main()
 
@@ -2812,7 +2841,7 @@ class TestCLI:
             mock_db_instance.__exit__ = Mock(return_value=False)
             mock_db_class.return_value = mock_db_instance
 
-            with patch.object(sys, "argv", ["abstracts-explorer", "clustering", "pre-generate"]):
+            with patch.object(sys, "argv", ["abstracts-explorer", "clustering", "cache", "populate"]):
                 exit_code = main()
 
         assert exit_code == 0
@@ -2853,13 +2882,13 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "clustering", "pre-generate"],
+                ["abstracts-explorer", "clustering", "cache", "populate"],
             ):
                 exit_code = main()
 
         assert exit_code == 0
         captured = capsys.readouterr()
-        assert "Pre-generation complete" in captured.out
+        assert "Cache population complete" in captured.out
         # 2 combos: NeurIPS 2023 + NeurIPS 2024
         assert mock_compute.call_count == 2
         # Verify BERTopic parameters on all calls
@@ -2895,7 +2924,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "clustering", "pre-generate"],
+                ["abstracts-explorer", "clustering", "cache", "populate"],
             ):
                 exit_code = main()
 
@@ -2939,7 +2968,8 @@ class TestCLI:
                 [
                     "abstracts-explorer",
                     "clustering",
-                    "pre-generate",
+                    "cache",
+                    "populate",
                     "--force",
                 ],
             ):
@@ -2979,7 +3009,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "clustering", "pre-generate", "--no-llm-labels"],
+                ["abstracts-explorer", "clustering", "cache", "populate", "--no-llm-labels"],
             ):
                 exit_code = main()
 
@@ -3024,7 +3054,8 @@ class TestCLI:
                 [
                     "abstracts-explorer",
                     "clustering",
-                    "pre-generate",
+                    "cache",
+                    "populate",
                     "--requests-per-minute",
                     "30",
                 ],
@@ -3076,7 +3107,8 @@ class TestCLI:
                 [
                     "abstracts-explorer",
                     "clustering",
-                    "pre-generate",
+                    "cache",
+                    "populate",
                     "--requests-per-minute",
                     "0",
                 ],
@@ -3118,7 +3150,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "clustering", "pre-generate"],
+                ["abstracts-explorer", "clustering", "cache", "populate"],
             ):
                 exit_code = main()
 
@@ -3159,7 +3191,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "clustering", "pre-generate", "--conference", "ML4PS"],
+                ["abstracts-explorer", "clustering", "cache", "populate", "--conference", "ML4PS"],
             ):
                 exit_code = main()
 
@@ -3204,7 +3236,7 @@ class TestCLI:
             with patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "clustering", "pre-generate"],
+                ["abstracts-explorer", "clustering", "cache", "populate"],
             ):
                 exit_code = main()
 
@@ -3243,7 +3275,8 @@ class TestCLI:
                 [
                     "abstracts-explorer",
                     "clustering",
-                    "pre-generate",
+                    "cache",
+                    "populate",
                     "--conference",
                     "NeurIPS",
                     "--year",
@@ -3301,7 +3334,8 @@ class TestCLI:
                 [
                     "abstracts-explorer",
                     "clustering",
-                    "pre-generate",
+                    "cache",
+                    "populate",
                     "--conference",
                     "ml4ps@neurips",
                     "--year",
@@ -3333,7 +3367,7 @@ class TestCLI:
             collection="test",
             model="test-model",
             embedding_model="test-embedding-model",
-            backend_url="http://localhost:1234",
+            llm_backend_url="http://localhost:1234",
             max_context=5,
             temperature=0.7,
             show_sources=False,
@@ -3362,7 +3396,7 @@ class TestCLI:
             collection="test",
             model="test-model",
             embedding_model="test-embedding-model",
-            backend_url="http://localhost:1234",
+            llm_backend_url="http://localhost:1234",
             max_context=5,
             temperature=0.7,
             show_sources=False,
@@ -3401,7 +3435,7 @@ class TestCLI:
             collection="test",
             model="test-model",
             embedding_model="test-embedding-model",
-            backend_url="http://localhost:1234",
+            llm_backend_url="http://localhost:1234",
             max_context=5,
             temperature=0.7,
             show_sources=False,
@@ -3521,7 +3555,7 @@ class TestWebUICommand:
 
         parser, _ = build_parser(Config())
 
-        args = parser.parse_args(["web-ui"])
+        args = parser.parse_args(["serve", "web"])
         assert args.port == 5001
 
     def test_web_ui_threads_default_from_config(self):
@@ -3532,7 +3566,7 @@ class TestWebUICommand:
         config.web_ui_threads = 12
         parser, _ = build_parser(config)
 
-        args = parser.parse_args(["web-ui"])
+        args = parser.parse_args(["serve", "web"])
         assert args.threads == 12
 
     def test_web_ui_threads_cli_overrides_config(self):
@@ -3543,7 +3577,7 @@ class TestWebUICommand:
         config.web_ui_threads = 12
         parser, _ = build_parser(config)
 
-        args = parser.parse_args(["web-ui", "--threads", "3"])
+        args = parser.parse_args(["serve", "web", "--threads", "3"])
         assert args.threads == 3
 
     def test_web_ui_invalid_threads_returns_error(self, capsys):
@@ -3572,7 +3606,7 @@ class TestMainDispatch:
         # Set EMBEDDING_DB and patch config reload
         patch_get_config_for_test(monkeypatch, embeddings_path)
 
-        with patch.object(sys, "argv", ["abstracts-explorer", "chat"]):
+        with patch.object(sys, "argv", ["abstracts-explorer", "papers", "chat"]):
             with patch("abstracts_explorer.cli.main.chat_command") as mock_chat:
                 mock_chat.return_value = 0
                 exit_code = main()
@@ -3582,7 +3616,7 @@ class TestMainDispatch:
 
     def test_main_web_ui_command(self):
         """Test main() dispatches web-ui command."""
-        with patch.object(sys, "argv", ["abstracts-explorer", "web-ui"]):
+        with patch.object(sys, "argv", ["abstracts-explorer", "serve", "web"]):
             with patch("abstracts_explorer.cli.main.web_ui_command") as mock_web:
                 mock_web.return_value = 0
                 exit_code = main()
@@ -3620,8 +3654,8 @@ class TestCLISearchErrorHandling:
         args = argparse.Namespace(
             query="test",
             embeddings_path=str(embeddings_path),
-            backend_url="http://localhost:1234",
-            model="test-model",
+            embedding_backend_url="http://localhost:1234",
+            embedding_model="test-model",
             collection="test_collection",
             limit=5,
             show_abstract=False,
@@ -3660,8 +3694,8 @@ class TestCLISearchErrorHandling:
         args = argparse.Namespace(
             query="test",
             embeddings_path=str(embeddings_path),
-            backend_url="http://localhost:1234",
-            model="test-model",
+            embedding_backend_url="http://localhost:1234",
+            embedding_model="test-model",
             collection="test_collection",
             limit=5,
             show_abstract=False,
@@ -3739,7 +3773,8 @@ class TestCLIEmbeddingsProgressAndStats:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "create-embeddings",
+                    "embeddings",
+                    "create",
                 ],
             ):
                 exit_code = main()
@@ -3768,7 +3803,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            backend_url="http://localhost:1234",
+            llm_backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3806,7 +3841,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            backend_url="http://localhost:1234",
+            llm_backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3844,7 +3879,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            backend_url="http://localhost:1234",
+            llm_backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3882,7 +3917,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            backend_url="http://localhost:1234",
+            llm_backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3923,7 +3958,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            backend_url="http://localhost:1234",
+            llm_backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -3963,7 +3998,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            backend_url="http://localhost:1234",
+            llm_backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -4013,7 +4048,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            backend_url="http://localhost:1234",
+            llm_backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -4062,7 +4097,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            backend_url="http://localhost:1234",
+            llm_backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -4103,7 +4138,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            backend_url="http://localhost:1234",
+            llm_backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -4141,7 +4176,7 @@ class TestCLIChatInteractiveLoop:
 
         args = argparse.Namespace(
             embeddings_path=str(embeddings_path),
-            backend_url="http://localhost:1234",
+            llm_backend_url="http://localhost:1234",
             model="test-model",
             embedding_model="test-embedding-model",
             collection="test_collection",
@@ -4185,7 +4220,7 @@ class TestDeleteDataCommand:
         """delete-data exits with error when --conference is missing."""
         set_test_db(tmp_path / "test.db")
 
-        with patch.object(sys, "argv", ["abstracts-explorer", "delete-data", "--year", "2024"]):
+        with patch.object(sys, "argv", ["abstracts-explorer", "data", "delete", "--year", "2024"]):
             # argparse will error because --conference is required
             with pytest.raises(SystemExit):
                 main()
@@ -4194,7 +4229,7 @@ class TestDeleteDataCommand:
         """delete-data exits with error when --year is missing."""
         set_test_db(tmp_path / "test.db")
 
-        with patch.object(sys, "argv", ["abstracts-explorer", "delete-data", "--conference", "NeurIPS"]):
+        with patch.object(sys, "argv", ["abstracts-explorer", "data", "delete", "--conference", "NeurIPS"]):
             with pytest.raises(SystemExit):
                 main()
 
@@ -4213,7 +4248,7 @@ class TestDeleteDataCommand:
             patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "delete-data", "--conference", "NeurIPS", "--year", "2024"],
+                ["abstracts-explorer", "data", "delete", "--conference", "NeurIPS", "--year", "2024"],
             ),
             patch("abstracts_explorer.cli.data_mgmt.EmbeddingsManager") as mock_em_class,
             patch("builtins.input", return_value="no"),
@@ -4258,7 +4293,8 @@ class TestDeleteDataCommand:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "delete-data",
+                    "data",
+                    "delete",
                     "--conference",
                     "NeurIPS",
                     "--year",
@@ -4308,7 +4344,8 @@ class TestDeleteDataCommand:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "delete-data",
+                    "data",
+                    "delete",
                     "--conference",
                     "NeurIPS",
                     "--year",
@@ -4343,7 +4380,7 @@ class TestDeleteDataCommand:
             patch.object(
                 sys,
                 "argv",
-                ["abstracts-explorer", "delete-data", "--conference", "ICLR", "--year", "2023"],
+                ["abstracts-explorer", "data", "delete", "--conference", "ICLR", "--year", "2023"],
             ),
             patch("abstracts_explorer.cli.data_mgmt.EmbeddingsManager") as mock_em_class,
             patch("builtins.input", return_value="yes"),
@@ -4377,7 +4414,8 @@ class TestDeleteDataCommand:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "delete-data",
+                    "data",
+                    "delete",
                     "--conference",
                     "NeurIPS",
                     "--year",
@@ -4417,7 +4455,8 @@ class TestDeleteDataCommand:
                 "argv",
                 [
                     "abstracts-explorer",
-                    "delete-data",
+                    "data",
+                    "delete",
                     "--conference",
                     "NeurIPS",
                     "--year",
@@ -5026,3 +5065,102 @@ class TestFeedbackCommand:
             exit_code = main()
 
         assert exit_code == 1
+
+
+class TestRestructuredCommandTree:
+    """Tests for the noun-group command tree and flag taxonomy."""
+
+    def _parse(self, argv):
+        from abstracts_explorer.cli.parsers import build_parser
+
+        parser, _ = build_parser(Config())
+        return parser.parse_args(argv)
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["download"],
+            ["create-embeddings"],
+            ["search", "x"],
+            ["chat"],
+            ["web-ui"],
+            ["mcp-server"],
+            ["clustering", "pre-generate"],
+            ["clustering", "clear-cache"],
+            ["eval", "results"],
+            ["eval", "clear"],
+            ["registry", "upload"],
+            ["registry", "download"],
+            ["check-consistency"],
+            ["delete-data"],
+            ["pre-process"],
+        ],
+    )
+    def test_old_commands_are_rejected(self, argv):
+        """Legacy command names are no longer accepted."""
+        with pytest.raises(SystemExit):
+            self._parse(argv)
+
+    def test_nested_command_paths(self):
+        """Leaf parsers expose the full command path and handler."""
+        args = self._parse(["clustering", "cache", "populate"])
+        assert args._command_path == ("clustering", "cache", "populate")
+        assert args._handler == "pre_generate_clustering_command"
+
+    def test_embedding_and_llm_flags_are_distinct(self):
+        """Embedding and LLM commands use explicit, separate flags."""
+        embed = self._parse(
+            ["embeddings", "create", "--embedding-model", "emb", "--embedding-backend-url", "http://e"]
+        )
+        assert embed.embedding_model == "emb"
+        assert embed.embedding_backend_url == "http://e"
+
+        chat = self._parse(
+            [
+                "papers",
+                "chat",
+                "--model",
+                "chat",
+                "--embedding-model",
+                "emb",
+                "--llm-backend-url",
+                "http://l",
+            ]
+        )
+        assert chat.model == "chat"
+        assert chat.embedding_model == "emb"
+        assert chat.llm_backend_url == "http://l"
+
+    def test_download_default_output_uses_data_dir(self):
+        """data download derives its default output path from DATA_DIR."""
+        config = Config()
+        config.data_dir = "/tmp/abstracts-data"
+        from abstracts_explorer.cli.parsers import build_parser
+
+        parser, _ = build_parser(config)
+        args = parser.parse_args(["data", "download"])
+        assert args.output == str(Path("/tmp/abstracts-data") / "abstracts.json")
+
+    def test_short_conference_and_yes_flags(self):
+        """-c and -y are available where applicable."""
+        args = self._parse(["data", "delete", "-c", "neurips", "--year", "2024", "-y"])
+        assert args.conference == "neurips"
+        assert args.yes is True
+
+    def test_serial_post_process_flag(self):
+        """pipeline run uses the positive --serial-post-process flag."""
+        args = self._parse(["pipeline", "run", "--serial-post-process"])
+        assert args.serial_post_process is True
+
+    def test_eval_mutually_exclusive_flags(self):
+        """Conflicting eval flags are rejected by argparse."""
+        with pytest.raises(SystemExit):
+            self._parse(["eval", "generate", "--no-followups", "--n-followups", "2"])
+        with pytest.raises(SystemExit):
+            self._parse(["eval", "verify", "--sample", "1", "--all"])
+
+    def test_clustering_run_accepts_scope_filters(self):
+        """clustering run can be scoped to a conference and year."""
+        args = self._parse(["clustering", "run", "-c", "NeurIPS", "--year", "2024"])
+        assert args.conference == "NeurIPS"
+        assert args.year == 2024

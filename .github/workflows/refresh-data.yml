@@ -120,7 +120,7 @@ jobs:
               run: |
                   while IFS= read -r tag; do
                     [ -z "$tag" ] && continue
-                    uv run abstracts-explorer registry download \
+                    uv run abstracts-explorer registry pull \
                       --conference "${{ matrix.conference }}" \
                       --tag "$tag" \
                       --yes
@@ -129,7 +129,8 @@ jobs:
             - name: Regenerate target-year data
               run: |
                   args=(
-                    pre-process
+                    pipeline
+                    run
                     --conference "${{ matrix.plugin }}"
                     --year "$TARGET_YEAR"
                     --ignore-embedding-model-mismatch
@@ -143,5 +144,5 @@ jobs:
             - name: Upload refreshed data
               if: env.UPLOAD == 'true'
               run: |
-                  uv run abstracts-explorer registry upload \
+                  uv run abstracts-explorer registry push \
                     --conference "${{ matrix.conference }}"

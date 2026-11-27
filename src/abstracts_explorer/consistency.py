@@ -214,7 +214,7 @@ def _check_embeddings(
                     severity=ERROR,
                     scope=label,
                     message=f"{len(missing)} missing embedding(s) for paper rows (e.g. {sample})",
-                    fix="abstracts-explorer create-embeddings --conference " f"{conference} --year {year}",
+                    fix="abstracts-explorer embeddings create --conference " f"{conference} --year {year}",
                 )
             )
         if stale:
@@ -225,7 +225,7 @@ def _check_embeddings(
                     severity=ERROR,
                     scope=label,
                     message=f"{len(stale)} embedding(s) are stale (content changed; e.g. {sample})",
-                    fix="abstracts-explorer create-embeddings --conference " f"{conference} --year {year}",
+                    fix="abstracts-explorer embeddings create --conference " f"{conference} --year {year}",
                 )
             )
 
@@ -240,7 +240,7 @@ def _check_embeddings(
                 category="embeddings",
                 severity=ERROR,
                 message=f"{len(orphans)} orphan embedding(s) have no matching paper row (e.g. {sample})",
-                fix="abstracts-explorer check-consistency --fix",
+                fix="abstracts-explorer data check --fix",
             )
         )
 
@@ -254,7 +254,7 @@ def _check_models(database: Any, report: ConsistencyReport, embedding_model: str
                 category="model",
                 severity=WARNING,
                 message="The embedding model metadata is missing from the paper database",
-                fix="abstracts-explorer create-embeddings",
+                fix="abstracts-explorer embeddings create",
             )
         )
         return
@@ -305,7 +305,7 @@ def _check_cache(
                     severity=INFO,
                     scope=_scope_label(*scope),
                     message="No clustering cache entry exists for this paper scope",
-                    fix="abstracts-explorer clustering pre-generate " f"--conference {conference} --year {year}",
+                    fix="abstracts-explorer clustering cache populate " f"--conference {conference} --year {year}",
                 )
             )
         completed += 1
@@ -328,7 +328,7 @@ def _check_cache(
                         f"{len(scope_entries)} clustering cache entries exist for this scope; "
                         f"keeping id={ordered[0]['id']}, duplicate ids={duplicate_ids}"
                     ),
-                    fix="abstracts-explorer check-consistency --fix",
+                    fix="abstracts-explorer data check --fix",
                 )
             )
 
@@ -340,7 +340,7 @@ def _check_cache(
                     severity=WARNING,
                     scope=label,
                     message="Clustering cache exists but the paper database has no papers for this scope",
-                    fix="abstracts-explorer check-consistency --fix",
+                    fix="abstracts-explorer data check --fix",
                 )
             )
             completed += 1
@@ -366,7 +366,7 @@ def _check_cache(
                         message=(
                             f"Cache entry {entry_id} has {len(points)} point(s) but reports " f"total_papers={total}"
                         ),
-                        fix="abstracts-explorer clustering pre-generate "
+                        fix="abstracts-explorer clustering cache populate "
                         f"--conference {scope[0]} --year {scope[1]} --force",
                     )
                 )
@@ -381,7 +381,7 @@ def _check_cache(
                             f"Cache entry {entry_id} reports total_papers={total} but the "
                             f"database has {actual_papers} paper(s)"
                         ),
-                        fix="abstracts-explorer clustering pre-generate "
+                        fix="abstracts-explorer clustering cache populate "
                         f"--conference {scope[0]} --year {scope[1]} --force",
                     )
                 )
@@ -398,7 +398,7 @@ def _check_cache(
                             f"Cache entry {entry_id} contains {len(missing_points)} point(s) that do "
                             f"not belong to this scope (e.g. {sample})"
                         ),
-                        fix="abstracts-explorer clustering pre-generate "
+                        fix="abstracts-explorer clustering cache populate "
                         f"--conference {scope[0]} --year {scope[1]} --force",
                     )
                 )
@@ -415,7 +415,7 @@ def _check_cache(
                             f"Cache entry {entry_id} was computed from collection "
                             f"'{entry_collection}' but the active collection is '{collection_name}'"
                         ),
-                        fix="abstracts-explorer clustering pre-generate "
+                        fix="abstracts-explorer clustering cache populate "
                         f"--conference {scope[0]} --year {scope[1]} --force",
                     )
                 )
@@ -431,7 +431,7 @@ def _check_cache(
                             f"Cache entry {entry_id} uses embedding model '{entry_model}' but "
                             f"'{embedding_model}' is configured"
                         ),
-                        fix="abstracts-explorer clustering pre-generate "
+                        fix="abstracts-explorer clustering cache populate "
                         f"--conference {scope[0]} --year {scope[1]} --force",
                     )
                 )

@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from abstracts_explorer.cli.embeddings import create_embeddings_command
     from abstracts_explorer.cli.evaluation import (
         eval_clear_command,
+        eval_clear_results_command,
         eval_generate_command,
         eval_results_command,
         eval_run_command,
@@ -91,6 +92,7 @@ _LAZY_IMPORTS = {
     "download_command": "abstracts_explorer.cli.download",
     "create_embeddings_command": "abstracts_explorer.cli.embeddings",
     "eval_clear_command": "abstracts_explorer.cli.evaluation",
+    "eval_clear_results_command": "abstracts_explorer.cli.evaluation",
     "eval_generate_command": "abstracts_explorer.cli.evaluation",
     "eval_results_command": "abstracts_explorer.cli.evaluation",
     "eval_run_command": "abstracts_explorer.cli.evaluation",
@@ -166,6 +168,7 @@ __all__ = [
     "delete_data_command",
     "download_command",
     "eval_clear_command",
+    "eval_clear_results_command",
     "eval_generate_command",
     "eval_results_command",
     "eval_run_command",

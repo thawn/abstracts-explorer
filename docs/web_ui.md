@@ -12,8 +12,8 @@ and year; the selected filters apply to every tab. Click the **Help** button in 
 header to open this documentation page.
 
 > **Prerequisites:** You need to have downloaded papers first
-> (`abstracts-explorer download`) and, for semantic search and AI Chat, created
-> embeddings (`abstracts-explorer create-embeddings`).
+> (`abstracts-explorer data download`) and, for semantic search and AI Chat, created
+> embeddings (`abstracts-explorer embeddings create`).
 
 ## Search Abstracts
 
@@ -132,7 +132,7 @@ results appear highlighted on the cluster plot and a **Topic Evolution** chart
 shows how that topic's paper count changed year over year.
 
 > **Requires embeddings** — this feature only works after running
-> `abstracts-explorer create-embeddings`.
+> `abstracts-explorer embeddings create`.
 
 ### Embedding Clusters
 
@@ -154,7 +154,7 @@ automatically identified topic cluster.
 - **Export Data** — download the raw clustering JSON for further analysis.
 
 > **Requires pre-generated clusters** — run
-> `abstracts-explorer clustering pre-generate` before using this view.
+> `abstracts-explorer clustering cache populate` before using this view.
 
 ## Starting the Web UI
 
@@ -163,7 +163,7 @@ automatically identified topic cluster.
 **1. Start the server:**
 
 ```bash
-abstracts-explorer web-ui
+abstracts-explorer serve web
 ```
 
 **2. Open your browser** at <http://127.0.0.1:5001>.
@@ -177,7 +177,7 @@ abstracts-explorer web-ui
 ### Command-line options
 
 ```bash
-abstracts-explorer web-ui [OPTIONS]
+abstracts-explorer serve web [OPTIONS]
 ```
 
 | Option | Description |

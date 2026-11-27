@@ -13,7 +13,7 @@ Complete API documentation for Abstracts Explorer.
 ## Plugin & Registry
 
 - [Plugin Module](plugin.md) — plugin framework for conference downloaders
-- [Registry Module](registry.md) — OCI registry upload/download of data artifacts
+- [Registry Module](registry.md) — OCI registry push/pull of data artifacts
 
 ## MCP Integration
 

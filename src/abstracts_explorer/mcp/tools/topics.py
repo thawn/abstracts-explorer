@@ -236,7 +236,7 @@ def _get_conference_topics_for_single_conference(
                 f"No pre-computed clustering data available for conference "
                 f"'{conference}'"
                 + (f" years={years}" if years else "")
-                + ". Run 'abstracts-explorer clustering pre-generate' first."
+                + ". Run 'abstracts-explorer clustering cache populate' first."
             )
 
         stats = cached.get("statistics") or {}

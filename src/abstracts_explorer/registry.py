@@ -552,7 +552,7 @@ class RegistryClient:
         if embedding_count == 0:
             raise RegistryError(
                 f"No embeddings found for {conference}/{year}."
-                " Create embeddings first with 'abstracts-explorer create-embeddings'."
+                " Create embeddings first with 'abstracts-explorer embeddings create'."
             )
 
         embeddings_path = temp_dir / f"embeddings-{year}.json"
@@ -569,7 +569,7 @@ class RegistryClient:
         if clustering_cache_count == 0:
             raise RegistryError(
                 f"No clustering cache found for {conference}/{year}."
-                " Generate the clustering cache first with 'abstracts-explorer clustering pre-generate'."
+                " Generate the clustering cache first with 'abstracts-explorer clustering cache populate'."
             )
 
         clustering_cache_path = temp_dir / f"clustering-{year}.json"
@@ -1011,7 +1011,7 @@ class RegistryClient:
         if not embedding_model:
             raise RegistryError(
                 "No embedding model found in local database. "
-                "Create embeddings first with 'abstracts-explorer create-embeddings'."
+                "Create embeddings first with 'abstracts-explorer embeddings create'."
             )
 
         # Determine which years to upload

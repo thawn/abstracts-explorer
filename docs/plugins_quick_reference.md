@@ -175,17 +175,17 @@ See full schema documentation for ~35 additional fields including URLs, timestam
 ### List Plugins
 
 ```bash
-abstracts-explorer download --list-plugins
+abstracts-explorer data download --list-plugins
 ```
 
 ### Download with Plugin
 
 ```bash
 # Basic
-abstracts-explorer download --conference myplugin --year 2025
+abstracts-explorer data download --conference myplugin --year 2025
 
 # With options
-abstracts-explorer download \
+abstracts-explorer data download \
     --conference ml4ps \
     --year 2025 \
     \

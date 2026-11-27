@@ -52,12 +52,14 @@ def eval_generate_command(args: argparse.Namespace) -> int:
     """
     config = get_config()
 
+    n_followups = args.n_followups if args.n_followups is not None else 1
+
     _print_header(
         "Generate Evaluation Q/A Pairs",
         f"Database: {config.masked_database_url}",
         f"Model: {args.model}",
         f"Pairs/tool: {args.n_pairs}",
-        f"Follow-ups: {'disabled' if args.no_followups else args.n_followups}",
+        f"Follow-ups: {'disabled' if args.no_followups else n_followups}",
         f"Tools: {', '.join(args.tools)}" if args.tools else "Tools: all",
     )
 
@@ -65,7 +67,7 @@ def eval_generate_command(args: argparse.Namespace) -> int:
         # Initialize embeddings manager for its openai_client
         with closing(
             EmbeddingsManager(
-                backend_url=args.backend_url,
+                backend_url=args.llm_backend_url,
             )
         ) as em:
             with DatabaseManager() as db:
@@ -84,7 +86,7 @@ def eval_generate_command(args: argparse.Namespace) -> int:
                     n_pairs_per_tool=args.n_pairs,
                     tools=args.tools if args.tools else None,
                     generate_followups=not args.no_followups,
-                    n_followups=args.n_followups,
+                    n_followups=n_followups,
                 )
 
                 count = evaluator.store_qa_pairs(pairs)
@@ -281,7 +283,7 @@ def eval_run_command(args: argparse.Namespace) -> int:
         # Initialize embeddings
         with closing(
             EmbeddingsManager(
-                backend_url=args.backend_url,
+                backend_url=args.llm_backend_url,
                 model_name=args.embedding_model,
                 collection_name=args.collection,
             )
@@ -332,8 +334,6 @@ def eval_results_command(args: argparse.Namespace) -> int:
         - run_id: Specific run to show (or latest)
         - sample: Random sample size for browsing
         - detail: Show detailed per-pair results
-        - clear: Delete results for the selected run
-        - yes: Skip confirmation prompt when clearing
 
     Returns
     -------
@@ -360,19 +360,6 @@ def eval_results_command(args: argparse.Namespace) -> int:
                 print(f"❌ Run '{target_run}' not found.", file=sys.stderr)
                 print(f"Available runs: {', '.join(run_ids)}")
                 return 1
-
-            # Handle --clear option
-            if getattr(args, "clear", False):
-                n = len(db.get_eval_results(run_id=target_run))
-                if not getattr(args, "yes", False):
-                    if not _confirm(
-                        f"⚠️  This will permanently delete {n} result(s) for run '{target_run}'. Are you sure?"
-                    ):
-                        print("Aborted.")
-                        return 0
-                deleted = db.delete_eval_results(run_id=target_run)
-                print(f"✅ Deleted {deleted} result(s) for run '{target_run}'.")
-                return 0
 
             # Show summary
             summary = db.get_eval_run_summary(target_run)
@@ -410,6 +397,56 @@ def eval_results_command(args: argparse.Namespace) -> int:
                     date_str = format_timestamp(run_date, fallback="unknown date")
                     marker = " ◀ current" if rid == target_run else ""
                     print(f"   {date_str}  {rid}: {s['total']} pairs, avg score: {score_str}{marker}")
+
+        return 0
+
+    except Exception as e:
+        return _unexpected_error(e, label="Error")
+
+
+def eval_clear_results_command(args: argparse.Namespace) -> int:
+    """
+    Delete stored evaluation results for a run.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+        - run_id: Specific run to delete (or latest)
+        - yes: Skip confirmation prompt
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure)
+    """
+    try:
+        with DatabaseManager() as db:
+            db.create_tables()
+
+            run_ids = db.get_eval_run_ids()
+            if not run_ids:
+                print("No evaluation results found — nothing to clear.")
+                return 0
+
+            if args.run_id:
+                target_run = args.run_id
+                if target_run not in run_ids:
+                    print(f"❌ Run '{target_run}' not found.", file=sys.stderr)
+                    print(f"Available runs: {', '.join(run_ids)}")
+                    return 1
+            else:
+                target_run = run_ids[-1]
+                print(f"Targeting latest run: {target_run}")
+
+            n = len(db.get_eval_results(run_id=target_run))
+            print(f"⚠️  This will permanently delete {n} result(s) for run '{target_run}'.")
+            if not args.yes and not _confirm("Are you sure?"):
+                print("Aborted.")
+                return 0
+
+            deleted = db.delete_eval_results(run_id=target_run)
+            print(f"✅ Deleted {deleted} result(s) for run '{target_run}'.")
 
         return 0
 

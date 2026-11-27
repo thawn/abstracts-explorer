@@ -2545,7 +2545,7 @@ class TestCLICommands:
             [
                 "abstracts-explorer",
                 "registry",
-                "upload",
+                "push",
                 "-r",
                 "ghcr.io/o/r",
                 "--token",
@@ -2571,7 +2571,7 @@ class TestCLICommands:
             [
                 "abstracts-explorer",
                 "registry",
-                "download",
+                "pull",
                 "-r",
                 "ghcr.io/o/r",
                 "--token",

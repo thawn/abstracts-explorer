@@ -193,9 +193,10 @@ them from `static/modules/`.
   `docs/plugins.md`.
 - **Docs**: edit `docs/*.md` and docstrings, then `cd docs && uv run make html`.
 
-CLI groups: `download`, `create-embeddings`, `pre-process`, `search`, `chat`,
-`web-ui`, `clustering {run,clear-cache,pre-generate}`, `mcp-server`,
-`eval`, `registry`, `feedback`, `delete-data`. See `docs/cli_reference.md`.
+CLI groups: `data {download,delete,check}`, `embeddings {create}`,
+`clustering {run,cache {populate,clear}}`, `papers {search,chat}`,
+`pipeline {run}`, `registry {push,pull,list,delete}`, `eval`, `feedback`,
+`serve {web,mcp}`. See `docs/cli_reference.md`.
 
 ## Git Workflow
 
@@ -218,8 +219,8 @@ Never commit `.env`, secrets, `data/`, `*.db`, `chroma_db/`, `_build/`,
 - **Docs**: `uv sync --extra docs`, fix Markdown errors, `make clean`.
 - **Database**: verify `PAPER_DB` path/URL and write permissions; tables are
   auto-created.
-- **Clustering**: pre-generate cache with `abstracts-explorer clustering
-  pre-generate`; reduce `n_components` or use PCA if memory-bound.
+- **Clustering**: populate the cache with `abstracts-explorer clustering
+  cache populate`; reduce `n_components` or use PCA if memory-bound.
 
 ## Resources
 

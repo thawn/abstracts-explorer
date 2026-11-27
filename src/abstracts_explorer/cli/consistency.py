@@ -1,5 +1,5 @@
 """
-``check-consistency`` command.
+``data check`` command.
 
 Compares the paper database, ChromaDB embeddings, and clustering cache and
 optionally removes duplicate or stale clustering cache rows.

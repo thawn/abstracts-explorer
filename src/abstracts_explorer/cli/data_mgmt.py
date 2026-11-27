@@ -1,5 +1,5 @@
 """
-``delete-data`` command
+``data delete`` command
 
 """
 
@@ -51,10 +51,10 @@ def delete_data_command(args: argparse.Namespace) -> int:
     year = getattr(args, "year", None)
 
     if not conference:
-        print("❌ --conference is required for the delete-data command.", file=sys.stderr)
+        print("❌ --conference is required for the data delete command.", file=sys.stderr)
         return 1
     if year is None:
-        print("❌ --year is required for the delete-data command.", file=sys.stderr)
+        print("❌ --year is required for the data delete command.", file=sys.stderr)
         return 1
 
     assert conference is not None

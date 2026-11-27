@@ -148,7 +148,7 @@ def main() -> int:
                     failed += 1
                     print(
                         f"[{entry['id']}] {label}: FAILED: missing hierarchy tree; "
-                        "regenerate with 'abstracts-explorer clustering pre-generate --force'",
+                        "regenerate with 'abstracts-explorer clustering cache populate --force'",
                         file=sys.stderr,
                     )
                     continue

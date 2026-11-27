@@ -306,7 +306,7 @@ class TestWebInterface:
         assert data["default_year"] is None
         assert data["default_conference_error"] is not None
         assert data["default_conference_error"]["available_conferences"] == ["ICLR"]
-        assert "registry download" in data["default_conference_error"]["guidance"]
+        assert "registry pull" in data["default_conference_error"]["guidance"]
 
     def test_available_filters_no_default_configured(self, client):
         """Test that no default is selected and no error is returned when nothing is configured."""
@@ -1855,8 +1855,8 @@ class TestWebUIRunServer:
         # Verify helpful error message was printed
         captured = capsys.readouterr()
         assert "Database not found" in captured.err
-        assert "abstracts-explorer download" in captured.err
-        assert "create-embeddings" in captured.err
+        assert "abstracts-explorer data download" in captured.err
+        assert "embeddings create" in captured.err
 
     def test_run_server_registers_sigterm_handler(self):
         """Test that run_server registers a SIGTERM handler for graceful shutdown."""
@@ -2926,7 +2926,7 @@ class TestClusteringEndpoint:
                     assert response.status_code == 404
                     data = response.get_json()
                     assert "error" in data
-                    assert "pre-computed" in data["error"].lower() or "pre-generate" in data["error"].lower()
+                    assert "pre-computed" in data["error"].lower() or "cache populate" in data["error"].lower()
 
     def test_compute_clusters_includes_conference_year_in_cache_params(self):
         """Test that compute_clusters passes conference/year filters to cache lookup."""

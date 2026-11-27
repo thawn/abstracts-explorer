@@ -10,16 +10,16 @@ Download papers for a specific conference and year:
 
 ```bash
 # Download from the default conference (NeurIPS)
-uv run abstracts-explorer download --year 2025
+uv run abstracts-explorer data download --year 2025
 
 # Download from a specific conference using a plugin
-uv run abstracts-explorer download --conference iclr --year 2025
+uv run abstracts-explorer data download --conference iclr --year 2025
 ```
 
 Alternatively, download pre-built data from a registry (no API access or LLM backend required):
 
 ```bash
-uv run abstracts-explorer registry download \
+uv run abstracts-explorer registry pull \
   -r ghcr.io/thawn/abstracts-data \
   --conference neurips --year 2025
 ```
@@ -35,7 +35,7 @@ Options:
 Generate vector embeddings for semantic search:
 
 ```bash
-uv run abstracts-explorer create-embeddings
+uv run abstracts-explorer embeddings create
 ```
 
 Options:
@@ -52,13 +52,13 @@ Search papers by keyword or semantic similarity:
 
 ```bash
 # Simple search
-uv run abstracts-explorer search "transformer architecture"
+uv run abstracts-explorer papers search "transformer architecture"
 
 # Limit results
-uv run abstracts-explorer search "reinforcement learning" --limit 10
+uv run abstracts-explorer papers search "reinforcement learning" --limit 10
 
 # Filter by year
-uv run abstracts-explorer search "neural networks" --year 2025
+uv run abstracts-explorer papers search "neural networks" --year 2025
 ```
 
 ### 4. Chat with Papers (RAG)
@@ -66,7 +66,7 @@ uv run abstracts-explorer search "neural networks" --year 2025
 Interactive chat interface powered by RAG:
 
 ```bash
-uv run abstracts-explorer chat
+uv run abstracts-explorer papers chat
 ```
 
 In the chat interface:
@@ -201,8 +201,8 @@ Process multiple years:
 ```bash
 #!/bin/bash
 for year in 2023 2024 2025; do
-    uv run abstracts-explorer download --year $year
-    uv run abstracts-explorer create-embeddings
+    uv run abstracts-explorer data download --year $year
+    uv run abstracts-explorer embeddings create
 done
 ```
 

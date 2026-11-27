@@ -2301,7 +2301,7 @@ class TestConfirmDefaultConferenceYearExists:
         assert result["year"] is None
         assert "ICML" in result["error"]["message"]
         assert result["error"]["available_conferences"] == ["ICLR"]
-        assert "registry download" in result["error"]["guidance"]
+        assert "registry pull" in result["error"]["guidance"]
 
     def test_no_default_configured_returns_no_error(self):
         """An empty configured conference is not validated."""

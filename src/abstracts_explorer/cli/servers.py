@@ -1,5 +1,5 @@
 """
-``web-ui`` and ``mcp-server`` commands
+``serve web`` and ``serve mcp`` commands
 
 """
 
