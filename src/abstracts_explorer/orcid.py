@@ -11,6 +11,7 @@ import json
 import logging
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -29,6 +30,10 @@ ORCID_ID_PATTERN = re.compile(r"^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$")
 ORCID_USER_AGENT = "abstracts-explorer ORCID client"
 
 _ORCID_CACHE = MetadataCache()
+
+_ORCID_TERM_TIMEOUT = 30.0
+_ORCID_LLM_CLIENT: Optional[Any] = None
+_ORCID_LLM_LOCK = threading.Lock()
 
 _LLM_SYSTEM_PROMPT = """You are an expert academic research assistant.
 Suggest concise paper search terms for a researcher based on their public ORCID record.
@@ -64,6 +69,38 @@ class _OrcidLlmProvider(ModelMixin):
         self.llm_rate_limit_delay = config.llm_rate_limit_delay
         self.llm_adaptive_rate_limit = config.llm_adaptive_rate_limit
         self.llm_adaptive_min_rpm = config.llm_adaptive_min_rpm
+
+
+def _get_orcid_llm_client() -> Any:
+    """
+    Return the shared, warm client used for ORCID term generation.
+
+    Reusing one client keeps the TLS connection pool alive instead of opening a
+    cold connection per call, and bounds a best-effort helper to a single
+    attempt with a short timeout so a slow backend cannot dominate the overall
+    chat request.
+    """
+    global _ORCID_LLM_CLIENT
+    with _ORCID_LLM_LOCK:
+        if _ORCID_LLM_CLIENT is None:
+            config = get_config()
+            provider = _OrcidLlmProvider()
+            timeout = min(float(config.llm_request_timeout), _ORCID_TERM_TIMEOUT)
+            _ORCID_LLM_CLIENT = provider.openai_client.with_options(max_retries=0, timeout=timeout)
+        return _ORCID_LLM_CLIENT
+
+
+def reset_orcid_llm_client() -> None:
+    """Close and discard the shared ORCID term-generation client (used by tests)."""
+    global _ORCID_LLM_CLIENT
+    with _ORCID_LLM_LOCK:
+        client = _ORCID_LLM_CLIENT
+        _ORCID_LLM_CLIENT = None
+    if client is not None:
+        try:
+            client.close()
+        except Exception as exc:
+            logger.debug("Failed to close ORCID LLM client: %s", exc)
 
 
 def normalize_orcid_id(value: str) -> str:
@@ -235,9 +272,13 @@ def fetch_orcid_record(orcid: str, timeout: float = 15.0) -> Dict[str, Any]:
     if cached is not None:
         return cached
 
-    works_payload = _get_json(f"{ORCID_API_BASE}/{orcid_id}/works", timeout=timeout)
-    keywords_payload = _get_json(f"{ORCID_API_BASE}/{orcid_id}/keywords", timeout=timeout)
-    person_payload = _get_json(f"{ORCID_API_BASE}/{orcid_id}/person", timeout=timeout)
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        works_future = executor.submit(_get_json, f"{ORCID_API_BASE}/{orcid_id}/works", timeout=timeout)
+        keywords_future = executor.submit(_get_json, f"{ORCID_API_BASE}/{orcid_id}/keywords", timeout=timeout)
+        person_future = executor.submit(_get_json, f"{ORCID_API_BASE}/{orcid_id}/person", timeout=timeout)
+        works_payload = works_future.result()
+        keywords_payload = keywords_future.result()
+        person_payload = person_future.result()
 
     record = {
         "orcid": orcid_id,
@@ -374,29 +415,20 @@ def _generate_llm_terms(
 ) -> List[Dict[str, str]]:
     """Ask the configured chat model for search terms."""
     config = get_config()
-    owns_client = client is None
 
     if client is None:
-        provider = _OrcidLlmProvider()
-        client = provider.openai_client
+        client = _get_orcid_llm_client()
 
-    try:
-        raw = chat_completion_text(
-            client=client,
-            model=config.chat_model,
-            system_prompt=_LLM_SYSTEM_PROMPT.replace("{max_terms}", str(max_terms)),
-            user_prompt=_build_user_prompt(record, works),
-            temperature=0.3,
-            max_tokens=800,
-            timeout=config.llm_request_timeout,
-            reasoning_effort="low",
-        )
-    finally:
-        if owns_client and client is not None:
-            try:
-                client.close()
-            except Exception as exc:
-                logger.debug("Failed to close ORCID LLM client: %s", exc)
+    raw = chat_completion_text(
+        client=client,
+        model=config.chat_model,
+        system_prompt=_LLM_SYSTEM_PROMPT.replace("{max_terms}", str(max_terms)),
+        user_prompt=_build_user_prompt(record, works),
+        temperature=0.3,
+        max_tokens=800,
+        timeout=min(float(config.llm_request_timeout), _ORCID_TERM_TIMEOUT),
+        reasoning_effort="low",
+    )
 
     return _parse_llm_terms(raw, max_terms)
 
@@ -474,14 +506,25 @@ def suggest_search_terms_from_orcid(
         result["warning"] = "The public ORCID record has no works or keywords to derive search terms from."
         return result
 
+    config = get_config()
+    orcid_id = result["orcid"]
+    terms_cache_key = f"orcid-terms:{orcid_id}:{max_terms}:{min_year}:{max_works}"
+    cached_terms = _ORCID_CACHE.get(terms_cache_key, config.metadata_cache_ttl)
+    if cached_terms is not None:
+        result["suggested_terms"] = cached_terms
+        result["source"] = "llm"
+        return result
+
     try:
-        result["suggested_terms"] = _generate_llm_terms(
+        terms = _generate_llm_terms(
             record,
             works,
             max_terms,
             client=client,
         )
+        result["suggested_terms"] = terms
         result["source"] = "llm"
+        _ORCID_CACHE.set(terms_cache_key, terms, config.metadata_cache_ttl)
     except Exception as exc:
         logger.warning("LLM ORCID term generation failed: %s", exc)
         result["suggested_terms"] = _fallback_terms(record, works, max_terms)

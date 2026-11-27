@@ -1153,7 +1153,9 @@ class TestWebUIE2E:
                 error_text = response.json().get("error", "")
             except Exception:
                 error_text = response.text()
-            pytest.skip(f"Chat backend unavailable (HTTP {response.status}): {error_text}")
+            if response.status in (429, 503):
+                pytest.skip(f"Chat backend transiently unavailable (HTTP {response.status}): {error_text}")
+            pytest.fail(f"Chat request failed (HTTP {response.status}): {error_text}")
 
         payload = response.json().get("response")
         assert isinstance(payload, dict), "Chat response should contain structured RAG output"

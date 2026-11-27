@@ -28,9 +28,10 @@ Notes
   ``staging_page`` fixture.
 * Chat test correctness is evaluated by calling the LLM backend configured
   in ``.env.tests`` (``LLM_BACKEND_URL`` / ``CHAT_MODEL``).  Set
-  ``LLM_BACKEND_AUTH_TOKEN`` to authenticate.  If the backend is unavailable,
-  the judgment step is skipped and the test still passes when a non-empty
-  response is received.
+  ``LLM_BACKEND_AUTH_TOKEN`` to authenticate.  When the backend is confirmed
+  reachable, a chat timeout, HTTP 5xx, or empty response fails the test;
+  only HTTP 429/503 (transient backend unavailability) is skipped.  The
+  judgment step skips when the judge backend cannot be reached.
 * Chat histories are always printed to stdout so they are visible with ``-s``
   and are included in the captured output shown on test failure.
 """
@@ -868,14 +869,15 @@ class TestChatInterface:
         reset_buttons = staging_page.locator("button[onclick*='resetChat']")
         assert reset_buttons.count() > 0, "Reset button should be present"
 
-    def test_chat_send_message(self, staging_url, staging_page):
+    def test_chat_send_message(self, staging_url, staging_page, llm_backend_available):
         """
         Send a chat message.
 
-        Typing a question and clicking send returns a complete response (or a
-        graceful error if the LLM backend is unavailable).  The test waits
-        until the loading spinner disappears from the last assistant message so
-        that it does not mistake the "Thinking..." placeholder for the answer.
+        Typing a question and clicking send returns a complete response.  The
+        test waits until the loading spinner disappears from the last assistant
+        message so that it does not mistake the "Thinking..." placeholder for
+        the answer.  The test skips only when the LLM backend is unreachable;
+        otherwise a timeout or empty response is a failure.
 
         Parameters
         ----------
@@ -883,7 +885,11 @@ class TestChatInterface:
             Base URL of the staging deployment.
         staging_page : Page
             Playwright page instance.
+        llm_backend_available : bool
+            Whether the configured LLM backend is reachable.
         """
+        if not llm_backend_available:
+            pytest.skip("LLM backend unavailable")
         query = "What papers are about machine learning?"
         staging_page.goto(staging_url)
 
@@ -906,24 +912,31 @@ class TestChatInterface:
                     }
                     return msgs[msgs.length - 1].querySelectorAll(".spinner").length === 0;
                 }""",
-                timeout=120000,
+                timeout=180000,
             )
-            history = _extract_chat_history(staging_page)
-            _print_chat_history(history, query)
-            assistant_msgs = staging_page.locator(".chat-message[data-role='assistant']")
-            assert assistant_msgs.count() >= 1, "Chat should display at least one assistant message"
-            assert assistant_msgs.last.inner_text().strip() != "", "Assistant response should not be empty"
         except PlaywrightTimeoutError:
             history = _extract_chat_history(staging_page)
             _print_chat_history(history, query)
-            # LLM backend may not be available – verify input was cleared
-            val = staging_page.locator("#chat-input").input_value()
-            assert val == "", "Chat input should be cleared after sending"
+            pytest.fail(f"Chat response did not complete within 180s for query: {query}")
+
+        history = _extract_chat_history(staging_page)
+        _print_chat_history(history, query)
+        assistant_msgs = staging_page.locator(".chat-message[data-role='assistant']")
+        assert assistant_msgs.count() >= 1, "Chat should display at least one assistant message"
+        assert assistant_msgs.last.inner_text().strip() != "", "Assistant response should not be empty"
 
 
 # ---------------------------------------------------------------------------
 # 4a. MCP tool smoke tests
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def llm_backend_available():
+    """Return whether the configured LLM backend is reachable for chat checks."""
+    from tests.helpers import check_lm_studio_available
+
+    return check_lm_studio_available()
 
 
 @pytest.mark.staging
@@ -945,7 +958,12 @@ class TestMCPToolSmokeTests:
     """
 
     # Default timeout (seconds) to wait for the LLM response
-    _TIMEOUT = 120
+    _TIMEOUT = 180
+
+    @pytest.fixture(autouse=True)
+    def _require_llm_backend(self, llm_backend_available):
+        if not llm_backend_available:
+            pytest.skip("LLM backend unavailable; skipping MCP smoke tests")
 
     def _send_chat_query(self, staging_url, staging_page, query):
         """
@@ -992,7 +1010,34 @@ class TestMCPToolSmokeTests:
 
         chat_input = staging_page.locator("#chat-input")
         chat_input.fill(query)
-        chat_input.press("Enter")
+
+        status: int | None = None
+        error_text = ""
+        try:
+            with staging_page.expect_response(
+                lambda response: response.request.method == "POST" and response.url.endswith("/api/chat"),
+                timeout=self._TIMEOUT * 1000,
+            ) as response_info:
+                chat_input.press("Enter")
+            chat_response = response_info.value
+            status = chat_response.status
+            if status != 200:
+                try:
+                    error_text = chat_response.json().get("error", "")
+                except Exception:
+                    error_text = ""
+        except PlaywrightTimeoutError:
+            status = None
+
+        history = _extract_chat_history(staging_page)
+        _print_chat_history(history, query)
+
+        if status in (429, 503):
+            pytest.skip(f"Chat backend transiently unavailable (HTTP {status}): {error_text}")
+        if status is None:
+            pytest.fail(f"No /api/chat response within {self._TIMEOUT}s for query: {query}")
+        if status != 200:
+            pytest.fail(f"Chat request failed (HTTP {status}): {error_text}")
 
         try:
             # Wait until the last assistant message has no spinner (response complete)
@@ -1006,13 +1051,13 @@ class TestMCPToolSmokeTests:
                 }""",
                 timeout=self._TIMEOUT * 1000,
             )
-            assistant_msgs = staging_page.locator(".chat-message[data-role='assistant']")
-            response_text = assistant_msgs.last.inner_text() if assistant_msgs.count() else ""
         except PlaywrightTimeoutError:
-            response_text = ""
+            pytest.fail(f"Chat response did not render within {self._TIMEOUT}s for query: {query}")
 
-        history = _extract_chat_history(staging_page)
-        _print_chat_history(history, query)
+        assistant_msgs = staging_page.locator(".chat-message[data-role='assistant']")
+        response_text = assistant_msgs.last.inner_text() if assistant_msgs.count() else ""
+        if not response_text.strip():
+            pytest.fail(f"Chat returned an empty response for query: {query}")
         return response_text, history
 
     # ------------------------------------------------------------------
@@ -1037,8 +1082,6 @@ class TestMCPToolSmokeTests:
         """
         query = "What are the main topics at NeurIPS 2025?"
         response, _ = self._send_chat_query(staging_url, staging_page, query)
-        if not response:
-            pytest.skip("LLM backend unavailable – no response received")
         _assert_llm_judgment(
             query,
             response,
@@ -1065,8 +1108,6 @@ class TestMCPToolSmokeTests:
         """
         query = "How has research on transformers evolved at NeurIPS over the years?"
         response, _ = self._send_chat_query(staging_url, staging_page, query)
-        if not response:
-            pytest.skip("LLM backend unavailable – no response received")
         chart_found, chart_description = _check_chart_rendered(staging_page)
         assert chart_found, f"Expected a trend chart to be rendered in chat. {chart_description}"
         _assert_llm_judgment(
@@ -1097,8 +1138,6 @@ class TestMCPToolSmokeTests:
         """
         query = "Find papers about reinforcement learning at NeurIPS 2025."
         response, _ = self._send_chat_query(staging_url, staging_page, query)
-        if not response:
-            pytest.skip("LLM backend unavailable – no response received")
         _assert_llm_judgment(
             query,
             response,
@@ -1123,8 +1162,6 @@ class TestMCPToolSmokeTests:
         """
         query = "Who are the authors of the paper titled 'Large Language Diffusion Models'?"
         response, _ = self._send_chat_query(staging_url, staging_page, query)
-        if not response:
-            pytest.skip("LLM backend unavailable – no response received")
         _assert_llm_judgment(
             query,
             response,
@@ -1150,8 +1187,6 @@ class TestMCPToolSmokeTests:
         """
         query = "How relevant is uncertainty quantification at NeurIPS 2025?"
         response, _ = self._send_chat_query(staging_url, staging_page, query)
-        if not response:
-            pytest.skip("LLM backend unavailable – no response received")
         _assert_llm_judgment(
             query,
             response,
@@ -1176,8 +1211,6 @@ class TestMCPToolSmokeTests:
         """
         query = "Show me a visual overview of how topics are clustered at NeurIPS."
         response, _ = self._send_chat_query(staging_url, staging_page, query)
-        if not response:
-            pytest.skip("LLM backend unavailable – no response received")
         chart_found, formatted_answer = _check_chart_rendered(staging_page)
         assert chart_found, f"Expected a cluster scatter plot to be rendered in chat. {formatted_answer}"
         _assert_llm_judgment(
@@ -1207,8 +1240,6 @@ class TestMCPToolSmokeTests:
         """
         query = "Summarize the papers I marked as interesting."
         response, _ = self._send_chat_query(staging_url, staging_page, query)
-        if not response:
-            pytest.skip("LLM backend unavailable – no response received")
         _assert_llm_judgment(
             query,
             response,
@@ -1239,8 +1270,6 @@ class TestMCPToolSmokeTests:
         """
         query = "Based on my interesting papers, suggest other papers that may interest me."
         response, _ = self._send_chat_query(staging_url, staging_page, query)
-        if not response:
-            pytest.skip("LLM backend unavailable – no response received")
         _assert_llm_judgment(
             query,
             response,
@@ -1271,8 +1300,6 @@ class TestMCPToolSmokeTests:
         """
         query = "Who should I meet based on my interesting papers?"
         response, _ = self._send_chat_query(staging_url, staging_page, query)
-        if not response:
-            pytest.skip("LLM backend unavailable – no response received")
         _assert_llm_judgment(
             query,
             response,
@@ -1308,8 +1335,6 @@ class TestMCPToolSmokeTests:
 
         query = f"Find papers that are interesting to me based on my ORCID record {_ORCID_ID}."
         response, _ = self._send_chat_query(staging_url, staging_page, query)
-        if not response:
-            pytest.skip("LLM backend unavailable – no response received")
         _assert_llm_judgment(
             query,
             response,

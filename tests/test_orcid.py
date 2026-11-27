@@ -380,6 +380,73 @@ class TestSuggestSearchTerms:
         assert result["source"] == "none"
         mock_chat.assert_not_called()
 
+    @patch("abstracts_explorer.orcid.chat_completion_text")
+    @patch("abstracts_explorer.orcid.fetch_orcid_record")
+    def test_caches_generated_terms(self, mock_fetch, mock_chat):
+        mock_fetch.return_value = {
+            "orcid": "0000-0002-2315-9247",
+            "name": "Jane Doe",
+            "keywords": ["deep learning"],
+            "works": [
+                {"title": "Deep Learning for Vision", "year": 2024, "type": "paper", "doi": None, "journal": None}
+            ],
+        }
+        mock_chat.return_value = json.dumps({"search_terms": ["deep learning", "computer vision"]})
+
+        first = suggest_search_terms_from_orcid("0000-0002-2315-9247", client=Mock())
+        second = suggest_search_terms_from_orcid("0000-0002-2315-9247", client=Mock())
+
+        assert mock_chat.call_count == 1
+        assert first["suggested_terms"] == second["suggested_terms"]
+        assert second["source"] == "llm"
+
+    @patch("abstracts_explorer.orcid.chat_completion_text")
+    @patch("abstracts_explorer.orcid.fetch_orcid_record")
+    def test_bounds_llm_timeout(self, mock_fetch, mock_chat):
+        mock_fetch.return_value = {
+            "orcid": "0000-0002-2315-9247",
+            "name": "Jane Doe",
+            "keywords": [],
+            "works": [
+                {"title": "Deep Learning for Vision", "year": 2024, "type": "paper", "doi": None, "journal": None}
+            ],
+        }
+        mock_chat.return_value = json.dumps({"search_terms": ["deep learning"]})
+
+        suggest_search_terms_from_orcid("0000-0002-2315-9247", client=Mock())
+
+        assert mock_chat.call_args.kwargs["timeout"] <= orcid._ORCID_TERM_TIMEOUT
+
+    @patch("abstracts_explorer.orcid.chat_completion_text")
+    @patch("abstracts_explorer.orcid.fetch_orcid_record")
+    def test_falls_back_on_llm_timeout(self, mock_fetch, mock_chat):
+        mock_fetch.return_value = {
+            "orcid": "0000-0002-2315-9247",
+            "name": "Jane Doe",
+            "keywords": ["deep learning"],
+            "works": [
+                {"title": "Deep Learning for Vision", "year": 2024, "type": "paper", "doi": None, "journal": None}
+            ],
+        }
+        mock_chat.side_effect = TimeoutError("timed out")
+
+        result = suggest_search_terms_from_orcid("0000-0002-2315-9247", client=Mock())
+
+        assert result["source"] == "fallback"
+        assert result["suggested_terms"]
+
+
+def test_shared_orcid_llm_client_is_warm_and_bounded():
+    """The ORCID term client is reused across calls with a single attempt."""
+    orcid.reset_orcid_llm_client()
+    try:
+        client = orcid._get_orcid_llm_client()
+        assert orcid._get_orcid_llm_client() is client
+        assert client.max_retries == 0
+    finally:
+        orcid.reset_orcid_llm_client()
+    assert orcid._ORCID_LLM_CLIENT is None
+
 
 def test_provider_client_uses_central_retry_and_cooldown_transport():
     """The ORCID LLM client uses the same retry budget and transports as other clients."""
