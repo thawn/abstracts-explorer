@@ -18,6 +18,7 @@ from abstracts_explorer.plugins import (
     get_plugin,
     list_plugin_names,
 )
+from tests.helpers import FakeTime
 
 pytestmark = pytest.mark.usefixtures("mock_current_year_probe")
 
@@ -284,12 +285,15 @@ class TestHAICONHTMLParsing:
             ids = haicon_plugin._fetch_session_ids("https://www.conftool.pro/haicon26", 30, True)
         assert ids == sorted(ids)
 
-    def test_fetch_session_ids_request_error(self, haicon_plugin):
+    def test_fetch_session_ids_request_error(self, haicon_plugin, monkeypatch):
         """Test that a request error raises RuntimeError."""
+        fake = FakeTime()
+        monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", fake.sleep)
         with patch.object(haicon_plugin._session, "get") as mock_get:
             mock_get.side_effect = requests.exceptions.ConnectionError("Connection failed")
             with pytest.raises(RuntimeError, match="Failed to fetch HAICON sessions"):
                 haicon_plugin._fetch_session_ids("https://www.conftool.pro/haicon26", 30, True)
+        assert fake.sleeps == [1.0, 2.0]
 
     def test_extract_session_name(self, haicon_plugin):
         """Test extraction of session name from page HTML."""
@@ -459,13 +463,16 @@ class TestHAICONHTMLParsing:
 
         assert papers == []
 
-    def test_fetch_session_papers_request_error(self, haicon_plugin):
+    def test_fetch_session_papers_request_error(self, haicon_plugin, monkeypatch):
         """Test that a request error logs a warning and returns empty list."""
+        fake = FakeTime()
+        monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", fake.sleep)
         with patch.object(haicon_plugin._session, "get") as mock_get:
             mock_get.side_effect = requests.exceptions.ConnectionError("Connection failed")
             papers = haicon_plugin._fetch_session_papers("https://www.conftool.pro/haicon26", 99, 2026, 30, True)
 
         assert papers == []
+        assert fake.sleeps == [1.0, 2.0]
 
     def test_multiline_abstract_joined(self, haicon_plugin):
         """Test that multi-paragraph abstracts are joined with newlines."""
@@ -648,12 +655,15 @@ class TestHAICONDownload:
             titles = [p.title for p in papers]
             assert "Old Cached Paper" not in titles
 
-    def test_download_request_error(self, haicon_plugin):
+    def test_download_request_error(self, haicon_plugin, monkeypatch):
         """Test that a request error on the overview page raises RuntimeError."""
+        fake = FakeTime()
+        monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", fake.sleep)
         with patch.object(haicon_plugin._session, "get") as mock_get:
             mock_get.side_effect = requests.exceptions.ConnectionError("Network error")
             with pytest.raises(RuntimeError, match="Failed to fetch HAICON sessions"):
                 haicon_plugin.download(year=2026, request_delay=0)
+        assert fake.sleeps == [1.0, 2.0]
 
     def test_download_timeout_kwarg(self, haicon_plugin):
         """Test that a custom timeout kwarg is passed to requests."""
