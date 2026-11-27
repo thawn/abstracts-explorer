@@ -3488,6 +3488,146 @@ class TestDeleteOldVersions:
         mock_del.assert_called_once_with("thawn", "abstracts-data", 2)
 
 
+def _safe_data_manifest():
+    """Return a minimal valid abstracts-explorer ORAS manifest."""
+    return {
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "annotations": {
+            "com.abstracts-explorer.conference": "neurips",
+            "com.abstracts-explorer.version": "0.4.0",
+        },
+    }
+
+
+class TestDeleteUntaggedVersions:
+    """Tests for the ``include_untagged`` option of ``delete_old_versions``."""
+
+    def _make_client(self):
+        with patch("oras.client.OrasClient"):
+            return RegistryClient("ghcr.io/thawn/abstracts-data", token="test-token")
+
+    def test_include_untagged_deletes_untagged_and_old(self):
+        client = self._make_client()
+        client._client.get_manifest.return_value = _safe_data_manifest()
+        pkg_versions = [
+            _make_pkg_version(1, []),
+            _make_pkg_version(2, ["neurips-2024_model_0.3.0"]),
+        ]
+        with patch.object(client, "_list_github_package_versions", return_value=pkg_versions):
+            with patch.object(client, "_delete_github_package_version") as mock_delete:
+                deleted = client.delete_old_versions(below_version="0.4.0", include_untagged=True)
+
+        deleted_ids = {entry["version_id"] for entry in deleted}
+        assert deleted_ids == {1, 2}
+        deleted_calls = {call.args for call in mock_delete.call_args_list}
+        assert deleted_calls == {
+            ("thawn", "abstracts-data", 1),
+            ("thawn", "abstracts-data", 2),
+        }
+
+    def test_untagged_only_ignores_tagged_versions(self):
+        client = self._make_client()
+        client._client.get_manifest.return_value = _safe_data_manifest()
+        pkg_versions = [
+            _make_pkg_version(1, []),
+            _make_pkg_version(2, ["neurips-2024_model_0.3.0"]),
+        ]
+        with patch.object(client, "_list_github_package_versions", return_value=pkg_versions):
+            with patch.object(client, "_delete_github_package_version") as mock_delete:
+                deleted = client.delete_old_versions(include_untagged=True)
+
+        assert [entry["version_id"] for entry in deleted] == [1]
+        assert deleted[0]["tags"] == []
+        assert deleted[0]["digest"] == "sha256:abc1"
+        mock_delete.assert_called_once_with("thawn", "abstracts-data", 1)
+
+    def test_untagged_dry_run_verifies_but_does_not_delete(self):
+        client = self._make_client()
+        client._client.get_manifest.return_value = _safe_data_manifest()
+        pkg_versions = [_make_pkg_version(1, [])]
+        with patch.object(client, "_list_github_package_versions", return_value=pkg_versions):
+            with patch.object(client, "_delete_github_package_version") as mock_delete:
+                deleted = client.delete_old_versions(include_untagged=True, dry_run=True)
+
+        assert len(deleted) == 1
+        mock_delete.assert_not_called()
+        client._client.get_manifest.assert_called_once()
+
+    def test_untagged_index_manifest_is_skipped(self):
+        client = self._make_client()
+        client._client.get_manifest.return_value = {
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "manifests": [{"digest": "sha256:child"}],
+        }
+        pkg_versions = [_make_pkg_version(1, [])]
+        with patch.object(client, "_list_github_package_versions", return_value=pkg_versions):
+            with patch.object(client, "_delete_github_package_version") as mock_delete:
+                deleted = client.delete_old_versions(include_untagged=True)
+
+        assert deleted == []
+        mock_delete.assert_not_called()
+
+    def test_untagged_attestation_is_skipped(self):
+        client = self._make_client()
+        manifest = _safe_data_manifest()
+        manifest["subject"] = {"digest": "sha256:target"}
+        client._client.get_manifest.return_value = manifest
+        pkg_versions = [_make_pkg_version(1, [])]
+        with patch.object(client, "_list_github_package_versions", return_value=pkg_versions):
+            with patch.object(client, "_delete_github_package_version") as mock_delete:
+                deleted = client.delete_old_versions(include_untagged=True)
+
+        assert deleted == []
+        mock_delete.assert_not_called()
+
+    def test_untagged_without_data_annotations_is_skipped(self):
+        client = self._make_client()
+        client._client.get_manifest.return_value = {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "annotations": {"org.opencontainers.image.title": "unknown"},
+        }
+        pkg_versions = [_make_pkg_version(1, [])]
+        with patch.object(client, "_list_github_package_versions", return_value=pkg_versions):
+            with patch.object(client, "_delete_github_package_version") as mock_delete:
+                deleted = client.delete_old_versions(include_untagged=True)
+
+        assert deleted == []
+        mock_delete.assert_not_called()
+
+    def test_untagged_manifest_fetch_failure_is_skipped(self):
+        client = self._make_client()
+        client._client.get_manifest.side_effect = Exception("network error")
+        pkg_versions = [_make_pkg_version(1, [])]
+        with patch.object(client, "_list_github_package_versions", return_value=pkg_versions):
+            with patch.object(client, "_delete_github_package_version") as mock_delete:
+                deleted = client.delete_old_versions(include_untagged=True)
+
+        assert deleted == []
+        mock_delete.assert_not_called()
+
+    def test_untagged_version_tagged_since_listing_is_skipped(self):
+        client = self._make_client()
+        client._client.get_manifest.return_value = _safe_data_manifest()
+        initial = [_make_pkg_version(1, [])]
+        fresh = [_make_pkg_version(1, ["neurips-2024_model_0.5.0"])]
+        with patch.object(client, "_list_github_package_versions", side_effect=[initial, fresh]):
+            with patch.object(client, "_delete_github_package_version") as mock_delete:
+                deleted = client.delete_old_versions(include_untagged=True)
+
+        assert deleted == []
+        mock_delete.assert_not_called()
+
+    def test_include_untagged_with_conference_raises(self):
+        client = self._make_client()
+        with pytest.raises(ValueError, match="conference"):
+            client.delete_old_versions(below_version="0.4.0", conference="neurips", include_untagged=True)
+
+    def test_neither_below_version_nor_untagged_raises(self):
+        client = self._make_client()
+        with pytest.raises(ValueError, match="below_version"):
+            client.delete_old_versions()
+
+
 # ---------------------------------------------------------------------------
 # Tests for registry_delete_command (CLI)
 # ---------------------------------------------------------------------------
@@ -3587,6 +3727,65 @@ class TestRegistryDeleteCommand:
             result = registry_delete_command(args)
         assert result == 1
         assert "Authentication token" in capsys.readouterr().err
+
+    def test_untagged_only_success(self, capsys):
+        from abstracts_explorer.cli import registry_delete_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            below_version=None,
+            conference=None,
+            untagged=True,
+            dry_run=False,
+            yes=True,
+        )
+        deleted_entries = [{"version_id": 1, "tags": [], "version": None, "digest": "sha256:abc"}]
+        with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
+            mock_instance = MockClient.return_value
+            mock_instance.delete_old_versions.return_value = deleted_entries
+
+            result = registry_delete_command(args)
+
+        assert result == 0
+        call_kwargs = mock_instance.delete_old_versions.call_args.kwargs
+        assert call_kwargs.get("include_untagged") is True
+        assert call_kwargs.get("below_version") is None
+        assert "untagged" in capsys.readouterr().out.lower()
+
+    def test_untagged_with_conference_returns_error(self, capsys):
+        from abstracts_explorer.cli import registry_delete_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            below_version=None,
+            conference="neurips",
+            untagged=True,
+            dry_run=False,
+            yes=True,
+        )
+        result = registry_delete_command(args)
+
+        assert result == 1
+        assert "cannot be combined" in capsys.readouterr().err
+
+    def test_no_threshold_returns_error(self, capsys):
+        from abstracts_explorer.cli import registry_delete_command
+
+        args = argparse.Namespace(
+            repository="ghcr.io/thawn/abstracts-data",
+            token="test-token",
+            below_version=None,
+            conference=None,
+            untagged=False,
+            dry_run=False,
+            yes=True,
+        )
+        result = registry_delete_command(args)
+
+        assert result == 1
+        assert "Specify" in capsys.readouterr().err
 
     def test_invalid_version_returns_error(self, capsys):
         from abstracts_explorer.cli import registry_delete_command

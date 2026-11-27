@@ -1642,58 +1642,192 @@ class RegistryClient:
                 f"HTTP {response.status_code} — {response.text[:200]}"
             )
 
-    def delete_old_versions(
+    def _is_safe_untagged_data_artifact(
         self,
-        below_version: str,
-        conference: Optional[str] = None,
-        dry_run: bool = False,
-        progress_callback: Optional[Callable[[str], None]] = None,
-    ) -> List[Dict[str, Any]]:
+        digest: str,
+        progress: Callable[[str], None],
+    ) -> bool:
         """
-        Delete registry package versions whose tag version is older than *below_version*.
+        Check whether an untagged manifest is an orphaned data artifact safe to delete.
 
-        Uses the `GitHub Packages API
-        <https://docs.github.com/en/rest/packages/packages>`_ to list and
-        delete container image versions.  Only versions that carry at least
-        one OCI tag matching the abstracts-explorer tag format
-        (``{conference}[-{year}]_{model}_{version}``) are considered;
-        untagged (dangling) versions are left untouched.
+        Untagged versions are only deleted after verifying that the manifest
+
+        * can be fetched by digest,
+        * is a single artifact manifest (not an image index referencing child
+          manifests),
+        * is not an attestation/referrer artifact (has no ``subject``), and
+        * carries abstracts-explorer manifest annotations.
+
+        Any manifest that cannot be positively identified as an orphaned data
+        artifact is considered unsafe and skipped.
 
         Parameters
         ----------
-        below_version : str
+        digest : str
+            Manifest digest (e.g. ``sha256:...``) of the untagged version.
+        progress : callable
+            Progress message callback.
+
+        Returns
+        -------
+        bool
+            ``True`` when the manifest is verified as safe to delete.
+        """
+        target = f"{self.repository}@{digest}"
+        try:
+            manifest = self._client.get_manifest(target)
+        except Exception as e:
+            progress(f"  Skipping {digest}: cannot fetch manifest for verification ({e}).")
+            return False
+
+        media_type = str(manifest.get("mediaType", "")).lower()
+        if "index" in media_type or manifest.get("manifests"):
+            progress(f"  Skipping {digest}: manifest is an index referencing child manifests.")
+            return False
+
+        if manifest.get("subject"):
+            progress(f"  Skipping {digest}: artifact is an attestation/referrer (has subject).")
+            return False
+
+        annotations = manifest.get("annotations") or manifest.get("labels") or {}
+        if not any(str(key).startswith("com.abstracts-explorer.") for key in annotations):
+            progress(f"  Skipping {digest}: not an abstracts-explorer data artifact (missing annotations).")
+            return False
+
+        return True
+
+    def _verify_untagged_versions(
+        self,
+        candidates: List[Dict[str, Any]],
+        progress: Callable[[str], None],
+    ) -> List[Dict[str, Any]]:
+        """
+        Verify untagged candidate versions immediately before deleting them.
+
+        Re-fetches the package versions so stale metadata cannot cause an
+        accidentally tagged version to be deleted, then verifies each
+        candidate's manifest with :meth:`_is_safe_untagged_data_artifact`.
+
+        Parameters
+        ----------
+        candidates : list of dict
+            Untagged package version entries from the GitHub Packages API.
+        progress : callable
+            Progress message callback.
+
+        Returns
+        -------
+        list of dict
+            The subset of *candidates* that were verified as safe to delete,
+            using the freshly fetched metadata.
+
+        Raises
+        ------
+        RegistryError
+            If the GitHub Packages API call fails during verification.
+        """
+        if not candidates:
+            return []
+
+        progress("Verifying untagged versions before deletion …")
+        fresh_versions = self._list_github_package_versions()
+        fresh_by_digest = {v.get("name"): v for v in fresh_versions if v.get("name")}
+
+        verified: List[Dict[str, Any]] = []
+        for candidate in candidates:
+            version_id = candidate.get("id")
+            digest = candidate.get("name", "")
+            fresh = fresh_by_digest.get(digest)
+            if fresh is None:
+                progress(f"  Skipping version {version_id} ({digest}): not found in refreshed listing.")
+                continue
+
+            fresh_tags = fresh.get("metadata", {}).get("container", {}).get("tags", [])
+            if fresh_tags:
+                progress(f"  Skipping version {version_id} ({digest}): now tagged {fresh_tags}.")
+                continue
+
+            if not self._is_safe_untagged_data_artifact(digest, progress):
+                continue
+
+            verified.append(fresh)
+
+        progress(f"  {len(verified)} of {len(candidates)} untagged version(s) verified as safe to delete.")
+        return verified
+
+    def delete_old_versions(
+        self,
+        below_version: Optional[str] = None,
+        conference: Optional[str] = None,
+        dry_run: bool = False,
+        progress_callback: Optional[Callable[[str], None]] = None,
+        include_untagged: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """
+        Delete registry package versions below a threshold and/or untagged versions.
+
+        Uses the `GitHub Packages API
+        <https://docs.github.com/en/rest/packages/packages>`_ to list and
+        delete container image versions.  Tagged versions are only considered
+        when *below_version* is given and they carry tags matching the
+        abstracts-explorer tag format (``{conference}[-{year}]_{model}_{version}``).
+
+        When *include_untagged* is ``True``, untagged (dangling) versions are
+        also deleted.  Each untagged candidate is verified immediately before
+        deletion: the version list is re-fetched to confirm the version is
+        still untagged, and its manifest is checked to ensure it is an
+        orphaned data artifact rather than an index or attestation/referrer.
+
+        Parameters
+        ----------
+        below_version : str, optional
             Threshold version string (PEP 440). Versions **strictly older**
             than this value are deleted.  Example: ``"0.4.0"`` deletes all
-            versions tagged with a version < 0.4.0.
+            versions tagged with a version < 0.4.0.  When ``None``, no tagged
+            versions are deleted (only untagged versions if requested).
         conference : str, optional
             When provided, only tags whose base component starts with
             *conference* (case-insensitive) are examined.  Tags for other
-            conferences are ignored.
+            conferences are ignored.  Cannot be combined with
+            *include_untagged*, because untagged versions carry no conference
+            information.
         dry_run : bool, optional
             When ``True``, log which versions *would* be deleted but perform
             no actual deletions (default: ``False``).
         progress_callback : callable, optional
             Function called with status messages during the operation.
+        include_untagged : bool, optional
+            When ``True``, also delete verified untagged (dangling) versions
+            (default: ``False``).
 
         Returns
         -------
         list of dict
             One entry per deleted (or, in dry-run mode, would-be-deleted)
             version.  Each dict contains ``version_id``, ``tags``, and
-            ``version``.
+            ``version`` (``None`` for untagged versions) and ``digest``.
 
         Raises
         ------
         RegistryError
-            If the registry is not hosted on ``ghcr.io``, if the GitHub API
-            call fails, or if *below_version* cannot be parsed.
+            If the registry is not hosted on ``ghcr.io`` or if the GitHub API
+            call fails.
         ValueError
-            If *below_version* is not a valid PEP 440 version string.
+            If neither *below_version* nor *include_untagged* is provided, if
+            *below_version* is not a valid PEP 440 version string, or if
+            *include_untagged* is combined with *conference*.
         """
-        try:
-            threshold = Version(below_version)
-        except InvalidVersion as e:
-            raise ValueError(f"Invalid version string '{below_version}': {e}") from e
+        if below_version is None and not include_untagged:
+            raise ValueError("Provide 'below_version' and/or 'include_untagged'.")
+        if include_untagged and conference is not None:
+            raise ValueError("'include_untagged' cannot be combined with a conference filter.")
+
+        threshold: Optional[Version] = None
+        if below_version is not None:
+            try:
+                threshold = Version(below_version)
+            except InvalidVersion as e:
+                raise ValueError(f"Invalid version string '{below_version}': {e}") from e
 
         _progress = _make_progress_callback(progress_callback)
 
@@ -1706,13 +1840,19 @@ class RegistryClient:
         owner, package_name = name_parts[0], name_parts[1]
 
         deleted: List[Dict[str, Any]] = []
+        untagged_candidates: List[Dict[str, Any]] = []
 
         for pkg_version in all_versions:
             version_id: int = pkg_version["id"]
             tags: List[str] = pkg_version.get("metadata", {}).get("container", {}).get("tags", [])
 
             if not tags:
-                # Skip untagged (dangling) versions
+                if include_untagged:
+                    untagged_candidates.append(pkg_version)
+                continue
+
+            if threshold is None:
+                # Only untagged versions were requested.
                 continue
 
             # A package version may carry multiple tags.  Only delete when
@@ -1751,6 +1891,27 @@ class RegistryClient:
                     "version": str(matched_tags[0][1]) if matched_tags else None,
                 }
             )
+
+        if untagged_candidates:
+            verified = self._verify_untagged_versions(untagged_candidates, _progress)
+            for pkg_version in verified:
+                version_id = pkg_version["id"]
+                digest = pkg_version.get("name", "")
+                if dry_run:
+                    _progress(f"  [dry-run] Would delete untagged version {version_id} ({digest}).")
+                else:
+                    _progress(f"  Deleting untagged version {version_id} ({digest}) …")
+                    self._delete_github_package_version(owner, package_name, version_id)
+                    _progress(f"  ✓ Deleted untagged version {version_id}.")
+
+                deleted.append(
+                    {
+                        "version_id": version_id,
+                        "tags": [],
+                        "version": None,
+                        "digest": digest,
+                    }
+                )
 
         action = "would be deleted" if dry_run else "deleted"
         _progress(f"\nDone. {len(deleted)} version(s) {action}.")

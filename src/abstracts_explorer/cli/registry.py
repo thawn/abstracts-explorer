@@ -362,10 +362,12 @@ def registry_list_command(args: argparse.Namespace) -> int:
 
 def registry_delete_command(args: argparse.Namespace) -> int:
     """
-    Delete registry package versions whose tag version is older than a given version.
+    Delete registry package versions below a version and/or untagged versions.
 
     Uses the GitHub Packages API to list all versions of the container package
     and deletes those whose OCI tag version is strictly below *below_version*.
+    When *untagged* is set, untagged (dangling) versions are also deleted after
+    each is verified as still untagged and safe to remove.
 
     Parameters
     ----------
@@ -373,8 +375,9 @@ def registry_delete_command(args: argparse.Namespace) -> int:
         Command-line arguments containing:
         - repository: OCI repository path
         - token: Authentication token
-        - below_version: Threshold version (e.g. "0.4.0"); versions older than this are deleted
+        - below_version: Optional threshold version (e.g. "0.4.0"); versions older than this are deleted
         - conference: Optional conference filter (only tags for this conference are checked)
+        - untagged: When True, also delete verified untagged (dangling) versions
         - dry_run: When True, print what would be deleted without deleting
         - yes: Skip confirmation prompt
 
@@ -401,20 +404,42 @@ def registry_delete_command(args: argparse.Namespace) -> int:
         )
         return 1
 
-    below_version = args.below_version
+    below_version = getattr(args, "below_version", None)
     conference = getattr(args, "conference", None)
     dry_run: bool = getattr(args, "dry_run", False)
+    untagged: bool = getattr(args, "untagged", False)
+
+    if below_version is None and not untagged:
+        print(
+            "❌ Specify --below-version and/or --untagged.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if untagged and conference is not None:
+        print(
+            "❌ --untagged cannot be combined with --conference "
+            "(untagged versions carry no conference information).",
+            file=sys.stderr,
+        )
+        return 1
 
     _print_header(
         "Registry Delete Old Versions",
         f"Repository: {repository}",
-        f"Delete below: {below_version}",
+        f"Delete below: {below_version or '(none)'}",
         f"Conference: {conference or 'all'}",
+        f"Untagged: {untagged}",
         f"Dry-run: {dry_run}",
     )
 
     if not dry_run and not getattr(args, "yes", False):
-        print(f"\n⚠️  This will permanently delete all versions below {below_version} from {repository}.")
+        targets = []
+        if below_version is not None:
+            targets.append(f"all versions below {below_version}")
+        if untagged:
+            targets.append("verified untagged versions")
+        print(f"\n⚠️  This will permanently delete {' and '.join(targets)} from {repository}.")
         if not _confirm("Type 'yes' to confirm: ", require_yes=True):
             print("Aborted.")
             return 1
@@ -426,12 +451,15 @@ def registry_delete_command(args: argparse.Namespace) -> int:
             conference=conference,
             dry_run=dry_run,
             progress_callback=lambda msg: print(f"  {msg}"),
+            include_untagged=untagged,
         )
         action = "would be deleted" if dry_run else "deleted"
         print(f"\n{'✅' if not dry_run else '🔍'} Done. {len(deleted)} version(s) {action}.")
         if deleted:
             for entry in deleted:
                 tags_str = ", ".join(entry.get("tags", []))
+                if not tags_str:
+                    tags_str = f"(untagged) {entry.get('digest', '')}"
                 print(f"  {'[dry-run] ' if dry_run else ''}🗑️  {tags_str}")
         return 0
 

@@ -952,10 +952,13 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         ("registry", "delete"),
         help="Delete registry package versions below a given version",
         description="""
-    Delete registry package versions whose OCI tag version is strictly below a given threshold.
+    Delete registry package versions whose OCI tag version is strictly below a given threshold,
+    and/or untagged (dangling) versions.
 
     Uses the GitHub Packages API to list all versions of the container package and permanently
-    deletes those that are outdated.  Untagged (dangling) versions are left untouched.
+    deletes those that are outdated.  Untagged versions are only deleted with --untagged and are
+    verified immediately before deletion (re-checked as still untagged and confirmed to be
+    orphaned data artifacts, not indexes or attestations).
 
     Examples:
       # Delete all versions below 0.4.0
@@ -970,6 +973,10 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
       abstracts-explorer registry delete --below-version 0.4.0 --conference neurips \\
     --repository ghcr.io/thawn/abstracts-data
 
+      # Delete untagged (dangling) versions only
+      abstracts-explorer registry delete --untagged \\
+    --repository ghcr.io/thawn/abstracts-data
+
       # Skip confirmation prompt
       abstracts-explorer registry delete --below-version 0.4.0 --yes \\
     --repository ghcr.io/thawn/abstracts-data
@@ -979,9 +986,10 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
     registry_delete_parser.add_argument(
         "--below-version",
         type=str,
-        required=True,
+        default=None,
         metavar="VERSION",
-        help="Delete all versions strictly below this version (e.g., '0.4.0'). Must be a valid PEP 440 version.",
+        help="Delete all versions strictly below this version (e.g., '0.4.0'). Must be a valid "
+        "PEP 440 version. At least one of --below-version or --untagged is required.",
     )
     registry_delete_parser.add_argument(
         "--conference",
@@ -989,6 +997,12 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         type=str,
         default=None,
         help="Only delete versions whose tags belong to this conference (optional; all conferences if omitted).",
+    )
+    registry_delete_parser.add_argument(
+        "--untagged",
+        action="store_true",
+        help="Also delete untagged (dangling) versions. Each is verified (still untagged, "
+        "an orphaned data artifact) before deletion. Cannot be combined with --conference.",
     )
     registry_delete_parser.add_argument(
         "--dry-run",

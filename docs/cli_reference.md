@@ -710,12 +710,20 @@ abstracts-explorer registry list --repository ghcr.io/thawn/abstracts-data --tag
 ### registry delete
 
 Delete registry package versions whose OCI tag version is strictly below a
-given version. Untagged (dangling) versions are left untouched.
+given version, and/or untagged (dangling) versions. At least one of
+`--below-version` or `--untagged` is required.
+
+Untagged versions are only removed with `--untagged`. Each candidate is
+**verified immediately before deletion**: the version list is re-fetched to
+confirm it is still untagged, and its manifest is checked to ensure it is an
+orphaned data artifact (not an image index or an attestation/referrer). Anything
+that cannot be positively identified as safe is skipped.
 
 ```text
 usage: abstracts-explorer registry delete [-h] [--repository REPOSITORY]
-                                          [--token TOKEN] --below-version VERSION
-                                          [--conference CONFERENCE] [--dry-run] [--yes]
+                                          [--token TOKEN] [--below-version VERSION]
+                                          [--conference CONFERENCE] [--untagged]
+                                          [--dry-run] [--yes]
 ```
 
 | Option | Description |
@@ -723,6 +731,7 @@ usage: abstracts-explorer registry delete [-h] [--repository REPOSITORY]
 | `--repository, -r REPOSITORY` / `--token TOKEN` | Registry location and auth |
 | `--below-version VERSION` | Delete all versions strictly below this version (PEP 440, e.g. `0.4.0`) |
 | `--conference, -c CONFERENCE` | Only delete versions whose tags belong to this conference (optional) |
+| `--untagged` | Also delete verified untagged (dangling) versions; cannot be combined with `--conference` |
 | `--dry-run` | Preview without deleting |
 | `--yes, -y` | Skip confirmation prompt |
 
@@ -730,6 +739,8 @@ usage: abstracts-explorer registry delete [-h] [--repository REPOSITORY]
 abstracts-explorer registry delete --below-version 0.4.0 \
   --repository ghcr.io/thawn/abstracts-data
 abstracts-explorer registry delete --below-version 0.4.0 --dry-run \
+  --repository ghcr.io/thawn/abstracts-data
+abstracts-explorer registry delete --untagged \
   --repository ghcr.io/thawn/abstracts-data
 ```
 
