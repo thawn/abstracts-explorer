@@ -1016,7 +1016,7 @@ class RegistryClient:
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def update_conference_summary(
+    def update_conference_image(
         self,
         conference: str,
         years: Optional[List[int]] = None,
@@ -1024,7 +1024,7 @@ class RegistryClient:
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> Dict[str, Any]:
         """
-        Rebuild a conference-level tag from existing per-year artifacts.
+        Rebuild the whole-conference image from existing per-year artifacts.
 
         The summary manifest is assembled from the layer descriptors of the
         existing per-year tags, so no data blobs are uploaded — only a small
@@ -1157,7 +1157,7 @@ class RegistryClient:
         Returns
         -------
         dict
-            Summary from :meth:`update_conference_summary` with an extra
+            Summary from :meth:`update_conference_image` with an extra
             ``year_tags`` list of the current-version year tags.
 
         Raises
@@ -1220,7 +1220,7 @@ class RegistryClient:
 
             current_year_tags.append(new_tag)
 
-        summary = self.update_conference_summary(
+        summary = self.update_conference_image(
             conference=conference,
             years=selected_years,
             embedding_model=model,

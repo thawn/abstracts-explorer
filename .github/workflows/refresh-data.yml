@@ -204,10 +204,10 @@ jobs:
                     --conference "${{ matrix.conference }}" \
                     --year "$TARGET_YEAR"
 
-            - name: Update conference summary
+            - name: Update whole-conference image
               if: env.UPLOAD == 'true' && env.ONLY_NEW == 'true' && !matrix.is_new && matrix.needs_update
               run: |
-                  uv run abstracts-explorer registry update-summary \
+                  uv run abstracts-explorer registry update-conference-image \
                     --conference "${{ matrix.conference }}"
 
     cleanup:

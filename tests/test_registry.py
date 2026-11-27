@@ -3888,8 +3888,8 @@ class _SummaryClientMixin:
         return client
 
 
-class TestUpdateConferenceSummary(_SummaryClientMixin):
-    """Tests for RegistryClient.update_conference_summary."""
+class TestUpdateConferenceImage(_SummaryClientMixin):
+    """Tests for RegistryClient.update_conference_image."""
 
     def test_reuses_year_layers_and_sums_counts(self):
         client = self._make_client()
@@ -3908,7 +3908,7 @@ class TestUpdateConferenceSummary(_SummaryClientMixin):
             patch.object(client, "list_tags", return_value=tags),
             patch.object(client, "_push_manifest_only") as push,
         ):
-            summary = client.update_conference_summary("neurips", years=[2024, 2025])
+            summary = client.update_conference_image("neurips", years=[2024, 2025])
 
         tag, layers, annotations, config, _ = push.call_args.args
         assert tag == _build_tag("neurips", None, embedding_model="model")
@@ -3924,7 +3924,7 @@ class TestUpdateConferenceSummary(_SummaryClientMixin):
         client._client.get_manifest.return_value = _manifest([_layer("sha256:a", "papers-2024.db")])
         with patch.object(client, "list_tags", return_value=["neurips-2024_model_0.3.0"]):
             with pytest.raises(RegistryError, match="2025"):
-                client.update_conference_summary("neurips", years=[2024, 2025])
+                client.update_conference_image("neurips", years=[2024, 2025])
 
     def test_uses_newest_year_tag_version(self):
         client = self._make_client()
@@ -3935,7 +3935,7 @@ class TestUpdateConferenceSummary(_SummaryClientMixin):
             patch.object(client, "list_tags", return_value=tags),
             patch.object(client, "_push_manifest_only") as push,
         ):
-            client.update_conference_summary("neurips", years=[2024])
+            client.update_conference_image("neurips", years=[2024])
 
         _, layers, _, _, _ = push.call_args.args
         assert layers[0]["digest"] == "sha256:new"
@@ -3950,7 +3950,7 @@ class TestUpdateConferenceSummary(_SummaryClientMixin):
             patch.object(client, "list_tags", return_value=["neurips-2024_model_0.3.0"]),
             patch.object(client, "_push_manifest_only") as push,
         ):
-            summary = client.update_conference_summary("neurips")
+            summary = client.update_conference_image("neurips")
 
         assert summary["years"] == [2024]
         push.assert_called_once()
@@ -3967,7 +3967,7 @@ class TestRetagConference(_SummaryClientMixin):
         with (
             patch.object(client, "list_tags", return_value=[old_tag]),
             patch.object(client, "_push_manifest_only") as push,
-            patch.object(client, "update_conference_summary", return_value={"tag": "summary"}) as update,
+            patch.object(client, "update_conference_image", return_value={"tag": "summary"}) as update,
         ):
             summary = client.retag_conference("neurips")
 
@@ -3985,7 +3985,7 @@ class TestRetagConference(_SummaryClientMixin):
         with (
             patch.object(client, "list_tags", return_value=[current_tag]),
             patch.object(client, "_push_manifest_only") as push,
-            patch.object(client, "update_conference_summary", return_value={"tag": "summary"}),
+            patch.object(client, "update_conference_image", return_value={"tag": "summary"}),
         ):
             client.retag_conference("neurips")
 
@@ -4014,7 +4014,7 @@ class TestRetagConference(_SummaryClientMixin):
 
 
 class TestRegistryOnlyTagCommand(_SummaryClientMixin):
-    """Tests for ``registry push --only-tag`` and ``registry update-summary`` CLI."""
+    """Tests for ``registry push --only-tag`` and ``registry update-conference-image`` CLI."""
 
     def test_only_tag_calls_retag(self, capsys):
         from abstracts_explorer.cli import registry_upload_command
@@ -4067,8 +4067,8 @@ class TestRegistryOnlyTagCommand(_SummaryClientMixin):
         assert result == 1
         assert "cannot be combined with --tag" in capsys.readouterr().err
 
-    def test_update_summary_command_success(self, capsys):
-        from abstracts_explorer.cli import registry_update_summary_command
+    def test_update_conference_image_command_success(self, capsys):
+        from abstracts_explorer.cli import registry_update_conference_image_command
 
         args = argparse.Namespace(
             repository="ghcr.io/thawn/abstracts-data",
@@ -4077,19 +4077,19 @@ class TestRegistryOnlyTagCommand(_SummaryClientMixin):
             embedding_model=None,
         )
         with patch("abstracts_explorer.registry.RegistryClient") as MockClient:
-            MockClient.return_value.update_conference_summary.return_value = {
+            MockClient.return_value.update_conference_image.return_value = {
                 "tag": "t",
                 "years": [2024],
                 "paper_count": 1,
                 "embedding_count": 1,
             }
-            result = registry_update_summary_command(args)
+            result = registry_update_conference_image_command(args)
 
         assert result == 0
-        assert "Summary updated" in capsys.readouterr().out
+        assert "Conference image updated!" in capsys.readouterr().out
 
-    def test_update_summary_requires_conference(self, capsys):
-        from abstracts_explorer.cli import registry_update_summary_command
+    def test_update_conference_image_requires_conference(self, capsys):
+        from abstracts_explorer.cli import registry_update_conference_image_command
 
         args = argparse.Namespace(
             repository="ghcr.io/thawn/abstracts-data",
@@ -4097,7 +4097,7 @@ class TestRegistryOnlyTagCommand(_SummaryClientMixin):
             conference=None,
             embedding_model=None,
         )
-        result = registry_update_summary_command(args)
+        result = registry_update_conference_image_command(args)
 
         assert result == 1
         assert "conference is required" in capsys.readouterr().err

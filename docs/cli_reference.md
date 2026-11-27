@@ -23,7 +23,7 @@ resource. Every top-level command is a noun group; subcommands are verbs.
 | `pipeline run` | Run the full pipeline (download → embeddings → clustering cache) |
 | `serve web` | Start the web interface |
 | `serve mcp` | Start the MCP server for cluster analysis |
-| `registry push/pull/list/update-summary/delete` | Push/pull data to/from OCI-compatible container registries |
+| `registry push/pull/list/update-conference-image/delete` | Push/pull data to/from OCI-compatible container registries |
 | `eval generate/verify/run/list/clear-pairs/clear-results` | Automatic evaluation of the RAG system |
 | `feedback stats/list/browse/clear` | Explore user feedback |
 
@@ -641,7 +641,7 @@ is always transferred as a complete unit per conference and year. Use
 `--conference all` to process all conferences at once.
 
 ```text
-usage: abstracts-explorer registry [-h] {push,pull,list,update-summary,delete} ...
+usage: abstracts-explorer registry [-h] {push,pull,list,update-conference-image,delete} ...
 ```
 
 ### registry push
@@ -670,17 +670,18 @@ abstracts-explorer registry push --conference neurips --only-tag \
   --repository ghcr.io/thawn/abstracts-data
 ```
 
-### registry update-summary
+### registry update-conference-image
 
-Rebuild a conference-level tag from the existing per-year artifacts. Only a
-small config blob and the summary manifest are uploaded; existing per-year data
-layers are reused by digest, so no data is re-uploaded. Use this after pushing a
-new year to add it to the whole-conference image.
+Rebuild the whole-conference image (the conference-level tag that contains
+every year) from the existing per-year artifacts. Only a small config blob and
+the image manifest are uploaded; existing per-year data layers are reused by
+digest, so no data is re-uploaded. Use this after pushing a new year, or to
+refresh the whole-conference image after other per-year changes.
 
 ```text
-usage: abstracts-explorer registry update-summary [-h] [--repository REPOSITORY]
-                                                  [--token TOKEN] --conference CONFERENCE
-                                                  [--embedding-model EMBEDDING_MODEL]
+usage: abstracts-explorer registry update-conference-image [-h] [--repository REPOSITORY]
+                                                          [--token TOKEN] --conference CONFERENCE
+                                                          [--embedding-model EMBEDDING_MODEL]
 ```
 
 | Option | Description |
@@ -690,7 +691,7 @@ usage: abstracts-explorer registry update-summary [-h] [--repository REPOSITORY]
 | `--embedding-model EMBEDDING_MODEL` | Embedding model (defaults to local DB metadata) |
 
 ```bash
-abstracts-explorer registry update-summary --conference neurips \
+abstracts-explorer registry update-conference-image --conference neurips \
   --repository ghcr.io/thawn/abstracts-data
 ```
 

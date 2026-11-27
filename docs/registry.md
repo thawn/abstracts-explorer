@@ -294,7 +294,7 @@ multiply the effective request rate against the shared LLM backend.
 
 When a new year is added to an existing conference, the workflow runs
 `registry push --conference X --year Y` to upload only that year, then
-`registry update-summary --conference X` to rebuild the conference-level tag.
+`registry update-conference-image --conference X` to rebuild the conference-level tag.
 The summary manifest reuses the existing per-year layer descriptors, so data
 for earlier years is not uploaded again.
 

@@ -143,11 +143,11 @@ def registry_upload_command(args: argparse.Namespace) -> int:
         return _unexpected_error(e, log_message="Upload failed")
 
 
-def registry_update_summary_command(args: argparse.Namespace) -> int:
+def registry_update_conference_image_command(args: argparse.Namespace) -> int:
     """
-    Rebuild a conference-level registry tag from existing per-year artifacts.
+    Rebuild the whole-conference registry image from existing per-year artifacts.
 
-    Only a small config blob and the summary manifest are uploaded; existing
+    Only a small config blob and the image manifest are uploaded; existing
     per-year data layers are reused by digest, so no data is re-uploaded.
 
     Parameters
@@ -189,7 +189,7 @@ def registry_update_summary_command(args: argparse.Namespace) -> int:
     conference = _resolve_conference_arg(raw_conf) or raw_conf
 
     _print_header(
-        "Registry Update Summary",
+        "Registry Update Conference Image",
         f"Repository: {repository}",
         f"Conference: {conference}",
         f"Embedding model: {args.embedding_model}" if args.embedding_model else None,
@@ -197,12 +197,12 @@ def registry_update_summary_command(args: argparse.Namespace) -> int:
 
     try:
         client = RegistryClient(repository=repository, token=token)
-        summary = client.update_conference_summary(
+        summary = client.update_conference_image(
             conference=conference,
             embedding_model=args.embedding_model,
             progress_callback=lambda msg: print(f"  {msg}"),
         )
-        print("\n✅ Summary updated!")
+        print("\n✅ Conference image updated!")
         print(f"  📄 Papers:     {summary.get('paper_count', 0)}")
         print(f"  🧮 Embeddings: {summary.get('embedding_count', 0)}")
         print(f"  📅 Years:      {summary.get('years', [])}")

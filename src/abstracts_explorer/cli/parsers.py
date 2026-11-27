@@ -887,22 +887,31 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         "Use when only the abstracts-explorer version changed but the data did not.",
     )
 
-    registry_update_summary_parser = _add_leaf(
+    registry_update_conference_image_parser = _add_leaf(
         registry_subparsers,
-        "update-summary",
-        "registry_update_summary_command",
-        ("registry", "update-summary"),
-        help="Rebuild a conference-level tag from existing per-year artifacts without re-uploading data",
+        "update-conference-image",
+        "registry_update_conference_image_command",
+        ("registry", "update-conference-image"),
+        help="Rebuild the whole-conference image from existing per-year artifacts without re-uploading data",
+        description="""
+    Rebuild the whole-conference registry image (the conference-level tag that
+    contains every year) from the existing per-year artifacts.
+
+    Only a small config blob and the image manifest are pushed; data layers for
+    existing years are reused by digest, so no data is re-uploaded. Use this
+    after pushing a new year, or to refresh the whole-conference image after
+    other per-year changes.
+        """,
     )
-    _add_registry_args(registry_update_summary_parser)
-    registry_update_summary_parser.add_argument(
+    _add_registry_args(registry_update_conference_image_parser)
+    registry_update_conference_image_parser.add_argument(
         "--conference",
         "-c",
         type=str,
         required=True,
         help="Conference name (e.g., neurips). A specific conference is required.",
     )
-    registry_update_summary_parser.add_argument(
+    registry_update_conference_image_parser.add_argument(
         "--embedding-model",
         type=str,
         default=None,
