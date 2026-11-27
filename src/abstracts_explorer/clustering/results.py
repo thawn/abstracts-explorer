@@ -411,7 +411,7 @@ def build_hierarchy_levels(
                 raise ClusteringError(
                     "Cached clustering hierarchy is missing precomputed centers; "
                     "run 'python scripts/backfill_cluster_centers_median.py' "
-                    "or regenerate with 'abstracts-explorer clustering pre-generate --force'."
+                    "or regenerate with 'abstracts-explorer clustering cache populate --force'."
                 )
 
             clusters.append(
@@ -485,7 +485,7 @@ def derive_hierarchy_levels(
     if "tree" not in hierarchy:
         raise ClusteringError(
             "Cached clustering results are missing their hierarchy tree; "
-            "regenerate them with 'abstracts-explorer clustering pre-generate --force'."
+            "regenerate them with 'abstracts-explorer clustering cache populate --force'."
         )
 
     tree = hierarchy.get("tree") or []

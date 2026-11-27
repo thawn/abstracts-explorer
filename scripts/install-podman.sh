@@ -12,6 +12,7 @@
 # Options:
 #   --variant caddy|nginx   TLS variant (default: caddy)
 #   --branch  BRANCH        Git branch to download from (default: main)
+#   --reinstall             Refresh files without root (skips system socket units)
 #   --help                  Show this help message
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
@@ -19,6 +20,7 @@ set -euo pipefail
 # ── defaults ──────────────────────────────────────────────────────────────────
 VARIANT="caddy"
 BRANCH="main"
+REINSTALL=false
 ABSTRACTS_EXPLORER_TAG="${ABSTRACTS_EXPLORER_TAG:-latest}"
 BASE_URL=""  # set after parsing args
 DEPLOY_DIR="$HOME/abstracts-explorer"
@@ -36,6 +38,7 @@ usage() {
 Usage: install-podman.sh [OPTIONS]
   --variant caddy|nginx   TLS variant (default: caddy)
   --branch  BRANCH        Git branch to download from (default: main)
+  --reinstall             Refresh files without root (skips system socket units)
   --help                  Show this help message
 EOF
     exit 0
@@ -121,6 +124,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --variant) VARIANT="${2:?--variant requires a value}"; shift 2 ;;
         --branch)  BRANCH="${2:?--branch requires a value}";   shift 2 ;;
+        --reinstall) REINSTALL=true; shift ;;
         --help)    usage ;;
         *)         die "Unknown option: $1" ;;
     esac
@@ -215,25 +219,34 @@ elif [ "$VARIANT" = "caddy" ]; then
 fi
 
 # System socket units (needs sudo)
-info "Installing system socket units (requires sudo)"
-TMPDIR_SYSTEM=$(mktemp -d)
-download "$BASE_URL/systemd/system/abstracts-web.socket" \
-         "$TMPDIR_SYSTEM/abstracts-web.socket"
-download "$BASE_URL/systemd/system/abstracts-web-proxy.service" \
-         "$TMPDIR_SYSTEM/abstracts-web-proxy.service"
+if [ "$REINSTALL" = true ]; then
+    if [ -f /etc/systemd/system/abstracts-web.socket ] \
+        && [ -f /etc/systemd/system/abstracts-web-proxy.service ]; then
+        ok "System socket units already installed — skipping (no sudo needed)"
+    else
+        warn "System socket units are not installed. Run once without --reinstall to install them with sudo."
+    fi
+else
+    info "Installing system socket units (requires sudo)"
+    TMPDIR_SYSTEM=$(mktemp -d)
+    download "$BASE_URL/systemd/system/abstracts-web.socket" \
+             "$TMPDIR_SYSTEM/abstracts-web.socket"
+    download "$BASE_URL/systemd/system/abstracts-web-proxy.service" \
+             "$TMPDIR_SYSTEM/abstracts-web-proxy.service"
 
-# Set SocketUser to the current user's UID
-CURRENT_UID=$(id -u)
-sed -i "s/^SocketUser=.*/SocketUser=${CURRENT_UID}/" \
-    "$TMPDIR_SYSTEM/abstracts-web.socket"
+    # Set SocketUser to the current user's UID
+    CURRENT_UID=$(id -u)
+    sed -i "s/^SocketUser=.*/SocketUser=${CURRENT_UID}/" \
+        "$TMPDIR_SYSTEM/abstracts-web.socket"
 
-sudo cp "$TMPDIR_SYSTEM/abstracts-web.socket"       /etc/systemd/system/
-sudo cp "$TMPDIR_SYSTEM/abstracts-web-proxy.service" /etc/systemd/system/
-rm -rf "$TMPDIR_SYSTEM"
+    sudo cp "$TMPDIR_SYSTEM/abstracts-web.socket"       /etc/systemd/system/
+    sudo cp "$TMPDIR_SYSTEM/abstracts-web-proxy.service" /etc/systemd/system/
+    rm -rf "$TMPDIR_SYSTEM"
 
-sudo systemctl daemon-reload
-sudo systemctl enable --now abstracts-web.socket
-ok "System socket units installed and enabled"
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now abstracts-web.socket
+    ok "System socket units installed and enabled"
+fi
 
 # Reload the user systemd manager so Podman Quadlet generates the .service
 # units from the .container / .volume / .network files installed above.
@@ -243,9 +256,13 @@ systemctl --user daemon-reload
 ok "User systemd daemon reloaded — quadlet service units are now available"
 
 # ── 3. Enable lingering ──────────────────────────────────────────────────────
-info "Enabling lingering for user $USER"
-loginctl enable-linger "$USER"
-ok "Lingering enabled"
+if loginctl show-user "$USER" -p Linger 2>/dev/null | grep -q '^Linger=yes$'; then
+    ok "Lingering already enabled for user $USER"
+else
+    info "Enabling lingering for user $USER"
+    loginctl enable-linger "$USER"
+    ok "Lingering enabled"
+fi
 
 # ── 4. Generate database password and store as Podman secret ─────────────────
 if podman secret inspect postgres-password >/dev/null 2>&1; then
@@ -291,8 +308,14 @@ elif [ "$VARIANT" = "caddy" ]; then
     echo ""
 fi
 
-warn "Create the LLM backend API token secret:"
-echo "  printf '%s' 'YOUR_TOKEN' | podman secret create llm-backend-auth-token -"
+if podman secret inspect llm-backend-auth-token >/dev/null 2>&1; then
+    LLM_TOKEN_EXISTS=1
+    ok "Podman secret 'llm-backend-auth-token' already exists — keeping it"
+else
+    LLM_TOKEN_EXISTS=0
+    warn "Create the LLM backend API token secret:"
+    echo "  printf '%s' 'YOUR_TOKEN' | podman secret create llm-backend-auth-token -"
+fi
 echo ""
 warn "Review and edit the environment file:"
 echo "  $DEPLOY_DIR/abstracts-explorer.env"
@@ -302,13 +325,19 @@ echo "  podman exec abstracts-ollaya ollaya pull laya:multilingual"
 echo ""
 
 # ── 7. Print next steps ──────────────────────────────────────────────────────
+if [ "$LLM_TOKEN_EXISTS" = "1" ]; then
+    TOKEN_STEP="  1. LLM backend API token secret 'llm-backend-auth-token' already exists."
+else
+    TOKEN_STEP="  1. Create the LLM backend API token secret:
+       printf '%s' 'YOUR_TOKEN' | podman secret create llm-backend-auth-token -"
+fi
+
 cat <<EOF
 
 $(ok "Installation complete!")
 
 Next steps:
-  1. Create the LLM backend API token secret:
-       printf '%s' 'YOUR_TOKEN' | podman secret create llm-backend-auth-token -
+$TOKEN_STEP
 
   2. Edit the environment file:
        nano $DEPLOY_DIR/abstracts-explorer.env

@@ -698,6 +698,113 @@ class TestEmbeddingsManager:
         embeddings_manager.close()
 
 
+def _add_shared_content_papers(db, title, abstract, original_ids):
+    """Add one paper per original_id, all sharing title and abstract."""
+    from abstracts_explorer.plugin import LightweightPaper
+
+    uids = []
+    for original_id in original_ids:
+        paper = LightweightPaper(
+            original_id=original_id,
+            title=title,
+            abstract=abstract,
+            authors=["Author"],
+            session="Session",
+            poster_position=f"P{original_id}",
+            year=2025,
+            conference="NeurIPS",
+        )
+        uids.append(db.add_paper(paper))
+    return uids
+
+
+def test_embed_from_database_dedupes_identical_abstracts(embeddings_manager, tmp_path, mock_lm_studio):
+    """Identical abstracts are embedded once and the vector is shared across UIDs."""
+    from abstracts_explorer.database import DatabaseManager
+
+    db_path = tmp_path / "dedupe.db"
+    set_test_db(db_path)
+    with DatabaseManager() as db:
+        db.create_tables()
+        uids = _add_shared_content_papers(db, "Shared Title", "Identical abstract text.", [1, 2])
+
+    embeddings_manager.create_collection()
+
+    count = embeddings_manager.embed_from_database()
+
+    assert count == 2
+    create = embeddings_manager.openai_client.embeddings.create
+    assert create.call_count == 1
+    assert len(create.call_args.kwargs["input"]) == 1
+
+    stored = embeddings_manager.collection.get(ids=uids, include=["embeddings"])
+    assert sorted(stored["ids"]) == sorted(uids)
+    assert len(stored["embeddings"]) == 2
+    assert list(stored["embeddings"][0]) == list(stored["embeddings"][1])
+    embeddings_manager.close()
+
+
+def test_embed_from_database_dedupes_across_batches(embeddings_manager, tmp_path, mock_lm_studio, monkeypatch):
+    """Duplicates sharing content are embedded once even when spread across batches."""
+    from abstracts_explorer.database import DatabaseManager
+    from abstracts_explorer.embeddings import ingest
+
+    monkeypatch.setattr(ingest, "EMBED_BATCH_SIZE", 1)
+
+    db_path = tmp_path / "dedupe_batches.db"
+    set_test_db(db_path)
+    with DatabaseManager() as db:
+        db.create_tables()
+        _add_shared_content_papers(db, "Shared Title", "Identical abstract text.", [1, 2])
+        _add_shared_content_papers(db, "Unique Title", "A different abstract.", [3])
+
+    embeddings_manager.create_collection()
+
+    count = embeddings_manager.embed_from_database()
+
+    assert count == 3
+    create = embeddings_manager.openai_client.embeddings.create
+    sent_texts = []
+    for call in create.call_args_list:
+        sent_texts.extend(call.kwargs["input"])
+    assert len(sent_texts) == 2
+    assert len(set(sent_texts)) == 2
+    assert embeddings_manager.collection.count() == 3
+    embeddings_manager.close()
+
+
+def test_embed_from_database_does_not_dedupe_across_years(embeddings_manager, tmp_path, mock_lm_studio):
+    """Identical content in different years is treated as a separate paper."""
+    from abstracts_explorer.database import DatabaseManager
+    from abstracts_explorer.plugin import LightweightPaper
+
+    db_path = tmp_path / "dedupe_years.db"
+    set_test_db(db_path)
+    with DatabaseManager() as db:
+        db.create_tables()
+        for year, original_id in ((2024, 1), (2025, 2)):
+            db.add_paper(
+                LightweightPaper(
+                    original_id=original_id,
+                    title="Shared Title",
+                    abstract="Identical abstract text.",
+                    authors=["Author"],
+                    session="Session",
+                    poster_position=f"P{original_id}",
+                    year=year,
+                    conference="NeurIPS",
+                )
+            )
+
+    embeddings_manager.create_collection()
+
+    count = embeddings_manager.embed_from_database()
+
+    assert count == 2
+    assert embeddings_manager.collection.count() == 2
+    embeddings_manager.close()
+
+
 def test_check_model_compatibility_no_database(embeddings_manager, tmp_path):
     """Checking model compatibility creates an empty database and reports no stored model."""
 

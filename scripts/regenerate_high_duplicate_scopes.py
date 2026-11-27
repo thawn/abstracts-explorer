@@ -374,7 +374,7 @@ def main() -> int:
     print("Commands:")
     for scope_conference, scope_year, _, _ in scopes:
         print(
-            f"  abstracts-explorer clustering pre-generate --conference {scope_conference} --year {scope_year} --force"
+            f"  abstracts-explorer clustering cache populate --conference {scope_conference} --year {scope_year} --force"
         )
 
     if not args.execute:

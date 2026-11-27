@@ -22,16 +22,16 @@ Start the web interface using the new CLI command:
 
 ```bash
 # Start with defaults (127.0.0.1:5000)
-uv run abstracts-explorer web-ui
+uv run abstracts-explorer serve web
 
 # Specify host and port
-uv run abstracts-explorer web-ui --host 0.0.0.0 --port 8080
+uv run abstracts-explorer serve web --host 0.0.0.0 --port 8080
 
 # Enable debug mode
-uv run abstracts-explorer web-ui --debug
+uv run abstracts-explorer serve web --debug
 
 # Get help
-uv run abstracts-explorer web-ui --help
+uv run abstracts-explorer serve web --help
 ```
 
 ### Programmatic Usage
@@ -140,7 +140,7 @@ npm run typecheck && npm test                     # Type-check and test the Type
 The web UI is fully integrated into the package:
 
 1. **Module Location**: `src/abstracts_explorer/web_ui/`
-2. **CLI Command**: `uv run abstracts-explorer web-ui`
+2. **CLI Command**: `uv run abstracts-explorer serve web`
 3. **Optional Dependency**: Install with `uv sync --extra web`
 4. **Test Coverage**: 18 comprehensive tests
 
@@ -149,7 +149,7 @@ The web UI is fully integrated into the package:
 If you were using the standalone `web/` directory before:
 
 - **Old**: `cd web && python app.py`
-- **New**: `uv run abstracts-explorer web-ui`
+- **New**: `uv run abstracts-explorer serve web`
 
 The functionality is identical, but now it's properly integrated into the package structure.
 
@@ -169,6 +169,6 @@ Or install Flask manually if not using uv:
 
 ## Notes
 
-- The web UI requires a database to be created first (`abstracts-explorer download`)
-- For semantic search, embeddings must be generated (`abstracts-explorer create-embeddings`)
+- The web UI requires a database to be created first (`abstracts-explorer data download`)
+- For semantic search, embeddings must be generated (`abstracts-explorer embeddings create`)
 - For AI chat, OpenAI-compatible API (such as LM Studio or blablador) must be running with a compatible model loaded

@@ -15,7 +15,7 @@ The codebase comprises **~21,200 lines** of Python (plus the dev-only
 | `plugins/` | 4,079 | Conference downloader plugins (11 plugins) |
 | `clustering/` package | — | BERTopic + UMAP, LLM labeling, hierarchy tree, cache |
 | `plugin/` package | 1,753 | Plugin framework, models, registry, HTTP, persistence |
-| `registry.py` | 1,684 | OCI registry upload/download |
+| `registry.py` | 1,684 | OCI registry push/pull |
 | `mcp/` package | 1,481 | MCP server, resources, cache, tool implementations (8 tools) |
 | `embeddings/` package | 1,426 | ChromaDB store, generation, queries, ingestion, artifacts |
 | `rag/` package | 1,064 | RAG agent, tool wrappers, conversation, extraction |
@@ -131,24 +131,26 @@ graph TD
     MAIN["main()"] --> PARSE[Parse Arguments]
     PARSE --> DISPATCH{Command?}
 
-    DISPATCH -->|download| DL[download_command]
-    DISPATCH -->|create-embeddings| CE[create_embeddings_command]
-    DISPATCH -->|pre-process| PP[pre_process_command]
-    DISPATCH -->|search| SR[search_command]
-    DISPATCH -->|chat| CH[chat_command]
-    DISPATCH -->|web-ui| WU[web_ui_command]
+    DISPATCH -->|data download| DL[download_command]
+    DISPATCH -->|data delete| DD[delete_data_command]
+    DISPATCH -->|data check| DC[consistency_check_command]
+    DISPATCH -->|embeddings create| CE[create_embeddings_command]
+    DISPATCH -->|pipeline run| PP[pre_process_command]
+    DISPATCH -->|papers search| SR[search_command]
+    DISPATCH -->|papers chat| CH[chat_command]
+    DISPATCH -->|serve web| WU[web_ui_command]
+    DISPATCH -->|serve mcp| MS[mcp_server_command]
     DISPATCH -->|clustering run| CL[cluster_embeddings_command]
-    DISPATCH -->|clustering clear-cache| CC[clear_clustering_cache_command]
-    DISPATCH -->|clustering pre-generate| PG[pre_generate_clustering_command]
-    DISPATCH -->|delete-data| DD[delete_data_command]
-    DISPATCH -->|mcp-server| MS[mcp_server_command]
+    DISPATCH -->|clustering cache clear| CC[clear_clustering_cache_command]
+    DISPATCH -->|clustering cache populate| PG[pre_generate_clustering_command]
     DISPATCH -->|eval generate| EG[eval_generate_command]
     DISPATCH -->|eval verify| EV[eval_verify_command]
     DISPATCH -->|eval run| ER[eval_run_command]
-    DISPATCH -->|eval results| ERS[eval_results_command]
-    DISPATCH -->|eval clear| ECL[eval_clear_command]
-    DISPATCH -->|registry upload| RU[registry_upload_command]
-    DISPATCH -->|registry download| RD[registry_download_command]
+    DISPATCH -->|eval list| ERS[eval_results_command]
+    DISPATCH -->|eval clear-pairs| ECL[eval_clear_command]
+    DISPATCH -->|eval clear-results| ECR[eval_clear_results_command]
+    DISPATCH -->|registry push| RU[registry_upload_command]
+    DISPATCH -->|registry pull| RD[registry_download_command]
     DISPATCH -->|registry list| RL[registry_list_command]
     DISPATCH -->|registry delete| RDEL[registry_delete_command]
 

@@ -35,7 +35,7 @@ Plugins with a different companion URL convention can override
 Official AAAI conference proceedings downloader using Open Journal Systems (OJS).
 
 ```bash
-uv run abstracts-explorer download --conference aaai --year 2026
+uv run abstracts-explorer data download --conference aaai --year 2026
 ```
 
 - **Years**: 2010 onward; current-year availability is checked against proceedings.
@@ -64,7 +64,7 @@ automatic retries.
 Official NeurIPS conference data downloader.
 
 ```bash
-uv run abstracts-explorer download --conference neurips --year 2025
+uv run abstracts-explorer data download --conference neurips --year 2025
 ```
 
 - **Years**: 1987 onward (2020+ from EventHosts JSON, earlier from the NeurIPS proceedings)
@@ -81,7 +81,7 @@ a `<cache>.failed.json` sidecar and retried on the next run.
 Official ICML conference data downloader.
 
 ```bash
-uv run abstracts-explorer download --conference icml --year 2019
+uv run abstracts-explorer data download --conference icml --year 2019
 ```
 
 - **Years**: 2013 onward (2020+ from EventHosts JSON, earlier from PMLR proceedings)
@@ -93,7 +93,7 @@ uv run abstracts-explorer download --conference icml --year 2019
 Official ICLR conference data downloader.
 
 ```bash
-uv run abstracts-explorer download --conference iclr --year 2019
+uv run abstracts-explorer data download --conference iclr --year 2019
 ```
 
 - **Years**: 2017 onward (2020+ from EventHosts JSON, earlier from OpenReview)
@@ -116,7 +116,7 @@ the downloader falls back to the Semantic Scholar bulk search API. Use
 ML4PS (Machine Learning for Physical Sciences) workshop downloader.
 
 ```bash
-uv run abstracts-explorer download --conference ml4ps --year 2025
+uv run abstracts-explorer data download --conference ml4ps --year 2025
 ```
 
 - **Years**: 2025
@@ -128,7 +128,7 @@ uv run abstracts-explorer download --conference ml4ps --year 2025
 HAICON (Helmholtz AI Conference) data downloader.
 
 ```bash
-uv run abstracts-explorer download --conference haicon --year 2026
+uv run abstracts-explorer data download --conference haicon --year 2026
 ```
 
 - **Years**: 2026+
@@ -140,7 +140,7 @@ uv run abstracts-explorer download --conference haicon --year 2026
 AGU annual meeting abstracts from the public m-anage program API.
 
 ```bash
-uv run abstracts-explorer download --conference agu --year 2026
+uv run abstracts-explorer data download --conference agu --year 2026
 ```
 
 - **Years**: 2014 onward (2014–2023 use the legacy `fmYY` slug, 2024+ use `aguYY`)
@@ -165,17 +165,17 @@ uv run abstracts-explorer download --conference agu --year 2026
 ### List Available Plugins
 
 ```bash
-uv run abstracts-explorer download --list-plugins
+uv run abstracts-explorer data download --list-plugins
 ```
 
 ### Download with a Plugin
 
 ```bash
 # Basic usage
-uv run abstracts-explorer download --conference ml4ps --year 2025
+uv run abstracts-explorer data download --conference ml4ps --year 2025
 
 # With options
-uv run abstracts-explorer download \
+uv run abstracts-explorer data download \
     --conference ml4ps \
     --year 2025 \
     \
@@ -306,7 +306,7 @@ _register()
 from my_workshop_plugin import MyWorkshopPlugin
 
 # Or use via CLI
-# uv run abstracts-explorer download --conference myworkshop --year 2025
+# uv run abstracts-explorer data download --conference myworkshop --year 2025
 ```
 
 #### Flexible Author Format
@@ -484,7 +484,7 @@ Or set `PYTHONPATH`:
 
 ```bash
 export PYTHONPATH=/path/to/plugins:$PYTHONPATH
-uv run abstracts-explorer download --conference myplugin --year 2025
+uv run abstracts-explorer data download --conference myplugin --year 2025
 ```
 
 ## Testing Your Plugin

@@ -229,7 +229,7 @@ response = chat.query("What are the main topics?")
 
 MCP tools require:
 
-- **Embeddings created**: Run `abstracts-explorer create-embeddings` first
+- **Embeddings created**: Run `abstracts-explorer embeddings create` first
 - **Papers downloaded**: Have conference data in database
 - **Tool-capable LLM**: Model must support function calling (e.g., GPT-3.5+, Gemma 3, Claude)
 

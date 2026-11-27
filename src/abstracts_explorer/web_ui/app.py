@@ -395,7 +395,7 @@ def check_embedding_model():
             f"Embedding model mismatch detected! The embeddings were created with '{stored_model}' "
             f"but the current configuration uses '{current_model}'. Embeddings from different models "
             f"are incompatible. Please recreate the embeddings using: "
-            f"abstracts-explorer create-embeddings --force"
+            f"abstracts-explorer embeddings create --force"
         )
 
     return jsonify(
@@ -705,8 +705,8 @@ def compute_clusters():
 
     Clustering always uses BERTopic with Agglomerative clustering
     (distance_threshold=0.5, linkage=ward) on 5-D UMAP embeddings and
-    2-D UMAP visualization.  Results must be pre-generated via the CLI
-    ``clustering pre-generate`` command.
+    2-D UMAP visualization.  Results must be populated via the CLI
+    ``clustering cache populate`` command.
 
     Request Body
     ------------
@@ -776,7 +776,7 @@ def compute_clusters():
         if "tree" not in hierarchy:
             raise ApiError(
                 "Cached clustering data is outdated. Regenerate it with "
-                "'abstracts-explorer clustering pre-generate --force'.",
+                "'abstracts-explorer clustering cache populate --force'.",
                 409,
             )
         if not locations:
@@ -803,7 +803,7 @@ def compute_clusters():
         jsonify(
             {
                 "error": "No pre-computed clustering data available for this conference/year combination. "
-                "Run 'abstracts-explorer clustering pre-generate' to generate clustering data.",
+                "Run 'abstracts-explorer clustering cache populate' to generate clustering data.",
             }
         ),
         404,
@@ -1264,13 +1264,13 @@ def run_server(host="127.0.0.1", port=5001, debug=False, dev=False, threads=None
             print(f"\nThe database file does not exist: {db_path}", file=sys.stderr)
             print("\nTo create and populate the database, run one of these commands:", file=sys.stderr)
             print("  # Download NeurIPS papers:", file=sys.stderr)
-            print("  abstracts-explorer download --conference neurips --year 2025", file=sys.stderr)
+            print("  abstracts-explorer data download --conference neurips --year 2025", file=sys.stderr)
             print("\n  # Or use a different conference/year:", file=sys.stderr)
-            print("  abstracts-explorer download --conference iclr --year 2025", file=sys.stderr)
+            print("  abstracts-explorer data download --conference iclr --year 2025", file=sys.stderr)
             print("\n  # List available plugins:", file=sys.stderr)
-            print("  abstracts-explorer download --list-plugins", file=sys.stderr)
+            print("  abstracts-explorer data download --list-plugins", file=sys.stderr)
             print("\nAfter downloading papers, you may also want to create embeddings:", file=sys.stderr)
-            print("  abstracts-explorer create-embeddings", file=sys.stderr)
+            print("  abstracts-explorer embeddings create", file=sys.stderr)
             raise FileNotFoundError(f"Database not found: {db_path}")
     # For PostgreSQL, we can't check file existence - connection will be validated at runtime
 

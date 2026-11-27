@@ -43,16 +43,16 @@ Download conference abstracts:
 
 ```bash
 # Download abstracts for a specific conference and year
-uv run abstracts-explorer download --year 2025
+uv run abstracts-explorer data download --year 2025
 
 # Or download from a workshop using plugins
-uv run abstracts-explorer download --conference ml4ps --year 2025
+uv run abstracts-explorer data download --conference ml4ps --year 2025
 ```
 
 Alternatively, download pre-built data from an OCI registry (no LLM backend required):
 
 ```bash
-uv run abstracts-explorer registry download \
+uv run abstracts-explorer registry pull \
   -r ghcr.io/thawn/abstracts-data \
   --conference neurips --year 2025
 ```
@@ -60,19 +60,19 @@ uv run abstracts-explorer registry download \
 Create embeddings for semantic search:
 
 ```bash
-uv run abstracts-explorer create-embeddings
+uv run abstracts-explorer embeddings create
 ```
 
 Search papers:
 
 ```bash
-uv run abstracts-explorer search "machine learning"
+uv run abstracts-explorer papers search "machine learning"
 ```
 
 Chat with papers using RAG:
 
 ```bash
-uv run abstracts-explorer chat
+uv run abstracts-explorer papers chat
 ```
 
 ## Documentation Contents

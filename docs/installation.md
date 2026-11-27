@@ -264,7 +264,7 @@ You should see the available commands listed.
 Test the web UI:
 
 ```bash
-abstracts-explorer web-ui
+abstracts-explorer serve web
 ```
 
 The web interface should start at <http://127.0.0.1:5001>.
@@ -301,13 +301,13 @@ Instead of downloading conference data from source APIs and generating embedding
 
 ```bash
 # Download all available conference data (e.g. NeurIPS, ICLR, ICML)
-uv run abstracts-explorer registry download \
+uv run abstracts-explorer registry pull \
   -r ghcr.io/thawn/abstracts-data \
   --conference all \
   --embedding-model text-embedding-qwen3-embedding-4b
 
 # Or download a specific conference and year
-uv run abstracts-explorer registry download \
+uv run abstracts-explorer registry pull \
   -r ghcr.io/thawn/abstracts-data \
   --conference neurips --year 2025
 

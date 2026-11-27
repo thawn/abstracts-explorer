@@ -14,7 +14,7 @@ Affected scopes (from the 2026-11-23 embedding recovery):
 - NeurIPS 1987-2003 and 2019
 
 Run this only after ``scripts/migrate_embeddings_compaction.py`` and
-``abstracts-explorer create-embeddings`` have completed. Run it as a single
+``abstracts-explorer embeddings create`` have completed. Run it as a single
 process; the local ChromaDB lock rejects parallel runs.
 
 Usage::

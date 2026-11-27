@@ -60,6 +60,8 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
         - collection: Name of the ChromaDB collection
         - output: Path to export JSON results
         - limit: Maximum number of embeddings to process
+        - conference: Conference to filter by (optional)
+        - year: Year to filter by (optional)
 
     Returns
     -------
@@ -74,6 +76,8 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
 
     requests_per_minute = getattr(args, "requests_per_minute", config.requests_per_minute)
     rate_limit_str = f"{requests_per_minute} req/min" if requests_per_minute > 0 else "disabled"
+    conference = _resolve_conference_arg(getattr(args, "conference", None))
+    year = getattr(args, "year", None)
     _print_header(
         "Clustering",
         f"Embeddings: {config.embedding_db}",
@@ -82,6 +86,8 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
         "Clustering: BERTopic + agglomerative (ward, distance_threshold=0.5)",
         f"Rate limit: {rate_limit_str}",
         f"Limit: {args.limit} papers" if args.limit else None,
+        f"Conference: {conference}" if conference else None,
+        f"Year: {year}" if year is not None else None,
     )
 
     from abstracts_explorer.clustering import ClusteringError
@@ -94,6 +100,8 @@ def cluster_embeddings_command(args: argparse.Namespace) -> int:
             output_path=args.output,
             limit=args.limit,
             show_progress=True,
+            conferences=[conference] if conference else None,
+            years=[year] if year is not None else None,
             use_llm_labels=not getattr(args, "no_llm_labels", False),
             requests_per_minute=requests_per_minute,
         )
@@ -170,20 +178,20 @@ def clear_clustering_cache_command(args: argparse.Namespace) -> int:
 
 def pre_generate_clustering_command(args: argparse.Namespace) -> int:
     """
-    Pre-generate clustering results for one or all conference/year combinations.
+    Populate the clustering cache for one or all conference/year combinations.
 
     Uses BERTopic with Agglomerative clustering (ward linkage, distance
     threshold 0.5) on 5-D UMAP embeddings and 2-D UMAP visualization.
     Results are persisted to the database cache so that the web UI can serve
     them instantly.
 
-    Without ``--conference`` or ``--year``, generates clustering for every
+    Without ``--conference`` or ``--year``, populates the cache for every
     conference in the database combined with each individual year.
 
-    With ``--conference`` only, generates for that conference for each individual year.
+    With ``--conference`` only, populates the cache for that conference for each individual year.
 
-    With both ``--conference`` and ``--year``, generates for that specific
-    conference + year only.
+    With both ``--conference`` and ``--year``, populates the cache for that
+    specific conference + year only.
 
     Parameters
     ----------
@@ -242,7 +250,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
         if yr is not None:
             extra_lines.append(f"Year: {yr}")
     _print_header(
-        "Pre-generate Clustering",
+        "Populate Clustering Cache",
         f"Embeddings: {config.embedding_db}",
         f"Collection: {args.collection}",
         "Clustering: BERTopic + agglomerative (ward, distance_threshold=0.5)",
@@ -272,7 +280,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
                     label += f" {yr}"
                 else:
                     raise ValueError(
-                        "Year must be specified for clustering pre-generation to ensure manageable computation"
+                        "Year must be specified for clustering cache population to ensure manageable computation"
                     )
 
                 print(f"\n🚀 Clustering {label}...")
@@ -282,7 +290,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
                         results = _load("compute_clusters_with_cache")(
                             embeddings_manager=em,
                             database=db,
-                            embedding_model=config.embedding_model,
+                            embedding_model=getattr(args, "embedding_model", config.embedding_model),
                             limit=None,
                             force=args.force,
                             conferences=c_conferences,
@@ -303,7 +311,7 @@ def pre_generate_clustering_command(args: argparse.Namespace) -> int:
                     fail_count += 1
 
             print(f"\n{'=' * 70}")
-            print(f"✅ Pre-generation complete: {success_count} succeeded, {fail_count} failed")
+            print(f"✅ Cache population complete: {success_count} succeeded, {fail_count} failed")
 
         return 0 if fail_count == 0 else 1
 

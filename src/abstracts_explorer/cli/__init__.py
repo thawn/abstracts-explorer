@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from abstracts_explorer.cli.embeddings import create_embeddings_command
     from abstracts_explorer.cli.evaluation import (
         eval_clear_command,
+        eval_clear_results_command,
         eval_generate_command,
         eval_results_command,
         eval_run_command,
@@ -66,6 +67,7 @@ if TYPE_CHECKING:
         registry_delete_command,
         registry_download_command,
         registry_list_command,
+        registry_update_conference_image_command,
         registry_upload_command,
     )
     from abstracts_explorer.cli.search_chat import chat_command, search_command
@@ -91,6 +93,7 @@ _LAZY_IMPORTS = {
     "download_command": "abstracts_explorer.cli.download",
     "create_embeddings_command": "abstracts_explorer.cli.embeddings",
     "eval_clear_command": "abstracts_explorer.cli.evaluation",
+    "eval_clear_results_command": "abstracts_explorer.cli.evaluation",
     "eval_generate_command": "abstracts_explorer.cli.evaluation",
     "eval_results_command": "abstracts_explorer.cli.evaluation",
     "eval_run_command": "abstracts_explorer.cli.evaluation",
@@ -113,6 +116,7 @@ _LAZY_IMPORTS = {
     "registry_delete_command": "abstracts_explorer.cli.registry",
     "registry_download_command": "abstracts_explorer.cli.registry",
     "registry_list_command": "abstracts_explorer.cli.registry",
+    "registry_update_conference_image_command": "abstracts_explorer.cli.registry",
     "registry_upload_command": "abstracts_explorer.cli.registry",
     "chat_command": "abstracts_explorer.cli.search_chat",
     "search_command": "abstracts_explorer.cli.search_chat",
@@ -166,6 +170,7 @@ __all__ = [
     "delete_data_command",
     "download_command",
     "eval_clear_command",
+    "eval_clear_results_command",
     "eval_generate_command",
     "eval_results_command",
     "eval_run_command",
@@ -181,6 +186,7 @@ __all__ = [
     "registry_delete_command",
     "registry_download_command",
     "registry_list_command",
+    "registry_update_conference_image_command",
     "registry_upload_command",
     "search_command",
     "setup_logging",

@@ -1,5 +1,5 @@
 """
-``pre-process`` pipeline
+``pipeline run`` command
 
 """
 
@@ -8,6 +8,7 @@ import logging
 import queue
 import sys
 import threading
+from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
 
@@ -32,13 +33,13 @@ def _build_pre_process_embeddings_args(
     force: bool,
     non_interactive: bool = False,
 ) -> argparse.Namespace:
-    """Build the ``create-embeddings`` argument namespace for a pipeline unit."""
+    """Build the ``embeddings create`` argument namespace for a pipeline unit."""
     return argparse.Namespace(
         conference=conference,
         year=year,
         collection=getattr(args, "collection", config.collection_name),
-        backend_url=getattr(args, "backend_url", config.llm_backend_url),
-        model=getattr(args, "model", config.embedding_model),
+        embedding_backend_url=getattr(args, "embedding_backend_url", config.llm_backend_url),
+        embedding_model=getattr(args, "embedding_model", config.embedding_model),
         force=force,
         where=getattr(args, "where", None),
         requests_per_minute=getattr(args, "requests_per_minute", config.requests_per_minute),
@@ -55,11 +56,12 @@ def _build_pre_process_clustering_args(
     year: Optional[int],
     force: bool,
 ) -> argparse.Namespace:
-    """Build the ``clustering pre-generate`` argument namespace for a pipeline unit."""
+    """Build the ``clustering cache populate`` argument namespace for a pipeline unit."""
     return argparse.Namespace(
         conference=conference,
         year=year,
         collection=getattr(args, "collection", config.collection_name),
+        embedding_model=getattr(args, "embedding_model", config.embedding_model),
         force=force,
         no_llm_labels=getattr(args, "no_llm_labels", False),
         requests_per_minute=getattr(args, "requests_per_minute", config.requests_per_minute),
@@ -102,17 +104,17 @@ def _post_process_worker(
                 )
             )
             if rc != 0:
-                failures.append((label, "create-embeddings"))
-                print(f"❌ [{label}] Create-embeddings failed (exit code {rc})", file=sys.stderr)
+                failures.append((label, "embeddings create"))
+                print(f"❌ [{label}] Embeddings create failed (exit code {rc})", file=sys.stderr)
                 continue
 
-            print(f"\n🔮 [{label}] Pre-generating clustering results...")
+            print(f"\n🔮 [{label}] Populating clustering cache...")
             rc = pre_generate_clustering_command(
                 _build_pre_process_clustering_args(args, config, unit_conference, unit_year, force)
             )
             if rc != 0:
-                failures.append((label, "clustering pre-generate"))
-                print(f"❌ [{label}] Clustering pre-generate failed (exit code {rc})", file=sys.stderr)
+                failures.append((label, "clustering cache populate"))
+                print(f"❌ [{label}] Clustering cache populate failed (exit code {rc})", file=sys.stderr)
                 continue
 
             successes.append(label)
@@ -159,8 +161,8 @@ def _embedding_worker(
                     )
                 )
                 if rc != 0:
-                    failures.append((label, "create-embeddings"))
-                    print(f"❌ [{label}] Create-embeddings failed (exit code {rc})", file=sys.stderr)
+                    failures.append((label, "embeddings create"))
+                    print(f"❌ [{label}] Embeddings create failed (exit code {rc})", file=sys.stderr)
                     continue
 
                 successes.append(label)
@@ -191,13 +193,13 @@ def _clustering_worker(
         label = f"{unit_conference} {unit_year}"
 
         try:
-            print(f"\n🔮 [{label}] Pre-generating clustering results...")
+            print(f"\n🔮 [{label}] Populating clustering cache...")
             rc = pre_generate_clustering_command(
                 _build_pre_process_clustering_args(args, config, unit_conference, unit_year, force)
             )
             if rc != 0:
-                failures.append((label, "clustering pre-generate"))
-                print(f"❌ [{label}] Clustering pre-generate failed (exit code {rc})", file=sys.stderr)
+                failures.append((label, "clustering cache populate"))
+                print(f"❌ [{label}] Clustering cache populate failed (exit code {rc})", file=sys.stderr)
                 continue
 
             successes.append(label)
@@ -251,7 +253,7 @@ def _pre_process_parallel(
                 embedding_successes,
                 embedding_failures,
             ),
-            name="pre-process-embeddings",
+            name="pipeline-embeddings",
             daemon=True,
         )
         clustering_worker = threading.Thread(
@@ -264,7 +266,7 @@ def _pre_process_parallel(
                 clustering_successes,
                 clustering_failures,
             ),
-            name="pre-process-clustering",
+            name="pipeline-clustering",
             daemon=True,
         )
         embedding_worker.start()
@@ -295,7 +297,7 @@ def _pre_process_parallel(
         worker = threading.Thread(
             target=_post_process_worker,
             args=(unit_queue, args, config, force, successes, failures),
-            name="pre-process-post",
+            name="pipeline-post",
             daemon=True,
         )
         worker.start()
@@ -317,13 +319,13 @@ def _pre_process_parallel(
             rc = 1
 
     if rc == 0:
-        print("\n✅ Pre-process pipeline completed successfully!")
+        print("\n✅ Pipeline completed successfully!")
     return rc
 
 
 def pre_process_command(args: argparse.Namespace) -> int:
     """
-    Run the full pre-processing pipeline: download → create-embeddings → clustering pre-generate.
+    Run the full data pipeline: data download → embeddings create → clustering cache populate.
 
     Each ``(conference, year)`` unit is post-processed as soon as its download
     is committed, while the remaining downloads continue in the background.
@@ -339,8 +341,9 @@ def pre_process_command(args: argparse.Namespace) -> int:
         - force: Force re-download / reset embeddings / force recompute clustering
         - ignore_embedding_model_mismatch: Recreate embeddings on model mismatch
           without prompting
-        - no_overlap_post_process: Run embeddings and clustering in one worker
-        - collection, backend_url, model, where, requests_per_minute: Forwarded
+        - serial_post_process: Run embeddings and clustering in one worker
+        - collection, embedding_backend_url, embedding_model, where,
+          requests_per_minute: Forwarded
           to the embeddings and clustering steps
 
     Returns
@@ -356,19 +359,19 @@ def pre_process_command(args: argparse.Namespace) -> int:
     verbose = getattr(args, "verbose", 0)
 
     _print_header(
-        "Pre-process Pipeline",
+        "Data Pipeline",
         f"Conference: {conference}" if conference else None,
         f"Year: {year}" if year is not None else None,
         f"Force: {force}",
         f"Collection: {getattr(args, 'collection', config.collection_name)}",
-        f"Model: {getattr(args, 'model', config.embedding_model)}",
-        "Steps: download → create-embeddings → clustering pre-generate",
+        f"Model: {getattr(args, 'embedding_model', config.embedding_model)}",
+        "Steps: data download → embeddings create → clustering cache populate",
     )
 
     download_args = argparse.Namespace(
         conference=conference,
         year=year,
-        output="data/abstracts.json",
+        output=str(Path(config.data_dir) / "abstracts.json"),
         force=force,
         list_plugins=False,
         max_workers=20,
@@ -376,5 +379,5 @@ def pre_process_command(args: argparse.Namespace) -> int:
         verbose=verbose,
     )
 
-    overlap = not getattr(args, "no_overlap_post_process", False)
+    overlap = not getattr(args, "serial_post_process", False)
     return _pre_process_parallel(args, config, download_args, overlap=overlap)

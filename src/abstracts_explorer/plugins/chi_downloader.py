@@ -51,7 +51,7 @@ class CHIDownloaderPlugin(DownloaderPlugin):
     -----
     Download the JSON for CHI 2024 from the PWA, then run::
 
-        abstracts-explorer download --plugin chi --year 2024 \\
+        abstracts-explorer data download --conference chi --year 2024 \\
             --input-file chi_2024_program.json
 
     Supported content types

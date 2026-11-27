@@ -106,7 +106,17 @@ curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scrip
 # nginx variant (existing SSL certificate):
 curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scripts/install-podman.sh \
   | bash -s -- --variant nginx
+
+# Refresh files/config later without root (after the initial install):
+curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/main/scripts/install-podman.sh \
+  | bash -s -- --reinstall
 ```
+
+The `--reinstall` flag re-downloads quadlet and configuration files, creates any
+missing Podman secrets, and reloads the user systemd daemon without requiring
+`sudo`. It skips the root-owned system socket units (already installed by the
+initial run) and preserves the existing `abstracts-explorer.env` by merging it
+with the new template.
 
 The script:
 1. Downloads all quadlet, configuration, and environment files. If
@@ -132,7 +142,8 @@ systemctl --user set-environment ABSTRACTS_EXPLORER_TAG=v1.2.3
 
 After the script finishes, you only need to:
 
-1. **Create the LLM backend API token secret:**
+1. **Create the LLM backend API token secret** (only if it does not already
+   exist — the install script reports whether it is present):
 
    ```bash
    printf '%s' 'YOUR_BLABLADOR_TOKEN' | podman secret create llm-backend-auth-token -
@@ -196,7 +207,7 @@ printf '%s' 'NEW_VALUE' | podman secret create --replace SECRET_NAME -
 systemctl --user restart abstracts-explorer  # pick up the new value
 ```
 
-**GitHub token (optional):** To enable OCI registry downloads, create the
+**GitHub token (optional):** To enable OCI registry pulls, create the
 secret and then uncomment the `Secret=github-token` line in
 `~/.config/containers/systemd/abstracts-explorer.container`:
 
@@ -253,7 +264,7 @@ After the services are running, use the CLI to [download pre-generated data from
 
 ```bash
 podman exec abstracts-explorer \
-  abstracts-explorer registry download
+  abstracts-explorer registry pull
 ```
 
 #### Run the full pipeline inside the container
@@ -262,11 +273,11 @@ Alternatively, you can run the full [download and embedding pipeline](cli_refere
 
 ```bash
 podman exec abstracts-explorer \
-  abstracts-explorer download
+  abstracts-explorer data download
 podman exec abstracts-explorer \
-  abstracts-explorer create-embeddings
+  abstracts-explorer embeddings create
 podman exec abstracts-explorer \
-  abstracts-explorer clustering pre-generate
+  abstracts-explorer clustering cache populate
 ```
 
 #### Migrate existing data

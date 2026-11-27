@@ -1083,7 +1083,7 @@ class TestCLIEvalCommands:
 
     def test_eval_results_no_runs(self, eval_db, capsys):
         """Test eval results with no evaluation runs."""
-        with patch.object(sys, "argv", ["abstracts-explorer", "eval", "results"]):
+        with patch.object(sys, "argv", ["abstracts-explorer", "eval", "list"]):
             exit_code = main()
             assert exit_code == 0
             captured = capsys.readouterr()
@@ -1103,7 +1103,7 @@ class TestCLIEvalCommands:
         with patch.object(
             sys,
             "argv",
-            ["abstracts-explorer", "eval", "results", "--run-id", "eval-test"],
+            ["abstracts-explorer", "eval", "list", "--run-id", "eval-test"],
         ):
             exit_code = main()
             assert exit_code == 0
@@ -1122,7 +1122,7 @@ class TestCLIEvalCommands:
         with patch.object(
             sys,
             "argv",
-            ["abstracts-explorer", "eval", "results", "--detail"],
+            ["abstracts-explorer", "eval", "list", "--detail"],
         ):
             exit_code = main()
             assert exit_code == 0
@@ -1140,7 +1140,7 @@ class TestCLIEvalClear:
 
     def test_eval_clear_no_pairs(self, eval_db, capsys):
         """eval clear with no accepted pairs prints a friendly message."""
-        with patch.object(sys, "argv", ["abstracts-explorer", "eval", "clear", "--yes"]):
+        with patch.object(sys, "argv", ["abstracts-explorer", "eval", "clear-pairs", "--yes"]):
             exit_code = main()
         assert exit_code == 0
         captured = capsys.readouterr()
@@ -1153,7 +1153,7 @@ class TestCLIEvalClear:
         initial = eval_db_with_pairs.get_eval_qa_pair_count(verified_only=True)
         assert initial >= 1
 
-        with patch.object(sys, "argv", ["abstracts-explorer", "eval", "clear", "--yes"]):
+        with patch.object(sys, "argv", ["abstracts-explorer", "eval", "clear-pairs", "--yes"]):
             exit_code = main()
         assert exit_code == 0
         captured = capsys.readouterr()
@@ -1165,7 +1165,7 @@ class TestCLIEvalClear:
         eval_db_with_pairs.update_eval_qa_pair(1, verified=1)
 
         with (
-            patch.object(sys, "argv", ["abstracts-explorer", "eval", "clear"]),
+            patch.object(sys, "argv", ["abstracts-explorer", "eval", "clear-pairs"]),
             patch("builtins.input", return_value="y"),
         ):
             exit_code = main()
@@ -1179,7 +1179,7 @@ class TestCLIEvalClear:
         count_before = eval_db_with_pairs.get_eval_qa_pair_count(verified_only=True)
 
         with (
-            patch.object(sys, "argv", ["abstracts-explorer", "eval", "clear"]),
+            patch.object(sys, "argv", ["abstracts-explorer", "eval", "clear-pairs"]),
             patch("builtins.input", return_value="n"),
         ):
             exit_code = main()
@@ -1195,10 +1195,10 @@ class TestCLIEvalClear:
 
 
 class TestCLIEvalResultsClear:
-    """Tests for the 'eval results --clear' option."""
+    """Tests for the 'eval clear-results' command."""
 
     def test_eval_results_clear_with_yes(self, eval_db_with_pairs, capsys):
-        """eval results --clear --yes deletes results for the latest run."""
+        """eval clear-results --yes deletes results for the latest run."""
         eval_db_with_pairs.add_eval_result(
             run_id="run-to-clear",
             qa_pair_id=1,
@@ -1213,7 +1213,7 @@ class TestCLIEvalResultsClear:
         )
         assert len(eval_db_with_pairs.get_eval_results(run_id="run-to-clear")) == 2
 
-        with patch.object(sys, "argv", ["abstracts-explorer", "eval", "results", "--clear", "--yes"]):
+        with patch.object(sys, "argv", ["abstracts-explorer", "eval", "clear-results", "--yes"]):
             exit_code = main()
         assert exit_code == 0
         captured = capsys.readouterr()
@@ -1222,7 +1222,7 @@ class TestCLIEvalResultsClear:
         assert len(eval_db_with_pairs.get_eval_results(run_id="run-to-clear")) == 0
 
     def test_eval_results_clear_confirmation_no(self, eval_db_with_pairs, capsys):
-        """eval results --clear with 'n' aborts without deleting."""
+        """eval clear-results with 'n' aborts without deleting."""
         eval_db_with_pairs.add_eval_result(
             run_id="run-keep",
             qa_pair_id=1,
@@ -1230,7 +1230,7 @@ class TestCLIEvalResultsClear:
         )
 
         with (
-            patch.object(sys, "argv", ["abstracts-explorer", "eval", "results", "--clear"]),
+            patch.object(sys, "argv", ["abstracts-explorer", "eval", "clear-results"]),
             patch("builtins.input", return_value="n"),
         ):
             exit_code = main()
@@ -1240,7 +1240,7 @@ class TestCLIEvalResultsClear:
         assert len(eval_db_with_pairs.get_eval_results(run_id="run-keep")) == 1
 
     def test_eval_results_clear_confirmation_uppercase_no(self, eval_db_with_pairs, capsys):
-        """eval results --clear with 'N' (uppercase) aborts without deleting."""
+        """eval clear-results with 'N' (uppercase) aborts without deleting."""
         eval_db_with_pairs.add_eval_result(
             run_id="run-keep2",
             qa_pair_id=1,
@@ -1248,7 +1248,7 @@ class TestCLIEvalResultsClear:
         )
 
         with (
-            patch.object(sys, "argv", ["abstracts-explorer", "eval", "results", "--clear"]),
+            patch.object(sys, "argv", ["abstracts-explorer", "eval", "clear-results"]),
             patch("builtins.input", return_value="N"),
         ):
             exit_code = main()
@@ -1258,8 +1258,8 @@ class TestCLIEvalResultsClear:
         assert len(eval_db_with_pairs.get_eval_results(run_id="run-keep2")) == 1
 
     def test_eval_results_clear_no_results(self, eval_db, capsys):
-        """eval results --clear with no runs prints a friendly message."""
-        with patch.object(sys, "argv", ["abstracts-explorer", "eval", "results", "--clear", "--yes"]):
+        """eval clear-results with no runs prints a friendly message."""
+        with patch.object(sys, "argv", ["abstracts-explorer", "eval", "clear-results", "--yes"]):
             exit_code = main()
         assert exit_code == 0
         captured = capsys.readouterr()
