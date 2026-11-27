@@ -142,7 +142,8 @@ systemctl --user set-environment ABSTRACTS_EXPLORER_TAG=v1.2.3
 
 After the script finishes, you only need to:
 
-1. **Create the LLM backend API token secret:**
+1. **Create the LLM backend API token secret** (only if it does not already
+   exist — the install script reports whether it is present):
 
    ```bash
    printf '%s' 'YOUR_BLABLADOR_TOKEN' | podman secret create llm-backend-auth-token -

@@ -308,8 +308,14 @@ elif [ "$VARIANT" = "caddy" ]; then
     echo ""
 fi
 
-warn "Create the LLM backend API token secret:"
-echo "  printf '%s' 'YOUR_TOKEN' | podman secret create llm-backend-auth-token -"
+if podman secret inspect llm-backend-auth-token >/dev/null 2>&1; then
+    LLM_TOKEN_EXISTS=1
+    ok "Podman secret 'llm-backend-auth-token' already exists — keeping it"
+else
+    LLM_TOKEN_EXISTS=0
+    warn "Create the LLM backend API token secret:"
+    echo "  printf '%s' 'YOUR_TOKEN' | podman secret create llm-backend-auth-token -"
+fi
 echo ""
 warn "Review and edit the environment file:"
 echo "  $DEPLOY_DIR/abstracts-explorer.env"
@@ -319,13 +325,19 @@ echo "  podman exec abstracts-ollaya ollaya pull laya:multilingual"
 echo ""
 
 # ── 7. Print next steps ──────────────────────────────────────────────────────
+if [ "$LLM_TOKEN_EXISTS" = "1" ]; then
+    TOKEN_STEP="  1. LLM backend API token secret 'llm-backend-auth-token' already exists."
+else
+    TOKEN_STEP="  1. Create the LLM backend API token secret:
+       printf '%s' 'YOUR_TOKEN' | podman secret create llm-backend-auth-token -"
+fi
+
 cat <<EOF
 
 $(ok "Installation complete!")
 
 Next steps:
-  1. Create the LLM backend API token secret:
-       printf '%s' 'YOUR_TOKEN' | podman secret create llm-backend-auth-token -
+$TOKEN_STEP
 
   2. Edit the environment file:
        nano $DEPLOY_DIR/abstracts-explorer.env
