@@ -12,6 +12,7 @@ from abstracts_explorer.consistency import (
     ConsistencyIssue,
     ConsistencyReport,
     apply_cache_fixes,
+    apply_embedding_fixes,
     check_consistency,
 )
 from abstracts_explorer.embeddings.hashing import hash_text
@@ -42,6 +43,14 @@ class FakeCollection:
             result["embeddings"] = [[0.0] for _ in keys]
         return result
 
+    def delete(self, ids=None, **kwargs):
+        removed = 0
+        for uid in ids or []:
+            if str(uid) in self.records:
+                del self.records[str(uid)]
+                removed += 1
+        return removed
+
 
 class FakeCollectionMeta:
     def __init__(self, name: str) -> None:
@@ -61,6 +70,11 @@ class FakeEmbeddingsManager:
         self.collection_name = collection_name
         self.collection = FakeCollection(collection_name, records)
         self.client = FakeClient(collections or [collection_name])
+
+    def delete_embeddings_by_ids(self, ids):
+        if not ids:
+            return 0
+        return self.collection.delete(ids=list(ids))
 
 
 def _add_paper(db, uid_title, *, conference="NeurIPS", year=2025):
@@ -155,6 +169,32 @@ class TestEmbeddingChecks:
         report = check_consistency(db, em, embedding_model="test-model")
 
         assert any("orphan" in issue.message.lower() for issue in report.errors)
+
+    def test_orphan_embedding_marks_for_fix(self, setup):
+        db, em, *_ = setup
+        em.collection.records["deadbeefdeadbeef"] = hash_text("orphan")
+
+        report = check_consistency(db, em, embedding_model="test-model")
+
+        assert report.fix_embedding_ids == ["deadbeefdeadbeef"]
+
+    def test_apply_embedding_fixes_deletes_orphans(self, setup):
+        db, em, *_ = setup
+        em.collection.records["deadbeefdeadbeef"] = hash_text("orphan")
+        report = check_consistency(db, em, embedding_model="test-model")
+
+        deleted = apply_embedding_fixes(em, report)
+
+        assert deleted == 1
+        assert "deadbeefdeadbeef" not in em.collection.records
+
+    def test_clean_state_has_no_embedding_fixes(self, setup):
+        db, em, *_ = setup
+
+        report = check_consistency(db, em, embedding_model="test-model")
+
+        assert report.fix_embedding_ids == []
+        assert apply_embedding_fixes(em, ConsistencyReport()) == 0
 
     def test_stale_content_hash_is_an_error(self, setup):
         db, em, uid, _ = setup
