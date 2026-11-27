@@ -23,7 +23,7 @@ resource. Every top-level command is a noun group; subcommands are verbs.
 | `pipeline run` | Run the full pipeline (download → embeddings → clustering cache) |
 | `serve web` | Start the web interface |
 | `serve mcp` | Start the MCP server for cluster analysis |
-| `registry push/pull/list/delete` | Push/pull data to/from OCI-compatible container registries |
+| `registry push/pull/list/update-conference-image/delete` | Push/pull data to/from OCI-compatible container registries |
 | `eval generate/verify/run/list/clear-pairs/clear-results` | Automatic evaluation of the RAG system |
 | `feedback stats/list/browse/clear` | Explore user feedback |
 
@@ -641,7 +641,7 @@ is always transferred as a complete unit per conference and year. Use
 `--conference all` to process all conferences at once.
 
 ```text
-usage: abstracts-explorer registry [-h] {push,pull,list,delete} ...
+usage: abstracts-explorer registry [-h] {push,pull,list,update-conference-image,delete} ...
 ```
 
 ### registry push
@@ -649,7 +649,7 @@ usage: abstracts-explorer registry [-h] {push,pull,list,delete} ...
 ```text
 usage: abstracts-explorer registry push [-h] [--repository REPOSITORY]
                                         [--token TOKEN] [--conference CONFERENCE]
-                                        [--year YEAR] [--tag TAG]
+                                        [--year YEAR] [--tag TAG] [--only-tag]
 ```
 
 | Option | Description |
@@ -659,9 +659,39 @@ usage: abstracts-explorer registry push [-h] [--repository REPOSITORY]
 | `--conference, -c CONFERENCE` | Conference name or `all` (default: all) |
 | `--year YEAR` | Conference year (default: all available years) |
 | `--tag TAG` | Custom tag (default: derived from conference, year and embedding model) |
+| `--only-tag` | Do not upload data; re-push existing artifacts under the current version tag |
 
 ```bash
 abstracts-explorer registry push --conference neurips --year 2024 \
+  --repository ghcr.io/thawn/abstracts-data
+
+# Only the version changed (data unchanged): update tags without uploading
+abstracts-explorer registry push --conference neurips --only-tag \
+  --repository ghcr.io/thawn/abstracts-data
+```
+
+### registry update-conference-image
+
+Rebuild the whole-conference image (the conference-level tag that contains
+every year) from the existing per-year artifacts. Only a small config blob and
+the image manifest are uploaded; existing per-year data layers are reused by
+digest, so no data is re-uploaded. Use this after pushing a new year, or to
+refresh the whole-conference image after other per-year changes.
+
+```text
+usage: abstracts-explorer registry update-conference-image [-h] [--repository REPOSITORY]
+                                                          [--token TOKEN] --conference CONFERENCE
+                                                          [--embedding-model EMBEDDING_MODEL]
+```
+
+| Option | Description |
+| ------ | ----------- |
+| `--repository, -r REPOSITORY` / `--token TOKEN` | Registry location and auth |
+| `--conference, -c CONFERENCE` | Conference name (required) |
+| `--embedding-model EMBEDDING_MODEL` | Embedding model (defaults to local DB metadata) |
+
+```bash
+abstracts-explorer registry update-conference-image --conference neurips \
   --repository ghcr.io/thawn/abstracts-data
 ```
 
@@ -710,12 +740,20 @@ abstracts-explorer registry list --repository ghcr.io/thawn/abstracts-data --tag
 ### registry delete
 
 Delete registry package versions whose OCI tag version is strictly below a
-given version. Untagged (dangling) versions are left untouched.
+given version, and/or untagged (dangling) versions. At least one of
+`--below-version` or `--untagged` is required.
+
+Untagged versions are only removed with `--untagged`. Each candidate is
+**verified immediately before deletion**: the version list is re-fetched to
+confirm it is still untagged, and its manifest is checked to ensure it is an
+orphaned data artifact (not an image index or an attestation/referrer). Anything
+that cannot be positively identified as safe is skipped.
 
 ```text
 usage: abstracts-explorer registry delete [-h] [--repository REPOSITORY]
-                                          [--token TOKEN] --below-version VERSION
-                                          [--conference CONFERENCE] [--dry-run] [--yes]
+                                          [--token TOKEN] [--below-version VERSION]
+                                          [--conference CONFERENCE] [--untagged]
+                                          [--dry-run] [--yes]
 ```
 
 | Option | Description |
@@ -723,6 +761,7 @@ usage: abstracts-explorer registry delete [-h] [--repository REPOSITORY]
 | `--repository, -r REPOSITORY` / `--token TOKEN` | Registry location and auth |
 | `--below-version VERSION` | Delete all versions strictly below this version (PEP 440, e.g. `0.4.0`) |
 | `--conference, -c CONFERENCE` | Only delete versions whose tags belong to this conference (optional) |
+| `--untagged` | Also delete verified untagged (dangling) versions; cannot be combined with `--conference` |
 | `--dry-run` | Preview without deleting |
 | `--yes, -y` | Skip confirmation prompt |
 
@@ -730,6 +769,8 @@ usage: abstracts-explorer registry delete [-h] [--repository REPOSITORY]
 abstracts-explorer registry delete --below-version 0.4.0 \
   --repository ghcr.io/thawn/abstracts-data
 abstracts-explorer registry delete --below-version 0.4.0 --dry-run \
+  --repository ghcr.io/thawn/abstracts-data
+abstracts-explorer registry delete --untagged \
   --repository ghcr.io/thawn/abstracts-data
 ```
 

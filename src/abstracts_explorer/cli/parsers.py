@@ -880,6 +880,43 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         default=None,
         help="Custom tag (default: derived from conference, year and embedding model)",
     )
+    registry_push_parser.add_argument(
+        "--only-tag",
+        action="store_true",
+        help="Do not upload data; re-push existing artifacts under the current version tag. "
+        "Use when only the abstracts-explorer version changed but the data did not.",
+    )
+
+    registry_update_conference_image_parser = _add_leaf(
+        registry_subparsers,
+        "update-conference-image",
+        "registry_update_conference_image_command",
+        ("registry", "update-conference-image"),
+        help="Rebuild the whole-conference image from existing per-year artifacts without re-uploading data",
+        description="""
+    Rebuild the whole-conference registry image (the conference-level tag that
+    contains every year) from the existing per-year artifacts.
+
+    Only a small config blob and the image manifest are pushed; data layers for
+    existing years are reused by digest, so no data is re-uploaded. Use this
+    after pushing a new year, or to refresh the whole-conference image after
+    other per-year changes.
+        """,
+    )
+    _add_registry_args(registry_update_conference_image_parser)
+    registry_update_conference_image_parser.add_argument(
+        "--conference",
+        "-c",
+        type=str,
+        required=True,
+        help="Conference name (e.g., neurips). A specific conference is required.",
+    )
+    registry_update_conference_image_parser.add_argument(
+        "--embedding-model",
+        type=str,
+        default=None,
+        help="Embedding model name (defaults to the model stored in the local database).",
+    )
 
     registry_pull_parser = _add_leaf(
         registry_subparsers,
@@ -952,10 +989,13 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         ("registry", "delete"),
         help="Delete registry package versions below a given version",
         description="""
-    Delete registry package versions whose OCI tag version is strictly below a given threshold.
+    Delete registry package versions whose OCI tag version is strictly below a given threshold,
+    and/or untagged (dangling) versions.
 
     Uses the GitHub Packages API to list all versions of the container package and permanently
-    deletes those that are outdated.  Untagged (dangling) versions are left untouched.
+    deletes those that are outdated.  Untagged versions are only deleted with --untagged and are
+    verified immediately before deletion (re-checked as still untagged and confirmed to be
+    orphaned data artifacts, not indexes or attestations).
 
     Examples:
       # Delete all versions below 0.4.0
@@ -970,6 +1010,10 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
       abstracts-explorer registry delete --below-version 0.4.0 --conference neurips \\
     --repository ghcr.io/thawn/abstracts-data
 
+      # Delete untagged (dangling) versions only
+      abstracts-explorer registry delete --untagged \\
+    --repository ghcr.io/thawn/abstracts-data
+
       # Skip confirmation prompt
       abstracts-explorer registry delete --below-version 0.4.0 --yes \\
     --repository ghcr.io/thawn/abstracts-data
@@ -979,9 +1023,10 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
     registry_delete_parser.add_argument(
         "--below-version",
         type=str,
-        required=True,
+        default=None,
         metavar="VERSION",
-        help="Delete all versions strictly below this version (e.g., '0.4.0'). Must be a valid PEP 440 version.",
+        help="Delete all versions strictly below this version (e.g., '0.4.0'). Must be a valid "
+        "PEP 440 version. At least one of --below-version or --untagged is required.",
     )
     registry_delete_parser.add_argument(
         "--conference",
@@ -989,6 +1034,12 @@ def build_parser(config: Config) -> tuple[argparse.ArgumentParser, dict[str, arg
         type=str,
         default=None,
         help="Only delete versions whose tags belong to this conference (optional; all conferences if omitted).",
+    )
+    registry_delete_parser.add_argument(
+        "--untagged",
+        action="store_true",
+        help="Also delete untagged (dangling) versions. Each is verified (still untagged, "
+        "an orphaned data artifact) before deletion. Cannot be combined with --conference.",
     )
     registry_delete_parser.add_argument(
         "--dry-run",

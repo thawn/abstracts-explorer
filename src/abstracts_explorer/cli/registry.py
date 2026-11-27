@@ -67,15 +67,28 @@ def registry_upload_command(args: argparse.Namespace) -> int:
         )
         return 1
 
+    only_tag = getattr(args, "only_tag", False)
+
     _print_header(
-        "Registry Upload",
+        "Registry Re-tag" if only_tag else "Registry Upload",
         f"Repository: {repository}",
         f"Conference: {conference}",
         f"Year: {args.year if args.year else 'all'}",
         f"Tag: {args.tag}" if args.tag else None,
+        "Only tag (no data upload)" if only_tag else None,
     )
 
-    if conference == "all" and (args.year is not None or args.tag):
+    if only_tag:
+        if conference == "all":
+            print(
+                "❌ --only-tag requires a specific --conference (not 'all').",
+                file=sys.stderr,
+            )
+            return 1
+        if args.tag:
+            print("❌ --only-tag cannot be combined with --tag.", file=sys.stderr)
+            return 1
+    elif conference == "all" and (args.year is not None or args.tag):
         print(
             "❌ --year and --tag cannot be combined with --conference all.",
             file=sys.stderr,
@@ -84,6 +97,17 @@ def registry_upload_command(args: argparse.Namespace) -> int:
 
     try:
         client = RegistryClient(repository=repository, token=token)
+
+        if only_tag:
+            summary = client.retag_conference(
+                conference=conference,
+                years=[args.year] if args.year is not None else None,
+                progress_callback=lambda msg: print(f"  {msg}"),
+            )
+            print("\n✅ Re-tag complete!")
+            print(f"  📅 Years:      {summary.get('years', [])}")
+            print(f"  🏷️  Tag:        {summary.get('tag', '')}")
+            return 0
 
         if conference == "all":
             summaries = client.upload_all(
@@ -117,6 +141,79 @@ def registry_upload_command(args: argparse.Namespace) -> int:
         return 1
     except Exception as e:
         return _unexpected_error(e, log_message="Upload failed")
+
+
+def registry_update_conference_image_command(args: argparse.Namespace) -> int:
+    """
+    Rebuild the whole-conference registry image from existing per-year artifacts.
+
+    Only a small config blob and the image manifest are uploaded; existing
+    per-year data layers are reused by digest, so no data is re-uploaded.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments containing:
+        - repository: OCI repository path
+        - token: Authentication token
+        - conference: Conference name (required)
+        - embedding_model: Optional embedding model override
+
+    Returns
+    -------
+    int
+        Exit code (0 for success, non-zero for failure)
+    """
+    from abstracts_explorer.registry import RegistryClient, RegistryError
+
+    repository, token = _resolve_registry_auth(args)
+
+    if not repository:
+        print(
+            "❌ Repository not specified. Use --repository or set REGISTRY_REPOSITORY env var.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if not token:
+        print(
+            "❌ Authentication token not specified. Use --token or set GITHUB_TOKEN env var.",
+            file=sys.stderr,
+        )
+        return 1
+
+    raw_conf = getattr(args, "conference", None)
+    if not raw_conf or raw_conf.lower() == "all":
+        print("❌ --conference is required (a specific conference).", file=sys.stderr)
+        return 1
+    conference = _resolve_conference_arg(raw_conf) or raw_conf
+
+    _print_header(
+        "Registry Update Conference Image",
+        f"Repository: {repository}",
+        f"Conference: {conference}",
+        f"Embedding model: {args.embedding_model}" if args.embedding_model else None,
+    )
+
+    try:
+        client = RegistryClient(repository=repository, token=token)
+        summary = client.update_conference_image(
+            conference=conference,
+            embedding_model=args.embedding_model,
+            progress_callback=lambda msg: print(f"  {msg}"),
+        )
+        print("\n✅ Conference image updated!")
+        print(f"  📄 Papers:     {summary.get('paper_count', 0)}")
+        print(f"  🧮 Embeddings: {summary.get('embedding_count', 0)}")
+        print(f"  📅 Years:      {summary.get('years', [])}")
+        print(f"  🏷️  Tag:        {summary.get('tag', '')}")
+        return 0
+
+    except RegistryError as e:
+        print(f"\n❌ Registry error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        return _unexpected_error(e, log_message="Update summary failed")
 
 
 def _registry_download_has_existing_data(conference: str, year: Optional[int]) -> bool:
@@ -362,10 +459,12 @@ def registry_list_command(args: argparse.Namespace) -> int:
 
 def registry_delete_command(args: argparse.Namespace) -> int:
     """
-    Delete registry package versions whose tag version is older than a given version.
+    Delete registry package versions below a version and/or untagged versions.
 
     Uses the GitHub Packages API to list all versions of the container package
     and deletes those whose OCI tag version is strictly below *below_version*.
+    When *untagged* is set, untagged (dangling) versions are also deleted after
+    each is verified as still untagged and safe to remove.
 
     Parameters
     ----------
@@ -373,8 +472,9 @@ def registry_delete_command(args: argparse.Namespace) -> int:
         Command-line arguments containing:
         - repository: OCI repository path
         - token: Authentication token
-        - below_version: Threshold version (e.g. "0.4.0"); versions older than this are deleted
+        - below_version: Optional threshold version (e.g. "0.4.0"); versions older than this are deleted
         - conference: Optional conference filter (only tags for this conference are checked)
+        - untagged: When True, also delete verified untagged (dangling) versions
         - dry_run: When True, print what would be deleted without deleting
         - yes: Skip confirmation prompt
 
@@ -401,20 +501,42 @@ def registry_delete_command(args: argparse.Namespace) -> int:
         )
         return 1
 
-    below_version = args.below_version
+    below_version = getattr(args, "below_version", None)
     conference = getattr(args, "conference", None)
     dry_run: bool = getattr(args, "dry_run", False)
+    untagged: bool = getattr(args, "untagged", False)
+
+    if below_version is None and not untagged:
+        print(
+            "❌ Specify --below-version and/or --untagged.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if untagged and conference is not None:
+        print(
+            "❌ --untagged cannot be combined with --conference "
+            "(untagged versions carry no conference information).",
+            file=sys.stderr,
+        )
+        return 1
 
     _print_header(
         "Registry Delete Old Versions",
         f"Repository: {repository}",
-        f"Delete below: {below_version}",
+        f"Delete below: {below_version or '(none)'}",
         f"Conference: {conference or 'all'}",
+        f"Untagged: {untagged}",
         f"Dry-run: {dry_run}",
     )
 
     if not dry_run and not getattr(args, "yes", False):
-        print(f"\n⚠️  This will permanently delete all versions below {below_version} from {repository}.")
+        targets = []
+        if below_version is not None:
+            targets.append(f"all versions below {below_version}")
+        if untagged:
+            targets.append("verified untagged versions")
+        print(f"\n⚠️  This will permanently delete {' and '.join(targets)} from {repository}.")
         if not _confirm("Type 'yes' to confirm: ", require_yes=True):
             print("Aborted.")
             return 1
@@ -426,12 +548,15 @@ def registry_delete_command(args: argparse.Namespace) -> int:
             conference=conference,
             dry_run=dry_run,
             progress_callback=lambda msg: print(f"  {msg}"),
+            include_untagged=untagged,
         )
         action = "would be deleted" if dry_run else "deleted"
         print(f"\n{'✅' if not dry_run else '🔍'} Done. {len(deleted)} version(s) {action}.")
         if deleted:
             for entry in deleted:
                 tags_str = ", ".join(entry.get("tags", []))
+                if not tags_str:
+                    tags_str = f"(untagged) {entry.get('digest', '')}"
                 print(f"  {'[dry-run] ' if dry_run else ''}🗑️  {tags_str}")
         return 0
 

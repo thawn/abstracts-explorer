@@ -261,31 +261,80 @@ The `Refresh Registry Data` GitHub Actions workflow
 
 It runs monthly and can also be started manually from the Actions tab. Each run:
 
-1. Restores the latest existing artifact for every supported conference.
-2. Runs `abstracts-explorer pipeline run` for the target year.
-3. Uploads the refreshed paper database, embeddings, and clustering cache.
+1. Determines which supported conferences are **new** or are missing data for
+   the target year (no registry tag for the configured embedding model, or the
+   target year absent from the conference summary).
+2. Restores the latest existing artifact for that conference.
+3. Runs `abstracts-explorer pipeline run` for the target year.
+4. Uploads only the missing year data, then rebuilds the conference summary
+   from existing per-year artifacts. Earlier years are reused by digest and are
+   **not re-uploaded**.
+
+The workflow checks out the released `main` branch (override with the
+`REFRESH_REF` repository variable) so version tags use a stable, released
+version instead of a per-commit dev version from `develop`.
 
 The target year defaults to the current UTC year. Manual runs accept optional
-`year` and `conference` filters, plus `force` and `upload` toggles. With
-`force` enabled (the default), the target year is re-downloaded, re-embedded,
-and re-clustered so the clustering cache never goes stale.
+`year` and `conference` filters, plus `only_new`, `force`, and `upload` toggles.
+
+`only_new` defaults to `true`, so both scheduled and manual runs only process
+data that is not yet in the registry: entirely new conferences and conferences
+missing the target year. Existing conferences that already contain the target
+year are skipped entirely. Set `only_new=false` on a manual run to fully
+refresh existing conferences.
+
+`force` defaults to `false`. When enabled, the target year is re-downloaded,
+re-embedded, and re-clustered instead of reusing cached data.
+
+Conferences are processed **sequentially**, one at a time. Each job has its own
+`REQUESTS_PER_MINUTE` limiter, so running conferences in parallel would
+multiply the effective request rate against the shared LLM backend.
+
+### Adding a year without re-uploading earlier years
+
+When a new year is added to an existing conference, the workflow runs
+`registry push --conference X --year Y` to upload only that year, then
+`registry update-conference-image --conference X` to rebuild the conference-level tag.
+The summary manifest reuses the existing per-year layer descriptors, so data
+for earlier years is not uploaded again.
+
+If only the abstracts-explorer version changed (not the data), re-tag the
+existing artifacts without exporting or uploading data:
+
+```bash
+abstracts-explorer registry push --conference neurips --only-tag
+```
+
+This pushes the per-year and summary manifests under the current version tag,
+reusing the existing data layers.
+
+After the refresh, a cleanup job removes orphaned untagged registry versions
+(this step runs in dry-run mode first; see `registry delete --untagged`).
 
 Plugins that require a manually supplied input file, such as CHI, are skipped
 because they cannot run unattended.
 
 The workflow authenticates to the registry with the built-in `GITHUB_TOKEN`,
-which must have `packages: write` permission. Optional repository variables:
+which must have `packages: write` permission. Model and backend settings are
+set explicitly in the workflow environment (defaults match `.env.tests`).
+Optional repository variables:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `REGISTRY_REPOSITORY` | `ghcr.io/thawn/abstracts-data` | Target OCI repository |
+| `REFRESH_REF` | `main` | Git ref checked out for the refresh jobs (stable version source) |
 | `LLM_BACKEND_URL` | `https://api.helmholtz-blablador.fz-juelich.de` | Embedding/clustering backend |
 | `EMBEDDING_MODEL` | `alias-qwen3-8b-embeddings` | Embedding model and registry tag component |
-| `CHAT_MODEL` | `alias-code` | Chat model |
+| `CHAT_MODEL` | `deepseek-v4.1-flash-at-hzdr` | Chat model |
 | `CLUSTER_LABEL_MODEL` | `alias-fast` | Cluster-label model |
 | `REQUESTS_PER_MINUTE` | `60` | Embedding API rate limit |
+| `LLM_CONNECT_TIMEOUT` | `30` | TCP/TLS connect timeout in seconds for backend requests |
+| `LLM_REQUEST_TIMEOUT` | `120` | Per-request timeout in seconds for backend requests |
 
-The Blablador token is read from the `BLABLADOR_TOKEN` repository secret.
+The Blablador token is read from the `BLABLADOR_TOKEN` repository secret and
+exposed to the pipeline as `LLM_BACKEND_AUTH_TOKEN`. The workflow fails fast if
+the secret is empty and logs a non-fatal connectivity probe before running the
+pipeline so token and network problems are distinguishable in the job output.
 
 ## Docker / Container Usage
 
