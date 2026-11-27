@@ -18,7 +18,7 @@ from abstracts_explorer.plugins import (
     get_plugin,
     list_plugin_names,
 )
-from tests.helpers import FakeTime
+from tests.helpers import install_fake_sleep
 
 pytestmark = pytest.mark.usefixtures("mock_current_year_probe")
 
@@ -287,8 +287,7 @@ class TestHAICONHTMLParsing:
 
     def test_fetch_session_ids_request_error(self, haicon_plugin, monkeypatch):
         """Test that a request error raises RuntimeError."""
-        fake = FakeTime()
-        monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", fake.sleep)
+        fake = install_fake_sleep(monkeypatch)
         with patch.object(haicon_plugin._session, "get") as mock_get:
             mock_get.side_effect = requests.exceptions.ConnectionError("Connection failed")
             with pytest.raises(RuntimeError, match="Failed to fetch HAICON sessions"):
@@ -465,8 +464,7 @@ class TestHAICONHTMLParsing:
 
     def test_fetch_session_papers_request_error(self, haicon_plugin, monkeypatch):
         """Test that a request error logs a warning and returns empty list."""
-        fake = FakeTime()
-        monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", fake.sleep)
+        fake = install_fake_sleep(monkeypatch)
         with patch.object(haicon_plugin._session, "get") as mock_get:
             mock_get.side_effect = requests.exceptions.ConnectionError("Connection failed")
             papers = haicon_plugin._fetch_session_papers("https://www.conftool.pro/haicon26", 99, 2026, 30, True)
@@ -657,8 +655,7 @@ class TestHAICONDownload:
 
     def test_download_request_error(self, haicon_plugin, monkeypatch):
         """Test that a request error on the overview page raises RuntimeError."""
-        fake = FakeTime()
-        monkeypatch.setattr("abstracts_explorer.plugin.base.time.sleep", fake.sleep)
+        fake = install_fake_sleep(monkeypatch)
         with patch.object(haicon_plugin._session, "get") as mock_get:
             mock_get.side_effect = requests.exceptions.ConnectionError("Network error")
             with pytest.raises(RuntimeError, match="Failed to fetch HAICON sessions"):
