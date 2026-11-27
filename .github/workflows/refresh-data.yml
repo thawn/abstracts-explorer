@@ -87,7 +87,10 @@ jobs:
         timeout-minutes: 350
         strategy:
             fail-fast: false
-            max-parallel: 5
+            # Process conferences sequentially; each job has its own
+            # REQUESTS_PER_MINUTE limiter, so parallel jobs would multiply
+            # the effective request rate against the shared LLM backend.
+            max-parallel: 1
             matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
         env:
             TARGET_YEAR: ${{ needs.prepare.outputs.year }}

@@ -280,6 +280,10 @@ existing conferences.
 `force` defaults to `false`. When enabled, the target year is re-downloaded,
 re-embedded, and re-clustered instead of reusing cached data.
 
+Conferences are processed **sequentially**, one at a time. Each job has its own
+`REQUESTS_PER_MINUTE` limiter, so running conferences in parallel would
+multiply the effective request rate against the shared LLM backend.
+
 After the refresh, a cleanup job removes orphaned untagged registry versions
 (this step runs in dry-run mode first; see `registry delete --untagged`).
 
