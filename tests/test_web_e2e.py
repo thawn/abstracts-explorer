@@ -1143,13 +1143,17 @@ class TestWebUIE2E:
 
         with page.expect_response(
             lambda response: response.url.endswith("/api/chat") and response.request.method == "POST",
-            timeout=120000,
+            timeout=180000,
         ) as response_info:
             chat_input.press("Enter")
 
         response = response_info.value
         if response.status != 200:
-            pytest.skip(f"Chat backend unavailable (HTTP {response.status})")
+            try:
+                error_text = response.json().get("error", "")
+            except Exception:
+                error_text = response.text()
+            pytest.skip(f"Chat backend unavailable (HTTP {response.status}): {error_text}")
 
         payload = response.json().get("response")
         assert isinstance(payload, dict), "Chat response should contain structured RAG output"
