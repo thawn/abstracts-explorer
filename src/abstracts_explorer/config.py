@@ -116,7 +116,14 @@ class Config:
         Default number of papers for RAG context.
     metadata_cache_ttl : int
         Time-to-live in seconds for the PostgreSQL metadata cache. ``0``
-        disables the cache.
+        disables the cache.  Also used as the time-to-live for semantic search
+        and topic-evolution result caches.
+    query_embedding_cache_max_entries : int
+        Maximum number of normalized query embeddings kept in the
+        process-global LRU cache (default: 1024).
+    search_cache_max_bytes : int
+        Maximum total approximate bytes for semantic search and
+        topic-evolution result caches (default: 256 MiB).
     rag_max_parallel_tools : int
         Maximum number of RAG tool calls executed concurrently (default: 8).
         Excess calls are queued by the agent's thread pool.
@@ -344,6 +351,10 @@ class Config:
         # RAG Settings
         self.max_context_papers = self._get_env_int("MAX_CONTEXT_PAPERS", default=5)
         self.metadata_cache_ttl = self._get_env_int("METADATA_CACHE_TTL", default=86400)
+        self.query_embedding_cache_max_entries = max(
+            1, self._get_env_int("QUERY_EMBEDDING_CACHE_MAX_ENTRIES", default=1024)
+        )
+        self.search_cache_max_bytes = max(0, self._get_env_int("SEARCH_CACHE_MAX_BYTES", default=256 * 1024 * 1024))
         self.rag_max_parallel_tools = max(1, self._get_env_int("RAG_MAX_PARALLEL_TOOLS", default=8))
         self.rag_request_limit = max(1, self._get_env_int("RAG_REQUEST_LIMIT", default=50))
         self.rag_query_timeout = max(1, self._get_env_int("RAG_QUERY_TIMEOUT", default=120))
@@ -575,6 +586,8 @@ class Config:
             "collection_name": self.collection_name,
             "max_context_papers": self.max_context_papers,
             "metadata_cache_ttl": self.metadata_cache_ttl,
+            "query_embedding_cache_max_entries": self.query_embedding_cache_max_entries,
+            "search_cache_max_bytes": self.search_cache_max_bytes,
             "rag_max_parallel_tools": self.rag_max_parallel_tools,
             "rag_request_limit": self.rag_request_limit,
             "rag_query_timeout": self.rag_query_timeout,

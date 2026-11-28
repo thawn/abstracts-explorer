@@ -8,6 +8,7 @@ using the new schema with integer IDs and proper author relationships.
 """
 
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -2747,3 +2748,147 @@ class TestSQLiteVersionRequirement:
 
         with pytest.raises(DatabaseError, match="SQLite >= 3.32"):
             db_manager.create_tables()
+
+
+class TestSemanticSearchResultCache:
+    """Process-global semantic search result cache behavior."""
+
+    def test_identical_query_hits_cache(self, connected_db, sample_paper):
+        uid = connected_db.add_paper(sample_paper)
+        em = Mock()
+        em.query_ids_within_distance.return_value = [(uid, 0.2)]
+
+        first, first_total = connected_db.search(
+            "transformer", limit=5, use_embeddings=True, embeddings_manager=em, include_total=True
+        )
+        second, second_total = connected_db.search(
+            "transformer", limit=5, use_embeddings=True, embeddings_manager=em, include_total=True
+        )
+
+        assert [paper["uid"] for paper in first] == [uid]
+        assert first == second
+        assert first_total == second_total == 1
+        em.query_ids_within_distance.assert_called_once()
+
+    def test_different_filters_or_query_miss(self, connected_db, sample_paper):
+        uid = connected_db.add_paper(sample_paper)
+        em = Mock()
+        em.query_ids_within_distance.return_value = [(uid, 0.2)]
+
+        connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+        connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em, years=[2025])
+        connected_db.search("attention", limit=5, use_embeddings=True, embeddings_manager=em)
+
+        assert em.query_ids_within_distance.call_count == 3
+
+    def test_ttl_expiry(self, connected_db, sample_paper, monkeypatch):
+        from abstracts_explorer import cache as cache_module
+        from tests.test_cache import FakeClock
+
+        uid = connected_db.add_paper(sample_paper)
+        em = Mock()
+        em.query_ids_within_distance.return_value = [(uid, 0.2)]
+
+        clock = FakeClock()
+        monkeypatch.setattr(
+            cache_module,
+            "SEARCH_RESULT_CACHE",
+            cache_module.TtlLruCache(max_entries=10, clock=clock),
+        )
+
+        connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+        connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+        assert em.query_ids_within_distance.call_count == 1
+
+        clock.advance(10**9)
+        connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+        assert em.query_ids_within_distance.call_count == 2
+
+    def test_lru_eviction(self, connected_db, sample_paper, monkeypatch):
+        from abstracts_explorer import cache as cache_module
+
+        uid = connected_db.add_paper(sample_paper)
+        em = Mock()
+        em.query_ids_within_distance.return_value = [(uid, 0.2)]
+
+        monkeypatch.setattr(
+            cache_module,
+            "SEARCH_RESULT_CACHE",
+            cache_module.TtlLruCache(max_entries=1),
+        )
+
+        connected_db.search("first", limit=5, use_embeddings=True, embeddings_manager=em)
+        connected_db.search("second", limit=5, use_embeddings=True, embeddings_manager=em)
+        connected_db.search("first", limit=5, use_embeddings=True, embeddings_manager=em)
+
+        assert em.query_ids_within_distance.call_count == 3
+
+    def test_oversized_entry_skipped(self, connected_db, sample_paper, monkeypatch):
+        from abstracts_explorer import cache as cache_module
+
+        uid = connected_db.add_paper(sample_paper)
+        em = Mock()
+        em.query_ids_within_distance.return_value = [(uid, 0.2)]
+
+        monkeypatch.setattr(
+            cache_module,
+            "SEARCH_RESULT_CACHE",
+            cache_module.TtlLruCache(max_entries=10, max_entry_bytes=1),
+        )
+
+        connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+        connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+
+        assert em.query_ids_within_distance.call_count == 2
+
+    def test_single_flight_concurrency(self, connected_db, monkeypatch):
+        from concurrent.futures import ThreadPoolExecutor
+
+        em = Mock()
+        calls = 0
+        lock = threading.Lock()
+        start = threading.Barrier(4)
+
+        def slow_find(*args, **kwargs):
+            nonlocal calls
+            with lock:
+                calls += 1
+            time.sleep(0.05)
+            return []
+
+        monkeypatch.setattr(connected_db, "_resolve_filter_ids", lambda **kwargs: None)
+        monkeypatch.setattr(connected_db, "find_paper_ids_within_distance", slow_find)
+        monkeypatch.setattr(connected_db, "get_result_details", lambda *args, **kwargs: [])
+
+        def worker():
+            start.wait()
+            return connected_db.search("concurrent", limit=5, use_embeddings=True, embeddings_manager=em)
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            results = list(executor.map(lambda _: worker(), range(4)))
+
+        assert calls == 1
+        assert results == [([], None)] * 4
+
+    def test_write_invalidates_cache(self, connected_db, sample_paper):
+        em = Mock()
+        em.query_ids_within_distance.return_value = []
+
+        connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+        connected_db.add_paper(sample_paper)
+        connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+
+        assert em.query_ids_within_distance.call_count == 2
+
+    def test_deep_copy_isolation(self, connected_db, sample_paper):
+        uid = connected_db.add_paper(sample_paper)
+        em = Mock()
+        em.query_ids_within_distance.return_value = [(uid, 0.2)]
+
+        first, _ = connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+        first[0]["title"] = "mutated"
+
+        second, _ = connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+
+        assert second[0]["title"] == sample_paper.title
+        em.query_ids_within_distance.assert_called_once()

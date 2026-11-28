@@ -1717,3 +1717,89 @@ def test_select_hierarchy_level_derives_from_tree():
 
     assert level is not None
     assert level["level"] == MCP_HIERARCHY_LEVEL
+
+
+def _topic_evolution_mocks():
+    """Build shared mock resources for topic-evolution cache tests."""
+    mock_em = Mock()
+    mock_em.query_ids_within_distance.return_value = [("a1", 0.1)]
+    mock_db = Mock()
+    mock_db.database_url = "sqlite:///topic-cache.db"
+    mock_db.get_years.return_value = [2023]
+    mock_db.resolve_paper_uids.return_value = ["a1"]
+    mock_db.get_paper_summaries_by_uids.return_value = [
+        {
+            "uid": "a1",
+            "title": "Paper 2023",
+            "session": "ML",
+            "year": 2023,
+            "conference": "NeurIPS",
+            "abstract": "",
+        }
+    ]
+    mock_db.get_stats.return_value = {"total_papers": 100}
+    return mock_em, mock_db
+
+
+def _execute_topic_evolution(mock_em, mock_db, topic: str = "transformers") -> str:
+    """Execute get_topic_evolution against shared mock resources."""
+    with (
+        patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager", return_value=mock_em),
+        patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager", return_value=mock_db),
+        patch("abstracts_explorer.mcp.shared_dependencies.get_config") as mock_cfg,
+    ):
+        mock_cfg.return_value = Mock(collection_name="papers")
+        return execute_mcp_tool("get_topic_evolution", {"topic_keywords": topic, "conferences": ["NeurIPS"]})
+
+
+class TestTopicEvolutionResultCache:
+    """Process-global topic-evolution result cache behavior."""
+
+    def test_cache_hit(self):
+        mock_em, mock_db = _topic_evolution_mocks()
+
+        first = _execute_topic_evolution(mock_em, mock_db)
+        second = _execute_topic_evolution(mock_em, mock_db)
+
+        assert first == second
+        mock_em.query_ids_within_distance.assert_called_once()
+        mock_db.get_years.assert_called_once()
+
+    def test_different_topic_misses(self):
+        mock_em, mock_db = _topic_evolution_mocks()
+
+        _execute_topic_evolution(mock_em, mock_db, "transformers")
+        _execute_topic_evolution(mock_em, mock_db, "attention")
+
+        assert mock_em.query_ids_within_distance.call_count == 2
+
+    def test_ttl_expiry(self, monkeypatch):
+        from abstracts_explorer import cache as cache_module
+        from tests.test_cache import FakeClock
+
+        clock = FakeClock()
+        monkeypatch.setattr(
+            cache_module,
+            "TOPIC_EVOLUTION_RESULT_CACHE",
+            cache_module.TtlLruCache(max_entries=10, clock=clock),
+        )
+        mock_em, mock_db = _topic_evolution_mocks()
+
+        _execute_topic_evolution(mock_em, mock_db)
+        _execute_topic_evolution(mock_em, mock_db)
+        assert mock_em.query_ids_within_distance.call_count == 1
+
+        clock.advance(10**9)
+        _execute_topic_evolution(mock_em, mock_db)
+        assert mock_em.query_ids_within_distance.call_count == 2
+
+    def test_invalidation(self):
+        from abstracts_explorer import cache as cache_module
+
+        mock_em, mock_db = _topic_evolution_mocks()
+
+        _execute_topic_evolution(mock_em, mock_db)
+        cache_module.invalidate_result_caches()
+        _execute_topic_evolution(mock_em, mock_db)
+
+        assert mock_em.query_ids_within_distance.call_count == 2

@@ -445,5 +445,8 @@ class SessionMixin:
         _METADATA_CACHE.set((self.database_url, kind, *parts), value, self._metadata_cache_ttl())
 
     def _invalidate_metadata_cache(self) -> None:
-        """Invalidate all metadata entries for the current database."""
+        """Invalidate metadata and result entries for the current database."""
         _METADATA_CACHE.invalidate_database(self.database_url)
+        from abstracts_explorer.cache import invalidate_result_caches
+
+        invalidate_result_caches(self.database_url)

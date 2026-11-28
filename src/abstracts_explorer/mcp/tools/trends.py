@@ -70,129 +70,149 @@ def get_topic_evolution(
 
         with resources._get_mcp_resources(collection_name) as (em, db):
             assert em is not None
-            logger.info(f"Analyzing topic evolution for: {topic_keywords}")
-            logger.info(f"Conferences: {conferences}")
-            logger.info(f"Distance threshold: {distance_threshold}")
+            from abstracts_explorer.cache import (
+                cache_key_text,
+                get_or_compute_topic_evolution_result,
+                normalize_query_text,
+            )
 
-            # Embed the query once here and reuse for every (conference, year) pair
-            # to avoid redundant LLM API calls.
-            query_embedding = QueryEmbedding(topic_keywords, em)
+            cache_key = (
+                str(getattr(db, "database_url", "")),
+                str(getattr(em, "collection_name", collection_name) or collection_name),
+                str(getattr(em, "model_name", "")),
+                normalize_query_text(topic_keywords),
+                cache_key_text(conferences),
+                start_year,
+                end_year,
+                float(distance_threshold),
+            )
 
-            conference_data: Dict[str, Dict[str, Any]] = {}
-            total_papers = 0
-            all_years: set[int] = set()
+            def _compute() -> Dict[str, Any]:
+                logger.info(f"Analyzing topic evolution for: {topic_keywords}")
+                logger.info(f"Conferences: {conferences}")
+                logger.info(f"Distance threshold: {distance_threshold}")
 
-            for conference in conferences:
-                # Determine year range from database for this conference
-                available_years = db.get_years(conference=conference)
-                if start_year is not None:
-                    available_years = [y for y in available_years if y >= start_year]
-                if end_year is not None:
-                    available_years = [y for y in available_years if y <= end_year]
+                # Embed the query once here and reuse for every (conference, year) pair
+                # to avoid redundant LLM API calls.
+                query_embedding = QueryEmbedding(topic_keywords, em)
 
-                logger.info(f"Conference: {conference}, years: {available_years}")
+                conference_data: Dict[str, Dict[str, Any]] = {}
+                total_papers = 0
+                all_years: set[int] = set()
 
-                year_counts: Dict[int, int] = {year: 0 for year in available_years}
-                year_relative: Dict[int, float] = {}
-                year_totals: Dict[int, int] = {}
-                year_distribution: Dict[int, list] = {year: [] for year in available_years}
+                for conference in conferences:
+                    # Determine year range from database for this conference
+                    available_years = db.get_years(conference=conference)
+                    if start_year is not None:
+                        available_years = [y for y in available_years if y >= start_year]
+                    if end_year is not None:
+                        available_years = [y for y in available_years if y <= end_year]
 
-                if available_years:
-                    # Query once per conference (all years at once) instead of
-                    # once per year.  The latter scales with the number of years
-                    # and can exceed reverse-proxy timeouts for conferences with
-                    # many years (e.g. IGARSS).
-                    candidate_ids = db.resolve_paper_uids(
-                        conferences=[conference],
-                        years=available_years,
-                    )
-                    if candidate_ids:
-                        matches = em.query_ids_within_distance(
-                            query=query_embedding,
-                            distance_threshold=distance_threshold,
-                            ids=candidate_ids,
+                    logger.info(f"Conference: {conference}, years: {available_years}")
+
+                    year_counts: Dict[int, int] = {year: 0 for year in available_years}
+                    year_relative: Dict[int, float] = {}
+                    year_totals: Dict[int, int] = {}
+                    year_distribution: Dict[int, list] = {year: [] for year in available_years}
+
+                    if available_years:
+                        # Query once per conference (all years at once) instead of
+                        # once per year.  The latter scales with the number of years
+                        # and can exceed reverse-proxy timeouts for conferences with
+                        # many years (e.g. IGARSS).
+                        candidate_ids = db.resolve_paper_uids(
+                            conferences=[conference],
+                            years=available_years,
                         )
-                        summaries = {
-                            paper["uid"]: paper
-                            for paper in db.get_paper_summaries_by_uids([uid for uid, _ in matches])
-                        }
+                        if candidate_ids:
+                            matches = em.query_ids_within_distance(
+                                query=query_embedding,
+                                distance_threshold=distance_threshold,
+                                ids=candidate_ids,
+                            )
+                            summaries = {
+                                paper["uid"]: paper
+                                for paper in db.get_paper_summaries_by_uids([uid for uid, _ in matches])
+                            }
 
-                        for uid, distance in matches:
-                            paper = summaries.get(uid)
-                            if paper is None:
-                                continue
-                            paper_year = paper.get("year")
-                            if paper_year is None:
-                                continue
-                            try:
-                                paper_year = int(paper_year)
-                            except (TypeError, ValueError):
-                                continue
-                            if paper_year not in year_counts:
-                                continue
+                            for uid, distance in matches:
+                                paper = summaries.get(uid)
+                                if paper is None:
+                                    continue
+                                paper_year = paper.get("year")
+                                if paper_year is None:
+                                    continue
+                                try:
+                                    paper_year = int(paper_year)
+                                except (TypeError, ValueError):
+                                    continue
+                                if paper_year not in year_counts:
+                                    continue
 
-                            year_counts[paper_year] += 1
+                                year_counts[paper_year] += 1
 
-                            # Collect sample papers (top 3 closest).  Results are
-                            # sorted by distance, so the first three per year are
-                            # the closest matches.
-                            if len(year_distribution[paper_year]) < 3:
-                                year_distribution[paper_year].append(
-                                    {
-                                        "title": paper.get("title", ""),
-                                        "session": paper.get("session", ""),
-                                        "distance": distance,
-                                    }
-                                )
+                                # Collect sample papers (top 3 closest).  Results are
+                                # sorted by distance, so the first three per year are
+                                # the closest matches.
+                                if len(year_distribution[paper_year]) < 3:
+                                    year_distribution[paper_year].append(
+                                        {
+                                            "title": paper.get("title", ""),
+                                            "session": paper.get("session", ""),
+                                            "distance": distance,
+                                        }
+                                    )
 
-                for year in available_years:
-                    count = year_counts[year]
-                    total_papers += count
+                    for year in available_years:
+                        count = year_counts[year]
+                        total_papers += count
 
-                    # Get total papers for this conference+year for relative percentage
-                    stats = db.get_stats(year=year, conference=conference)
-                    total_for_year = stats["total_papers"]
-                    year_totals[year] = total_for_year
-                    if total_for_year > 0:
-                        year_relative[year] = round((count / total_for_year) * 100, 2)
-                    else:
-                        year_relative[year] = 0.0
+                        # Get total papers for this conference+year for relative percentage
+                        stats = db.get_stats(year=year, conference=conference)
+                        total_for_year = stats["total_papers"]
+                        year_totals[year] = total_for_year
+                        if total_for_year > 0:
+                            year_relative[year] = round((count / total_for_year) * 100, 2)
+                        else:
+                            year_relative[year] = 0.0
 
-                all_years.update(year_counts.keys())
+                    all_years.update(year_counts.keys())
 
-                # Sort by year
-                sorted_years = sorted(year_counts.keys())
+                    # Sort by year
+                    sorted_years = sorted(year_counts.keys())
 
-                conference_data[conference] = {
-                    "year_counts": dict(sorted(year_counts.items())),
-                    "year_relative": dict(sorted(year_relative.items())),
-                    "year_totals": dict(sorted(year_totals.items())),
-                    "papers_by_year": {
-                        year: {
-                            "count": year_counts[year],
-                            "relative_percent": year_relative[year],
-                            "total_for_year": year_totals[year],
-                            "sample_papers": year_distribution[year],
-                        }
-                        for year in sorted_years
+                    conference_data[conference] = {
+                        "year_counts": dict(sorted(year_counts.items())),
+                        "year_relative": dict(sorted(year_relative.items())),
+                        "year_totals": dict(sorted(year_totals.items())),
+                        "papers_by_year": {
+                            year: {
+                                "count": year_counts[year],
+                                "relative_percent": year_relative[year],
+                                "total_for_year": year_totals[year],
+                                "sample_papers": year_distribution[year],
+                            }
+                            for year in sorted_years
+                        },
+                    }
+
+                sorted_all_years = sorted(all_years)
+
+                # Build result
+                result: Dict[str, Any] = {
+                    "topic": topic_keywords,
+                    "conferences": conferences,
+                    "distance_threshold": distance_threshold,
+                    "total_papers": total_papers,
+                    "year_range": {
+                        "start": min(sorted_all_years) if sorted_all_years else None,
+                        "end": max(sorted_all_years) if sorted_all_years else None,
                     },
+                    "conference_data": conference_data,
                 }
+                return result
 
-            sorted_all_years = sorted(all_years)
-
-            # Build result
-            result: Dict[str, Any] = {
-                "topic": topic_keywords,
-                "conferences": conferences,
-                "distance_threshold": distance_threshold,
-                "total_papers": total_papers,
-                "year_range": {
-                    "start": min(sorted_all_years) if sorted_all_years else None,
-                    "end": max(sorted_all_years) if sorted_all_years else None,
-                },
-                "conference_data": conference_data,
-            }
-
+            result = get_or_compute_topic_evolution_result(cache_key, _compute)
             return json.dumps(result, indent=2)
 
     except ToolError:

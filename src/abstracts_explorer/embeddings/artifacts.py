@@ -51,6 +51,9 @@ class ArtifactsMixin:
             for batch in iter_batches(ids, IO_BATCH_SIZE):
                 self.collection.delete(ids=list(batch))
                 deleted += len(batch)
+            from abstracts_explorer.cache import invalidate_result_caches
+
+            invalidate_result_caches()
             return deleted
 
     def export_embeddings(self, ids: list[str]) -> dict[str, Any]:

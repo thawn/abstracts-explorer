@@ -31,6 +31,35 @@ class _SearchFilterKwargs(TypedDict, total=False):
 logger = logging.getLogger(__name__)
 
 
+def _search_result_cache_key(
+    database_url: str,
+    embeddings_manager: Any,
+    query: str,
+    filters: _SearchFilterKwargs,
+    distance_threshold: float,
+    limit: int,
+    include_total: bool,
+) -> Tuple[Any, ...]:
+    """Build the process-global semantic-search cache key."""
+    from abstracts_explorer.cache import cache_key_text, normalize_query_text
+
+    return (
+        database_url,
+        str(getattr(embeddings_manager, "collection_name", "")),
+        str(getattr(embeddings_manager, "model_name", "")),
+        normalize_query_text(query),
+        cache_key_text(filters.get("conferences")),
+        cache_key_text(filters.get("years")),
+        cache_key_text(filters.get("sessions")),
+        cache_key_text(filters.get("locations")),
+        cache_key_text(filters.get("where_filters")),
+        cache_key_text(filters.get("field_filters")),
+        float(distance_threshold),
+        int(limit),
+        bool(include_total),
+    )
+
+
 class SearchMixin(PapersMixin):
     """Keyword and semantic search methods."""
 
@@ -421,17 +450,34 @@ class SearchMixin(PapersMixin):
         owns_manager = embeddings_manager is None
         em = embeddings_manager or EmbeddingsManager()
         try:
+            from abstracts_explorer.cache import get_or_compute_search_result
             from abstracts_explorer.embeddings.query import QueryEmbedding
 
-            query_embedding = QueryEmbedding(remaining_query, em)
-            matches = self.find_paper_ids_within_distance(
-                query_embedding,
+            cache_key = _search_result_cache_key(
+                self.database_url,
+                em,
+                query,
+                filters,
                 distance_threshold,
-                limit=None if include_total else limit,
-                **filters,
+                limit,
+                include_total,
             )
-            total_similar = len(matches) if include_total else None
-            return self.group_papers_by_content(self.get_result_details(matches, slice(0, limit))), total_similar
+
+            def _compute() -> Tuple[List[Dict[str, Any]], Optional[int]]:
+                query_embedding = QueryEmbedding(remaining_query, em)
+                matches = self.find_paper_ids_within_distance(
+                    query_embedding,
+                    distance_threshold,
+                    limit=None if include_total else limit,
+                    **filters,
+                )
+                total_similar = len(matches) if include_total else None
+                return (
+                    self.group_papers_by_content(self.get_result_details(matches, slice(0, limit))),
+                    total_similar,
+                )
+
+            return get_or_compute_search_result(cache_key, _compute)
         finally:
             if owns_manager:
                 em.close()

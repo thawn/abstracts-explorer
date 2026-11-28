@@ -69,6 +69,9 @@ class IngestMixin:
     def _store_embeddings(self, ids: list[str], documents: list[str], embeddings: Sequence[Any]) -> None:
         """Create or replace records in the collection (upsert semantics)."""
         self.collection.upsert(ids=ids, embeddings=embeddings, documents=documents)
+        from abstracts_explorer.cache import invalidate_result_caches
+
+        invalidate_result_caches()
 
     @require_writable()
     def _embed_and_upsert(self, uid: str, text: str) -> None:

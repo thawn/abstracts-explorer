@@ -71,7 +71,7 @@ class QueryEmbedding:
         if self._vector is None:
             with self._lock:
                 if self._vector is None:
-                    self._vector = self._manager.generate_embedding(self.text)
+                    self._vector = self._manager.generate_query_embedding(self.text)
         assert self._vector is not None
         return self._vector
 

@@ -38,15 +38,18 @@ def _reset_global_rate_limiter():
 @pytest.fixture(autouse=True)
 def _reset_process_caches():
     """Reset process-level schema and metadata caches between tests."""
+    from abstracts_explorer.cache import reset_all_caches
     from abstracts_explorer.database import reset_metadata_cache, reset_schema_cache
     from abstracts_explorer.orcid import _ORCID_CACHE, reset_orcid_llm_client
 
     reset_schema_cache()
     reset_metadata_cache()
+    reset_all_caches()
     _ORCID_CACHE.clear()
     yield
     reset_schema_cache()
     reset_metadata_cache()
+    reset_all_caches()
     _ORCID_CACHE.clear()
     reset_orcid_llm_client()
 

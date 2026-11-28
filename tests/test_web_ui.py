@@ -2972,7 +2972,7 @@ class TestClusteringEndpoint:
                 with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                     # Mock embeddings manager
                     mock_em = Mock()
-                    mock_em.generate_embedding.return_value = [0.1] * 100
+                    mock_em.generate_query_embedding.return_value = [0.1] * 100
                     mock_db = Mock()
 
                     # Mock the find_paper_ids_within_distance method directly
@@ -3040,7 +3040,7 @@ class TestClusteringEndpoint:
                 with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                     # Mock embeddings manager
                     mock_em = Mock()
-                    mock_em.generate_embedding.return_value = [0.1] * 100
+                    mock_em.generate_query_embedding.return_value = [0.1] * 100
                     mock_db = Mock()
 
                     # Mock find_paper_ids_within_distance to return no matches
@@ -3884,7 +3884,9 @@ class TestWebInputHardeningAndRateLimits:
 
         with patch("abstracts_explorer.web_ui.rate_limit.get_config", return_value=mock_config):
             with patch.object(
-                web_services, "get_embeddings_manager", return_value=Mock(generate_embedding=Mock(return_value=[]))
+                web_services,
+                "get_embeddings_manager",
+                return_value=Mock(generate_query_embedding=Mock(return_value=[])),
             ):
                 with patch.object(web_services, "get_database", return_value=mock_db):
                     first = client.post("/api/clusters/search", json={"query": "test"})
@@ -3905,7 +3907,9 @@ class TestWebInputHardeningAndRateLimits:
 
         with patch("abstracts_explorer.web_ui.rate_limit.get_config", return_value=mock_config):
             with patch.object(
-                web_services, "get_embeddings_manager", return_value=Mock(generate_embedding=Mock(return_value=[]))
+                web_services,
+                "get_embeddings_manager",
+                return_value=Mock(generate_query_embedding=Mock(return_value=[])),
             ):
                 with patch.object(web_services, "get_database", return_value=mock_db):
                     responses = [client.post("/api/clusters/search", json={"query": "test"}) for _ in range(5)]

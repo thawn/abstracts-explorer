@@ -190,6 +190,9 @@ class ChromaMixin:
                     logger.info("Deleted existing collection: %s", self.collection_name)
                 except Exception:
                     pass
+                from abstracts_explorer.cache import invalidate_result_caches
+
+                invalidate_result_caches()
 
             self._collection = self.client.get_or_create_collection(
                 name=self.collection_name,
