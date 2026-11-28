@@ -294,13 +294,56 @@ directories into the new Podman named volumes and sets the correct ownership and
 permissions.  It creates a timestamped backup of the existing data before
 migrating.
 
+#### Run repository helper scripts
+
+Production images do not include the `scripts/` directory. To run a helper
+script that is not baked into the image, stream it from the repository ref that
+matches the running image and execute it with the container's Python:
+
+```bash
+podman exec -i abstracts-explorer sh -c '
+  curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/<tag-or-branch>/scripts/<script>.py \
+  | python - --help
+'
+```
+
+Pin `<tag-or-branch>` to the same release or branch as the running image; the
+script must exist at that ref. Arguments after `-` are passed to the script. The
+command uses the container's existing configuration (`POSTGRES_*` variables and
+the `ABSTRACTS_DB_PASSWORD` secret), so no `PAPER_DB` override is needed.
+
+For example, to backfill `generated_keywords` for existing papers:
+
+```bash
+# Preview the changes (the script still adds the generated_keywords column
+# when missing, even in dry-run mode)
+podman exec -i abstracts-explorer sh -c '
+  curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/<tag-or-branch>/scripts/backfill_generated_keywords.py \
+  | python - --dry-run
+'
+
+# Backfill all scopes, or limit to one conference/year
+podman exec -i abstracts-explorer sh -c '
+  curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/<tag-or-branch>/scripts/backfill_generated_keywords.py \
+  | python -
+'
+podman exec -i abstracts-explorer sh -c '
+  curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/<tag-or-branch>/scripts/backfill_generated_keywords.py \
+  | python - --conference NeurIPS --year 2025
+'
+```
+
+The backfill adds the `generated_keywords` column when missing and is safe to
+re-run.
+
 #### Create PostgreSQL search indexes
 
 Search performance on PostgreSQL can be improved with trigram indexes for
 `ILIKE` searches and composite indexes for conference/year/session lookups. The
 index migration is manual and idempotent. It is not run automatically at startup.
 
-Run a dry run inside the running container:
+Run the script with the [helper-script recipe](#run-repository-helper-scripts),
+passing `--dry-run` to preview, no argument to apply, or `--drop` to roll back:
 
 ```bash
 podman exec -i abstracts-explorer sh -c '
@@ -309,26 +352,7 @@ podman exec -i abstracts-explorer sh -c '
 '
 ```
 
-Apply the indexes:
-
-```bash
-podman exec -i abstracts-explorer sh -c '
-  curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/<tag-or-branch>/scripts/migrate_pg_search_indexes.py \
-  | python -
-'
-```
-
-Roll back:
-
-```bash
-podman exec -i abstracts-explorer sh -c '
-  curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/<tag-or-branch>/scripts/migrate_pg_search_indexes.py \
-  | python - --drop
-'
-```
-
-Pin `<tag-or-branch>` to the same release or branch as the running image. The
-script must exist at that ref. The migration requires the `pg_trgm` extension;
+The migration requires the `pg_trgm` extension;
 the container's PostgreSQL user normally has permission to create it. If it does
 not, ask a database administrator to run `CREATE EXTENSION pg_trgm;` and rerun the
 script with `--skip-extension`.

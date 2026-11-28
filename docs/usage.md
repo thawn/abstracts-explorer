@@ -51,9 +51,19 @@ uv run python scripts/backfill_generated_keywords.py --conference NeurIPS --year
 uv run python scripts/backfill_generated_keywords.py --force
 ```
 
-On staging, run the same backfill command with `PAPER_DB` pointing at the
-PostgreSQL database. The script adds the `generated_keywords` column when it
-is missing and is safe to re-run.
+On staging (Podman), production images do not include `scripts/`. Stream the
+script from the matching repository ref and run it inside the container:
+
+```bash
+podman exec -i abstracts-explorer sh -c '
+  curl -fsSL https://raw.githubusercontent.com/thawn/abstracts-explorer/<tag-or-branch>/scripts/backfill_generated_keywords.py \
+  | python - --dry-run
+'
+```
+
+See [Run repository helper scripts](docker.md#run-repository-helper-scripts) for
+details. The script adds the `generated_keywords` column when it is missing and
+is safe to re-run.
 
 The source `keywords` field supplied by downloaders is still stored, but it is
 **not** used for topic extraction. Runtime related-topic aggregation uses
