@@ -352,6 +352,18 @@ Available tags (following container best practices):
 - `sha-*` - Specific commit SHA for traceability (e.g., `sha-5f8567d`)
 - `pr-*` - Pull request builds for testing (e.g., `pr-40`)
 
+### Profiling image
+
+`Dockerfile.profiling` builds a non-production image with `py-spy`,
+`pyinstrument`, and the `scripts/` directory.  Production images stay unchanged.
+
+```bash
+podman build -f Dockerfile.profiling -t localhost/abstracts-explorer:profiling .
+```
+
+Use it for request/SQL/CPU profiling only.  Web request profiling is enabled
+with `WEB_PROFILE=1`; see `PLAN.md` for the full local and staging workflow.
+
 ## Security hardening
 
 Both nginx and caddy configurations include the following security hardening out of the box:

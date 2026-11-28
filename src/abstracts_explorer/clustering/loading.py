@@ -9,6 +9,7 @@ import numpy as np
 
 from abstracts_explorer.clustering.errors import ClusteringError
 from abstracts_explorer.embeddings.batching import EMBEDDING_FETCH_BATCH_SIZE, iter_batches
+from abstracts_explorer.profiling import profile_span
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,8 @@ class LoadingMixin:
         get_kwargs: Dict[str, Any] = {"include": ["embeddings"]}
         if limit:
             get_kwargs["limit"] = limit
-        results = self.embeddings_manager.collection.get(**get_kwargs)
+        with profile_span("chroma.get", "chroma", ids=None, limit=limit):
+            results = self.embeddings_manager.collection.get(**get_kwargs)
         embeddings = results.get("embeddings")
         if embeddings is not None:
             embeddings = np.asarray(embeddings, dtype=np.float32)
@@ -109,7 +111,8 @@ class LoadingMixin:
             batch_kwargs: Dict[str, Any] = {"include": ["embeddings"], "ids": list(batch)}
             if remaining:
                 batch_kwargs["limit"] = remaining
-            batch_results = self.embeddings_manager.collection.get(**batch_kwargs)
+            with profile_span("chroma.get", "chroma", ids=len(batch), limit=remaining):
+                batch_results = self.embeddings_manager.collection.get(**batch_kwargs)
             batch_ids = batch_results.get("ids") or []
             batch_embeddings = batch_results.get("embeddings")
             if batch_embeddings is None:

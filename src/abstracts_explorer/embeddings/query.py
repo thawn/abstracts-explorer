@@ -9,10 +9,17 @@ from typing import Any, Optional
 
 from abstracts_explorer.embeddings.batching import MAX_QUERY_RESULTS, iter_batches
 from abstracts_explorer.embeddings.errors import EmbeddingsError, translate_errors
+from abstracts_explorer.profiling import profile_span
 
 logger = logging.getLogger(__name__)
 
 PaperMatch = tuple[str, float]
+
+
+def _collection_count(collection: Any) -> int:
+    """Return the collection size while recording a Chroma span."""
+    with profile_span("chroma.count", "chroma"):
+        return int(collection.count())
 
 
 class QueryEmbedding:
@@ -113,7 +120,7 @@ class QueryMixin:
             raise EmbeddingsError("Query cannot be empty")
 
         query_embedding = query.embedding
-        candidate_count = len(ids) if ids is not None else self.collection.count()
+        candidate_count = len(ids) if ids is not None else _collection_count(self.collection)
         request_limit = min(
             limit if limit is not None else candidate_count,
             candidate_count,
@@ -123,11 +130,12 @@ class QueryMixin:
             return []
 
         if ids is None:
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=request_limit,
-                include=["distances"],
-            )
+            with profile_span("chroma.query", "chroma", n_results=request_limit):
+                results = self.collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=request_limit,
+                    include=["distances"],
+                )
             paper_ids = list(results["ids"][0]) if results.get("ids") else []
             distances = list(results["distances"][0]) if results.get("distances") else []
             return list(zip(paper_ids, distances))
@@ -137,12 +145,13 @@ class QueryMixin:
             batch_limit = min(request_limit, len(batch))
             if batch_limit <= 0:
                 break
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=batch_limit,
-                include=["distances"],
-                ids=list(batch),
-            )
+            with profile_span("chroma.query", "chroma", n_results=batch_limit, ids=len(batch)):
+                results = self.collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=batch_limit,
+                    include=["distances"],
+                    ids=list(batch),
+                )
             batch_ids = list(results["ids"][0]) if results.get("ids") else []
             batch_distances = list(results["distances"][0]) if results.get("distances") else []
             merged.extend(zip(batch_ids, batch_distances))

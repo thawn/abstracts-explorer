@@ -7,7 +7,7 @@ import json
 import pytest
 from sqlalchemy import create_engine, text
 
-from tools.profiling import (
+from abstracts_explorer.profiling import (
     SqlProfiler,
     explain_statement,
     normalize_sql,
@@ -185,3 +185,43 @@ class TestExplainStatement:
         """EXPLAIN is only supported for PostgreSQL."""
         with pytest.raises(ValueError):
             explain_statement(engine, "SELECT 1")
+
+
+class TestProfilingSession:
+    """Tests for web request profiling."""
+
+    def test_request_profile_records_spans_and_sql(self, engine, tmp_path):
+        """A request record contains span categories, SQL fingerprints, and wall time."""
+        from abstracts_explorer.profiling import ProfilingSession, profile_span, profiling_enabled
+
+        output = tmp_path / "profile.jsonl"
+        session = ProfilingSession(output)
+        session.attach()
+        try:
+            assert profiling_enabled() is True
+            profile = session.start_request("POST", "/api/search", query="q=learning", user_agent="pytest")
+            with profile_span("chroma.query", "chroma", n_results=10):
+                with engine.connect() as connection:
+                    connection.execute(text("SELECT * FROM t WHERE name = :name"), {"name": "alpha"}).all()
+            session.finish_request(profile, 200)
+        finally:
+            session.detach()
+
+        assert profiling_enabled() is False
+        record = json.loads(output.read_text(encoding="utf-8").strip())
+        assert record["method"] == "POST"
+        assert record["path"] == "/api/search"
+        assert record["status"] == 200
+        assert record["wall_ms"] >= 0
+        assert record["categories_ms"]["sql"] >= 0
+        assert record["categories_ms"]["chroma"] >= 0
+        assert record["sql"]["count"] == 1
+        assert any("SELECT * FROM t WHERE name = ?" in item["sql"] for item in record["sql"]["top"])
+        assert any(span["name"] == "chroma.query" for span in record["spans"])
+
+    def test_profile_span_is_noop_without_session(self):
+        """profile_span works when profiling is disabled."""
+        from abstracts_explorer.profiling import profile_span
+
+        with profile_span("noop", "other", value=1):
+            pass

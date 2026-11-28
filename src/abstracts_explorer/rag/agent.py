@@ -35,6 +35,7 @@ from abstracts_explorer.rag.tools import (
     _tool_suggest_search_terms_from_orcid,
     _tool_summarize_interesting_papers,
 )
+from abstracts_explorer.profiling import instrument_async_transport, profile_span
 from abstracts_explorer.utils.http_utils import build_llm_timeout
 from abstracts_explorer.utils.time_utils import format_timestamp
 
@@ -236,7 +237,7 @@ class AgentMixin:
         config = get_config()
         requests_per_minute = config.requests_per_minute
 
-        inner_transport: httpx2.AsyncBaseTransport = httpx2.AsyncHTTPTransport()
+        inner_transport: httpx2.AsyncBaseTransport = instrument_async_transport(httpx2.AsyncHTTPTransport())
         if requests_per_minute > 0:
             inner_transport = RateLimitedTransport(
                 inner_transport,
@@ -482,7 +483,8 @@ class AgentMixin:
                 run_kwargs["message_history"] = self._message_history
 
             # Run the agent
-            result = self.agent.run_sync(question, timeout=self.query_timeout, **run_kwargs)
+            with profile_span("rag.agent", "rag"):
+                result = self.agent.run_sync(question, timeout=self.query_timeout, **run_kwargs)
 
             # Keep the most recent messages so a long chat cannot grow without bound.
             self._message_history = result.all_messages()[-60:]
@@ -518,7 +520,8 @@ class AgentMixin:
     def _safe_guard_check(self, question: str) -> GuardDecision:
         """Run the optional input guard, failing open on any unexpected error."""
         try:
-            return self._input_guard.check(question)
+            with profile_span("guard.check", "guard"):
+                return self._input_guard.check(question)
         except Exception as exc:
             logger.warning("Chat input guard crashed; continuing without guard (fail-open): %s", exc)
             return GuardDecision(blocked=False, checked=False, reason="guard_unavailable")

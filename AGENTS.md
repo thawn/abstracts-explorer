@@ -51,7 +51,7 @@ them with `--no-verify` unless explicitly asked.
   - `export/`: markdown/ZIP export (`export_utils.py` is a facade).
   - `utils/`: shared time/json/url/conference/paper-presentation helpers.
   - Top-level: `config.py`, `db_models.py`, `paper_utils.py`, `registry.py`, `rate_limiter.py`, `metadata_cache.py`, `llm_utils.py`, `web_ui/` (Flask + `request_services.py` + TypeScript modules bundled with esbuild).
-- `tools/profiling.py`: dev-only SQL profiler (not shipped in the wheel).
+- `profiling/`: SQL profiler, request spans, Chroma/LLM instrumentation (web profiling is opt-in via `WEB_PROFILE=1`).
 - `scripts/archive/`: applied one-off migrations kept for reference.
 - `tests/`: pytest suite.
 - `docs/`: Sphinx (Markdown).

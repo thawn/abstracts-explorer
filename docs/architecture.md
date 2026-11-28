@@ -5,8 +5,7 @@ codebase, including module relationships, data flow, and function-level flow-cha
 
 ## Module Overview
 
-The codebase comprises **~21,200 lines** of Python (plus the dev-only
-`tools/profiling.py`, which is not shipped in the wheel):
+The codebase comprises **~21,200 lines** of Python:
 
 | Module | Lines | Responsibility |
 |--------|------:|----------------|
@@ -32,7 +31,7 @@ The codebase comprises **~21,200 lines** of Python (plus the dev-only
 | `paper_utils.py` | 167 | Paper formatting utilities |
 | `metadata_cache.py` | 112 | TTL cache for PostgreSQL metadata |
 | `llm_utils.py` | 76 | Shared one-shot chat-completion helper |
-| `tools/profiling.py` | 745 | DB profiling (development tool, not shipped) |
+| `profiling/` package | — | SQL profiler, request spans, Chroma/LLM instrumentation |
 
 ## High-Level Module Dependency Graph
 

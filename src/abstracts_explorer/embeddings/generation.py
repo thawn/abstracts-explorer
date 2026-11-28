@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from typing import Any, Optional
 
 from abstracts_explorer.embeddings.errors import EmbeddingsError
+from abstracts_explorer.profiling import profile_span
 from abstracts_explorer.embeddings.tokens import (
     _CONTEXT_RETRY_SHRINK,
     _MAX_CONTEXT_RETRIES,
@@ -166,7 +167,8 @@ class GenerationMixin:
         attempt = 0
         while True:
             try:
-                response = self.openai_client.embeddings.create(model=self.model_name, input=prepared_text)
+                with profile_span("embedding.generate", "embedding", model=self.model_name, batch=False):
+                    response = self.openai_client.embeddings.create(model=self.model_name, input=prepared_text)
                 if not response.data:
                     raise EmbeddingsError("No embedding data in API response")
 
@@ -224,7 +226,14 @@ class GenerationMixin:
 
         fallback_reason: Optional[str] = None
         try:
-            response = self.openai_client.embeddings.create(model=self.model_name, input=prepared)
+            with profile_span(
+                "embedding.generate_batch",
+                "embedding",
+                model=self.model_name,
+                batch=True,
+                texts=len(prepared),
+            ):
+                response = self.openai_client.embeddings.create(model=self.model_name, input=prepared)
             if len(response.data) != len(prepared):
                 fallback_reason = "unexpected number of embeddings in API response"
             else:

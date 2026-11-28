@@ -12,6 +12,7 @@ import chromadb
 from chromadb.config import Settings
 
 from abstracts_explorer.embeddings.errors import EmbeddingsError, translate_errors
+from abstracts_explorer.profiling import profile_span
 from abstracts_explorer.embeddings.locking import (
     LocalChromaInUseError,
     acquire_local_chroma_lock,
@@ -245,4 +246,5 @@ class ChromaMixin:
 
     def _get_records(self, ids: list[str], include: list[str]) -> dict[str, Any]:
         """Fetch records for *ids* from the collection."""
-        return self.collection.get(ids=ids, include=include)
+        with profile_span("chroma.get", "chroma", ids=len(ids), include=",".join(include)):
+            return self.collection.get(ids=ids, include=include)

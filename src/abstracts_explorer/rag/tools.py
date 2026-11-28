@@ -22,6 +22,7 @@ from abstracts_explorer.mcp import (
 )
 from abstracts_explorer.mcp.errors import ToolError
 from abstracts_explorer.mcp_tools import abbreviate_result, format_tool_result_for_llm
+from abstracts_explorer.profiling import profile_span
 from abstracts_explorer.rag.tool_context import RAGToolContext
 from abstracts_explorer.utils.conference_utils import parse_conference_year
 
@@ -147,7 +148,8 @@ def _run_rag_tool(
 
     logger.info("Tool call: %s(keys=%s)", tool_name, sorted(kwargs))
     try:
-        raw = mcp_func(**kwargs)
+        with profile_span(f"tool.{tool_name}", "tool", cached=False):
+            raw = mcp_func(**kwargs)
     except ToolError as exc:
         raw = json.dumps({"error": str(exc)})
     logger.info("Tool result: %s → %s", tool_name, abbreviate_result(raw))
