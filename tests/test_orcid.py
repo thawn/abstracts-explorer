@@ -15,62 +15,11 @@ from abstracts_explorer.orcid import (
     normalize_orcid_id,
     suggest_search_terms_from_orcid,
 )
+from tests.helpers import load_orcid_fixture
 
-WORKS_PAYLOAD = {
-    "group": [
-        {
-            "work-summary": [
-                {
-                    "title": {"title": {"value": "Deep Learning for Vision"}},
-                    "publication-date": {"year": {"value": "2024"}},
-                    "type": "conference-paper",
-                    "external-ids": {
-                        "external-id": [
-                            {
-                                "external-id-type": "doi",
-                                "external-id-value": "10.1234/vision",
-                            }
-                        ]
-                    },
-                },
-                {
-                    "title": {"title": {"value": "Graph Neural Networks"}},
-                    "publication-date": {"year": {"value": "2022"}},
-                    "type": "journal-article",
-                },
-            ]
-        },
-        {
-            "work-summary": [
-                {
-                    "title": {"title": {"value": "Deep Learning for Vision"}},
-                    "publication-date": {"year": {"value": "2024"}},
-                    "type": "conference-paper",
-                },
-                {
-                    "title": {"title": {"value": "Reinforcement Learning at Scale"}},
-                    "publication-date": {"year": {"value": "2019"}},
-                    "type": "conference-paper",
-                },
-            ]
-        },
-    ]
-}
-
-KEYWORDS_PAYLOAD = {
-    "keyword": [
-        {"content": "deep learning"},
-        {"content": "reinforcement learning"},
-    ]
-}
-
-PERSON_PAYLOAD = {
-    "name": {
-        "given-names": {"value": "Jane"},
-        "family-name": {"value": "Doe"},
-        "credit-name": None,
-    }
-}
+WORKS_PAYLOAD = load_orcid_fixture("works")
+KEYWORDS_PAYLOAD = load_orcid_fixture("keywords")
+PERSON_PAYLOAD = load_orcid_fixture("person")
 
 
 def _response(payload, status_code=200):
@@ -138,13 +87,13 @@ class TestFetchOrcidRecord:
         record = fetch_orcid_record("https://orcid.org/0000-0002-2315-9247")
 
         assert record["orcid"] == "0000-0002-2315-9247"
-        assert record["name"] == "Jane Doe"
-        assert record["keywords"] == ["deep learning", "reinforcement learning"]
-        assert len(record["works"]) == 3
-        assert record["works"][0]["title"] == "Deep Learning for Vision"
+        assert record["name"] == "Till Korten"
+        assert record["keywords"] == []
+        assert len(record["works"]) == 6
+        assert record["works"][0]["title"] == "Data Management Makes Machine Learning Easier"
         assert record["works"][0]["year"] == 2024
-        assert record["works"][0]["doi"] == "10.1234/vision"
-        assert record["works"][-1]["year"] == 2019
+        assert record["works"][0]["doi"] == "10.6084/m9.figshare.27087598"
+        assert record["works"][-1]["year"] == 2022
         assert mock_get.call_count == 3
         assert mock_get.call_args.kwargs["headers"]["Accept"] == "application/json"
 

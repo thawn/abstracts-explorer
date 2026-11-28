@@ -3,11 +3,12 @@ Session and schema lifecycle for DatabaseManager.
 """
 
 import logging
+import sqlite3
 import threading
 from pathlib import Path
 from typing import Any, Optional
 
-from sqlalchemy import create_engine, event, inspect
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import OperationalError, ProgrammingError, IntegrityError
@@ -30,6 +31,25 @@ _SCHEMA_READY_URLS: set[str] = set()
 _SCHEMA_LOCK = threading.Lock()
 _SCHEMA_CREATE_LOCK = threading.Lock()
 _METADATA_CACHE = MetadataCache()
+
+# SQLite 3.32.0 raised the default SQLITE_MAX_VARIABLE_NUMBER from 999 to 32766.
+MIN_SQLITE_VERSION = (3, 32, 0)
+
+
+def _require_supported_sqlite() -> None:
+    """
+    Ensure the interpreter's SQLite supports large ``IN (...)`` lists.
+
+    Raises
+    ------
+    DatabaseError
+        If the SQLite version is below :data:`MIN_SQLITE_VERSION`.
+    """
+    if sqlite3.sqlite_version_info < MIN_SQLITE_VERSION:
+        raise DatabaseError(
+            f"SQLite >= {'.'.join(map(str, MIN_SQLITE_VERSION))} is required "
+            f"(found {sqlite3.sqlite_version}); upgrade SQLite/Python or use PostgreSQL."
+        )
 
 
 def mask_database_url(url: str) -> str:
@@ -167,6 +187,9 @@ class SessionMixin:
                 is_sqlite = self.database_url.startswith("sqlite")
                 file_sqlite = self.database_url.startswith("sqlite:///")
                 memory_sqlite = ":memory:" in self.database_url
+
+                if is_sqlite:
+                    _require_supported_sqlite()
 
                 # Create parent directories for SQLite (writers only)
                 if file_sqlite and not self.read_only:
@@ -401,7 +424,27 @@ class SessionMixin:
 
     def _metadata_cache_enabled(self) -> bool:
         """Return whether the metadata cache applies to this backend."""
-        return self.database_url.startswith("postgresql")
+        return self.database_url.startswith("postgresql") or self.database_url.startswith("sqlite")
+
+    def ping(self) -> bool:
+        """
+        Check database connectivity with a cheap ``SELECT 1``.
+
+        Returns
+        -------
+        bool
+            ``True`` when the database responds.
+
+        Raises
+        ------
+        DatabaseError
+            If the connectivity check fails.
+        """
+        try:
+            self.session.execute(text("SELECT 1"))
+            return True
+        except Exception as e:
+            raise self._db_error("Database connectivity check failed", e)
 
     def _metadata_cache_ttl(self) -> int:
         """Return the configured metadata cache TTL in seconds."""
@@ -422,5 +465,8 @@ class SessionMixin:
         _METADATA_CACHE.set((self.database_url, kind, *parts), value, self._metadata_cache_ttl())
 
     def _invalidate_metadata_cache(self) -> None:
-        """Invalidate all metadata entries for the current database."""
+        """Invalidate metadata and result entries for the current database."""
         _METADATA_CACHE.invalidate_database(self.database_url)
+        from abstracts_explorer.cache import invalidate_result_caches
+
+        invalidate_result_caches(self.database_url)

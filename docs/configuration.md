@@ -74,6 +74,17 @@ PostgreSQL connections use the `psycopg` v3 driver, which is installed with the
 package. Plain `postgresql://` URLs select this driver automatically; no
 `postgresql+psycopg://` prefix is required.
 
+!!! note "SQLite version requirement"
+    SQLite paper databases require **SQLite 3.32 or higher** (released
+    2020-05-22), where the default `SQLITE_MAX_VARIABLE_NUMBER` was raised from
+    999 to 32766. The application fails fast with a clear error when the
+    interpreter's SQLite is older.
+
+    The paper DB uses the SQLite library provided by the Python interpreter /
+    system, so upgrade Python or SQLite, or use PostgreSQL. This does not affect
+    ChromaDB: its wheel statically links a modern SQLite (3.46.0 on the pinned
+    ChromaDB release), independent of the system SQLite.
+
 ##### PostgreSQL search indexes
 
 Keyword search uses `ILIKE '%term%'` predicates on `title`, `abstract`,
@@ -96,6 +107,8 @@ The migration:
 
 It is manual and idempotent. There is no automatic migration at application
 startup. Rerunning the script skips valid indexes and recreates invalid ones.
+After deploying a new release, verify the composite indexes exist on staging
+with the `--dry-run` command shown above.
 
 Indexes preserve existing substring search semantics. They increase disk usage
 and add write/import overhead; this is usually acceptable for a read-heavy
@@ -112,13 +125,38 @@ For container deployments, see [Docker: Create PostgreSQL search indexes](docker
 
 ##### Metadata cache
 
-- **METADATA_CACHE_TTL**: Time-to-live in seconds for cached PostgreSQL metadata
-  queries such as conference lists, year lists, session lists, and the
-  conference/year mapping (default: `86400`).
+- **METADATA_CACHE_TTL**: Time-to-live in seconds for cached database metadata
+  queries such as conference lists, year lists, session lists, the
+  conference/year mapping, conference/year/location filters, grouped year
+  counts, and scope→UID resolutions (default: `86400`).
   - Set to `0` to disable caching.
-  - Applies only to PostgreSQL; SQLite always queries directly.
+  - Applies to both SQLite and PostgreSQL.
   - The cache is process-local. Restart `serve web` after external imports so it
     reloads metadata immediately; otherwise entries expire after the TTL.
+  - Local writes (adding or deleting papers) invalidate cached metadata and
+    result entries immediately.
+  - ORCID public-record lookups and generated ORCID search terms are also
+    cached with this TTL.
+
+##### Query embedding cache
+
+- **QUERY_EMBEDDING_CACHE_MAX_ENTRIES**: Maximum number of normalized query
+  strings whose embeddings are cached in each process (default: `1024`).
+  - The cache is an LRU with no TTL. Repeated and concurrent semantic searches
+    for the same normalized query reuse one embedding request.
+  - Only query embeddings are cached. Document/ingestion embeddings are never
+    cached.
+  - The cache is bypassed when the embedding backend URL or model name changes.
+
+##### Search and topic-evolution result cache
+
+- **SEARCH_CACHE_MAX_BYTES**: Total-byte cap for cached semantic-search and
+  topic-evolution results in each process (default: `268435456`, 256 MiB).
+  - Entries use `METADATA_CACHE_TTL` and a 1024-entry LRU. Individual results
+    larger than about 1 MiB are not cached. Set to `0` to disable the byte cap.
+  - Caches are process-local and thread-safe. Local database or embedding writes
+    invalidate them immediately; writes from another process may remain stale
+    until the TTL expires. Restart the web server after external imports.
 
 #### Embedding Database
 
@@ -136,6 +174,14 @@ The configuration automatically detects the type based on the format:
   less space available, `embeddings create` fails fast instead of risking a
   corrupted vector index. Set to `0` to disable the check. Ignored for HTTP
   `EMBEDDING_DB` values.
+
+- **WARMUP_EMBEDDINGS**: Warm the configured ChromaDB collection when the web
+  server starts (default: `true`). The warm-up opens the collection, reads its
+  count, determines the vector dimension from existing data, and issues one
+  tiny zero-vector query to load the HNSW index. No embedding API request is
+  made and empty collections are skipped. Set `WARMUP_EMBEDDINGS=0` to opt out
+  (for example when ChromaDB is unavailable at startup and will be initialized
+  lazily). Failures are logged and never block startup.
 
 !!! warning "Local ChromaDB is single-process"
     A local ChromaDB (`EMBEDDING_DB` file path) is locked for the lifetime of

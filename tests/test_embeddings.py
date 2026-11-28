@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import httpx2
+import numpy as np
 import pytest
 from filelock import ReadWriteLock
 from unittest.mock import Mock
@@ -19,6 +20,7 @@ from abstracts_explorer.embeddings import (
     hash_text,
     is_content_hash,
 )
+from abstracts_explorer.embeddings.batching import EMBEDDING_FETCH_BATCH_SIZE, MAX_QUERY_RESULTS
 from abstracts_explorer.embeddings.tokens import count_tokens as _count_tokens
 from tests.conftest import set_test_db
 from tests.helpers import FakeTime
@@ -1676,23 +1678,23 @@ class TestQueryEmbedding:
 
     def test_embedding_is_generated_once(self):
         manager = Mock()
-        manager.generate_embedding.return_value = [0.1, 0.2]
+        manager.generate_query_embedding.return_value = [0.1, 0.2]
         query = QueryEmbedding("test query", manager)
 
         assert query.embedding == [0.1, 0.2]
         assert query.embedding == [0.1, 0.2]
-        manager.generate_embedding.assert_called_once_with("test query")
+        manager.generate_query_embedding.assert_called_once_with("test query")
 
     def test_embedding_retries_after_failure(self):
         manager = Mock()
-        manager.generate_embedding.side_effect = [EmbeddingsError("boom"), [0.3]]
+        manager.generate_query_embedding.side_effect = [EmbeddingsError("boom"), [0.3]]
         query = QueryEmbedding("test query", manager)
 
         with pytest.raises(EmbeddingsError, match="boom"):
             _ = query.embedding
 
         assert query.embedding == [0.3]
-        assert manager.generate_embedding.call_count == 2
+        assert manager.generate_query_embedding.call_count == 2
 
 
 class TestConcurrentClientCreation:
@@ -1835,6 +1837,7 @@ class TestDistanceHelpers:
     def _make_manager(self):
         manager = object.__new__(EmbeddingsManager)
         manager.generate_embedding = Mock(return_value=[0.1])
+        manager.generate_query_embedding = Mock(return_value=[0.1])
         manager._collection = Mock()
         manager._collection.count.return_value = 10
         manager._collection.query.return_value = {
@@ -1875,7 +1878,7 @@ class TestDistanceHelpers:
         query = QueryEmbedding("query", manager)
         query._vector = [0.5, 0.6]
         manager.query_ids_within_distance(query, distance_threshold=1.0)
-        manager.generate_embedding.assert_not_called()
+        manager.generate_query_embedding.assert_not_called()
         assert manager._collection.query.call_args.kwargs["query_embeddings"] == [[0.5, 0.6]]
 
     def test_query_ids_within_distance_with_ids(self):
@@ -1887,15 +1890,15 @@ class TestDistanceHelpers:
         )
         assert manager._collection.query.call_args.kwargs["ids"] == ["paper-a", "paper-b"]
 
+    @staticmethod
+    def _fake_batch_query(**kwargs):
+        batch = kwargs["ids"]
+        return {"ids": [batch], "distances": [[0.1] * len(batch)]}
+
     def test_large_id_lists_are_queried_in_batches(self):
         manager = self._make_manager()
-        ids = [f"paper-{index}" for index in range(600)]
-
-        def fake_query(**kwargs):
-            batch = kwargs["ids"]
-            return {"ids": [batch], "distances": [[0.1] * len(batch)]}
-
-        manager._collection.query.side_effect = fake_query
+        ids = [f"paper-{index}" for index in range(MAX_QUERY_RESULTS + 1)]
+        manager._collection.query.side_effect = self._fake_batch_query
 
         result = manager.query_ids_within_distance(
             QueryEmbedding("query", manager),
@@ -1904,7 +1907,22 @@ class TestDistanceHelpers:
         )
 
         assert manager._collection.query.call_count == 2
-        assert len(result) == 600
+        assert len(result) == MAX_QUERY_RESULTS
+
+    def test_moderate_id_lists_are_queried_once(self):
+        """A conference-sized filter must not fan out into many Chroma queries."""
+        manager = self._make_manager()
+        ids = [f"paper-{index}" for index in range(6000)]
+        manager._collection.query.side_effect = self._fake_batch_query
+
+        result = manager.query_ids_within_distance(
+            QueryEmbedding("query", manager),
+            distance_threshold=1.0,
+            ids=ids,
+        )
+
+        assert manager._collection.query.call_count == 1
+        assert len(result) == 6000
 
     def test_empty_ids_returns_empty(self):
         manager = self._make_manager()
@@ -1919,6 +1937,38 @@ class TestDistanceHelpers:
         manager = self._make_manager()
         manager._collection.query.return_value = {"ids": [[]], "distances": [[]]}
         assert manager.query_ids_within_distance(QueryEmbedding("query", manager)) == []
+
+
+class TestRepresentativeEmbeddingFetch:
+    """Tests for fetching representative embeddings during dedupe ingestion."""
+
+    @staticmethod
+    def _make_manager() -> EmbeddingsManager:
+        manager = object.__new__(EmbeddingsManager)
+        manager._get_records = Mock()
+        manager._store_embeddings = Mock()
+        return manager
+
+    def test_embedding_fetch_batch_size_is_5000(self):
+        assert EMBEDDING_FETCH_BATCH_SIZE == 5000
+
+    def test_representative_fetch_is_batched_and_cast_to_float32(self, monkeypatch):
+        monkeypatch.setattr("abstracts_explorer.embeddings.ingest.EMBEDDING_FETCH_BATCH_SIZE", 2)
+        manager = self._make_manager()
+
+        def fake_get_records(ids, include):
+            return {"ids": list(ids), "embeddings": [np.array([0.1, 0.2], dtype=np.float64) for _ in ids]}
+
+        manager._get_records.side_effect = fake_get_records
+        duplicate_groups = {f"rep-{index}": [f"dup-{index}"] for index in range(3)}
+        texts = {f"dup-{index}": f"duplicate text {index}" for index in range(3)}
+
+        copied = manager._copy_representative_embeddings(duplicate_groups, texts)
+
+        assert copied == 3
+        assert manager._get_records.call_count == 2
+        stored = manager._store_embeddings.call_args.kwargs["embeddings"]
+        assert all(vector.dtype == np.float32 for vector in stored)
 
 
 class TestEmbeddingInputTruncation:
@@ -2057,3 +2107,101 @@ class TestCentralLLMRetries:
         transport = captured["transport"]
         assert isinstance(transport, CooldownAwareTransport)
         assert not isinstance(transport._transport, RateLimitedTransport)
+
+
+class TestQueryEmbeddingCache:
+    """Process-global query embedding cache behavior."""
+
+    @staticmethod
+    def _manager(model_name: str = "test-model", backend_url: str = "http://cache-test") -> EmbeddingsManager:
+        return EmbeddingsManager(
+            backend_url=backend_url,
+            model_name=model_name,
+            collection_name="cache_test",
+        )
+
+    def test_same_normalized_text_calls_backend_once(self):
+        em = self._manager()
+        em.generate_embedding = Mock(return_value=[0.1, 0.2])
+
+        first = QueryEmbedding("  Hello   World ", em)
+        second = QueryEmbedding("hello world", em)
+
+        assert first.embedding == [0.1, 0.2]
+        assert second.embedding == [0.1, 0.2]
+        em.generate_embedding.assert_called_once()
+
+    def test_different_text_misses(self):
+        em = self._manager()
+        em.generate_embedding = Mock(return_value=[0.1])
+
+        QueryEmbedding("hello", em).embedding
+        QueryEmbedding("goodbye", em).embedding
+
+        assert em.generate_embedding.call_count == 2
+
+    def test_max_size_eviction(self, monkeypatch):
+        from abstracts_explorer import cache as cache_module
+
+        monkeypatch.setattr(
+            cache_module,
+            "QUERY_EMBEDDING_CACHE",
+            cache_module.TtlLruCache(max_entries=2, default_ttl=None),
+        )
+        cache_module.reset_query_embedding_cache()
+        em = self._manager()
+        em.generate_embedding = Mock(return_value=[0.1])
+
+        QueryEmbedding("one", em).embedding
+        QueryEmbedding("two", em).embedding
+        QueryEmbedding("three", em).embedding
+        QueryEmbedding("one", em).embedding
+
+        assert em.generate_embedding.call_count == 4
+
+    def test_concurrent_same_query_calls_backend_once(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        em = self._manager()
+        calls = 0
+        lock = threading.Lock()
+
+        def slow_embedding(text):
+            nonlocal calls
+            with lock:
+                calls += 1
+            time.sleep(0.05)
+            return [1.0, 2.0]
+
+        em.generate_embedding = slow_embedding
+
+        def worker():
+            return QueryEmbedding("same query", em).embedding
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            results = list(executor.map(lambda _: worker(), range(8)))
+
+        assert calls == 1
+        assert results == [[1.0, 2.0]] * 8
+
+    def test_document_embedding_does_not_populate_cache(self):
+        em = self._manager()
+        em.generate_embedding = Mock(return_value=[0.5])
+
+        em.generate_embedding("document text")
+        QueryEmbedding("document text", em).embedding
+
+        assert em.generate_embedding.call_count == 2
+
+    def test_signature_change_clears_cache(self):
+        first = self._manager(model_name="model-a")
+        second = self._manager(model_name="model-b")
+        first.generate_embedding = Mock(return_value=[0.1])
+        second.generate_embedding = Mock(return_value=[0.2])
+
+        assert QueryEmbedding("same", first).embedding == [0.1]
+        assert QueryEmbedding("same", second).embedding == [0.2]
+        assert QueryEmbedding("same", first).embedding == [0.1]
+
+        assert first.generate_embedding.call_count == 2
+        assert second.generate_embedding.call_count == 1

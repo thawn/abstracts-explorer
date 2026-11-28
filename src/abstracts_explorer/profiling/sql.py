@@ -9,7 +9,7 @@ in the process (including managers created lazily inside MCP tools).
 
 The main entry point is :class:`SqlProfiler`::
 
-    from tools.profiling import SqlProfiler
+    from abstracts_explorer.profiling import SqlProfiler
 
     with SqlProfiler() as profiler:
         with profiler.case("search"):

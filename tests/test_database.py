@@ -8,12 +8,14 @@ using the new schema with integer IDs and proper author relationships.
 """
 
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import exc as sqlalchemy_exc
 from unittest.mock import Mock, patch
 
+from abstracts_explorer.constants import MAX_BIND_PARAMETERS
 from abstracts_explorer.database import DatabaseManager, DatabaseError, normalize_model_name
 from abstracts_explorer.embeddings import QueryEmbedding
 from abstracts_explorer.plugin import LightweightPaper
@@ -2163,7 +2165,7 @@ class TestGetConferenceYearsFromDb:
 
     def test_uses_single_query(self, connected_db, sample_paper):
         """The conference/year mapping is built with one SQL statement."""
-        from tools.profiling import SqlProfiler
+        from abstracts_explorer.profiling import SqlProfiler
 
         connected_db.add_paper(sample_paper)
 
@@ -2188,7 +2190,7 @@ class TestMetadataCacheIntegration:
 
     def test_postgresql_metadata_cache_hits(self, connected_db, sample_paper, monkeypatch):
         """A cached metadata call executes no SQL after the first call."""
-        from tools.profiling import SqlProfiler
+        from abstracts_explorer.profiling import SqlProfiler
 
         self._enable_cache(monkeypatch)
         connected_db.add_paper(sample_paper)
@@ -2204,21 +2206,22 @@ class TestMetadataCacheIntegration:
         assert stats["second"] == 0
         assert first == second == {"NeurIPS": [2025]}
 
-    def test_sqlite_bypasses_metadata_cache(self, connected_db, sample_paper):
-        """SQLite metadata calls always execute SQL."""
-        from tools.profiling import SqlProfiler
+    def test_sqlite_metadata_cache_hits(self, connected_db, sample_paper):
+        """SQLite metadata calls are cached like PostgreSQL."""
+        from abstracts_explorer.profiling import SqlProfiler
 
         connected_db.add_paper(sample_paper)
 
         with SqlProfiler() as profiler:
             with profiler.case("first"):
-                connected_db.get_conference_years_from_db()
+                first = connected_db.get_conference_years_from_db()
             with profiler.case("second"):
-                connected_db.get_conference_years_from_db()
+                second = connected_db.get_conference_years_from_db()
 
         stats = {case.label: case.statement_count for case in profiler.results()}
         assert stats["first"] == 1
-        assert stats["second"] == 1
+        assert stats["second"] == 0
+        assert first == second == {"NeurIPS": [2025]}
 
     def test_add_paper_invalidates_metadata_cache(
         self, connected_db, sample_paper, sample_paper_minimal, monkeypatch
@@ -2453,6 +2456,7 @@ class TestPaperUidResolution:
             "session",
             "location",
             "content_hash",
+            "generated_keywords",
         }
 
     def test_find_paper_ids_within_distance_returns_matches(self, connected_db, sample_paper):
@@ -2653,3 +2657,351 @@ class TestGetPaperWhereFilters:
 
         assert connected_db.get_paper_count({"year": 2025}) == 1
         assert connected_db.get_paper_count({"conference": {"$in": ["NeurIPS", "ICLR"]}}) == 2
+
+
+class TestInClauseBatching:
+    """IN (...) lists must be chunked by ``MAX_BIND_PARAMETERS``."""
+
+    def test_max_bind_parameters_value(self):
+        assert MAX_BIND_PARAMETERS == 32766
+
+    def test_get_content_hashes_chunks(self, connected_db, sample_paper, monkeypatch):
+        import abstracts_explorer.db.papers as papers_module
+
+        monkeypatch.setattr(papers_module, "MAX_BIND_PARAMETERS", 1)
+        uid = connected_db.add_paper(sample_paper)
+
+        hashes = connected_db.get_content_hashes([uid, "missing"])
+
+        assert uid in hashes
+        assert "missing" not in hashes
+
+    def test_get_paper_summaries_chunks(self, connected_db, sample_paper, sample_paper_minimal, monkeypatch):
+        import abstracts_explorer.db.papers as papers_module
+
+        monkeypatch.setattr(papers_module, "MAX_BIND_PARAMETERS", 1)
+        uid1 = connected_db.add_paper(sample_paper)
+        uid2 = connected_db.add_paper(sample_paper_minimal)
+
+        summaries = connected_db.get_paper_summaries_by_uids([uid1, uid2])
+
+        assert [summary["uid"] for summary in summaries] == [uid1, uid2]
+
+    def test_delete_papers_by_uids_chunks(self, connected_db, sample_paper, sample_paper_minimal, monkeypatch):
+        import abstracts_explorer.db.papers as papers_module
+
+        monkeypatch.setattr(papers_module, "MAX_BIND_PARAMETERS", 1)
+        uid1 = connected_db.add_paper(sample_paper)
+        uid2 = connected_db.add_paper(sample_paper_minimal)
+
+        assert connected_db.delete_papers_by_uids([uid1, uid2]) == 2
+        assert connected_db.get_paper_count() == 0
+
+    def test_delete_chat_donations_chunks(self, connected_db, monkeypatch):
+        import abstracts_explorer.db.donations as donations_module
+
+        monkeypatch.setattr(donations_module, "MAX_BIND_PARAMETERS", 1)
+        id1 = connected_db.donate_chat_transcript("up", [{"role": "user", "text": "hi"}])
+        id2 = connected_db.donate_chat_transcript("down", [{"role": "user", "text": "bye"}])
+
+        assert connected_db.delete_chat_donations(ids=[id1, id2]) == 2
+        assert connected_db.get_chat_donations() == []
+
+    def test_delete_validation_data_chunks(self, connected_db, monkeypatch):
+        import abstracts_explorer.db.donations as donations_module
+
+        monkeypatch.setattr(donations_module, "MAX_BIND_PARAMETERS", 1)
+        connected_db.donate_validation_data({"uid1": {"priority": 5, "searchTerm": None}})
+        connected_db.donate_validation_data({"uid2": {"priority": 3, "searchTerm": None}})
+        ids = [entry["id"] for entry in connected_db.get_validation_data()]
+
+        assert connected_db.delete_validation_data(ids=ids) == 2
+        assert connected_db.get_validation_data() == []
+
+    def test_delete_clustering_cache_ids_chunks(self, connected_db, monkeypatch):
+        import abstracts_explorer.db.clustering_cache as cache_module
+
+        monkeypatch.setattr(cache_module, "MAX_BIND_PARAMETERS", 1)
+        for year in (2023, 2024, 2025):
+            connected_db.save_clustering_cache(
+                embedding_model="model1",
+                reduction_method="umap",
+                n_components=2,
+                clustering_method="agglomerative",
+                results={"points": [], "statistics": {"n_clusters": 1}},
+                n_clusters=1,
+                conference="AAAI",
+                year=year,
+            )
+        entries = connected_db.list_clustering_cache_entries(conference="AAAI")
+        delete_ids = [entry["id"] for entry in entries[:2]]
+
+        assert connected_db.delete_clustering_cache_ids(delete_ids) == 2
+
+
+class TestSQLiteVersionRequirement:
+    """SQLite paper databases must meet the documented minimum version."""
+
+    def test_old_sqlite_is_rejected(self, db_manager, monkeypatch):
+        import abstracts_explorer.db.session as session_module
+
+        monkeypatch.setattr(session_module.sqlite3, "sqlite_version_info", (3, 31, 0))
+        monkeypatch.setattr(session_module.sqlite3, "sqlite_version", "3.31.0")
+
+        with pytest.raises(DatabaseError, match="SQLite >= 3.32"):
+            db_manager.create_tables()
+
+
+class TestSemanticSearchResultCache:
+    """Process-global semantic search result cache behavior."""
+
+    def test_identical_query_hits_cache(self, connected_db, sample_paper):
+        uid = connected_db.add_paper(sample_paper)
+        em = Mock()
+        em.query_ids_within_distance.return_value = [(uid, 0.2)]
+
+        first, first_total = connected_db.search(
+            "transformer", limit=5, use_embeddings=True, embeddings_manager=em, include_total=True
+        )
+        second, second_total = connected_db.search(
+            "transformer", limit=5, use_embeddings=True, embeddings_manager=em, include_total=True
+        )
+
+        assert [paper["uid"] for paper in first] == [uid]
+        assert first == second
+        assert first_total == second_total == 1
+        em.query_ids_within_distance.assert_called_once()
+
+    def test_different_filters_or_query_miss(self, connected_db, sample_paper):
+        uid = connected_db.add_paper(sample_paper)
+        em = Mock()
+        em.query_ids_within_distance.return_value = [(uid, 0.2)]
+
+        connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+        connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em, years=[2025])
+        connected_db.search("attention", limit=5, use_embeddings=True, embeddings_manager=em)
+
+        assert em.query_ids_within_distance.call_count == 3
+
+    def test_ttl_expiry(self, connected_db, sample_paper, monkeypatch):
+        from abstracts_explorer import cache as cache_module
+        from tests.test_cache import FakeClock
+
+        uid = connected_db.add_paper(sample_paper)
+        em = Mock()
+        em.query_ids_within_distance.return_value = [(uid, 0.2)]
+
+        clock = FakeClock()
+        monkeypatch.setattr(
+            cache_module,
+            "SEARCH_RESULT_CACHE",
+            cache_module.TtlLruCache(max_entries=10, clock=clock),
+        )
+
+        connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+        connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+        assert em.query_ids_within_distance.call_count == 1
+
+        clock.advance(10**9)
+        connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+        assert em.query_ids_within_distance.call_count == 2
+
+    def test_lru_eviction(self, connected_db, sample_paper, monkeypatch):
+        from abstracts_explorer import cache as cache_module
+
+        uid = connected_db.add_paper(sample_paper)
+        em = Mock()
+        em.query_ids_within_distance.return_value = [(uid, 0.2)]
+
+        monkeypatch.setattr(
+            cache_module,
+            "SEARCH_RESULT_CACHE",
+            cache_module.TtlLruCache(max_entries=1),
+        )
+
+        connected_db.search("first", limit=5, use_embeddings=True, embeddings_manager=em)
+        connected_db.search("second", limit=5, use_embeddings=True, embeddings_manager=em)
+        connected_db.search("first", limit=5, use_embeddings=True, embeddings_manager=em)
+
+        assert em.query_ids_within_distance.call_count == 3
+
+    def test_oversized_entry_skipped(self, connected_db, sample_paper, monkeypatch):
+        from abstracts_explorer import cache as cache_module
+
+        uid = connected_db.add_paper(sample_paper)
+        em = Mock()
+        em.query_ids_within_distance.return_value = [(uid, 0.2)]
+
+        monkeypatch.setattr(
+            cache_module,
+            "SEARCH_RESULT_CACHE",
+            cache_module.TtlLruCache(max_entries=10, max_entry_bytes=1),
+        )
+
+        connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+        connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+
+        assert em.query_ids_within_distance.call_count == 2
+
+    def test_single_flight_concurrency(self, connected_db, monkeypatch):
+        from concurrent.futures import ThreadPoolExecutor
+
+        em = Mock()
+        calls = 0
+        lock = threading.Lock()
+        start = threading.Barrier(4)
+
+        def slow_find(*args, **kwargs):
+            nonlocal calls
+            with lock:
+                calls += 1
+            time.sleep(0.05)
+            return []
+
+        monkeypatch.setattr(connected_db, "_resolve_filter_ids", lambda **kwargs: None)
+        monkeypatch.setattr(connected_db, "find_paper_ids_within_distance", slow_find)
+        monkeypatch.setattr(connected_db, "get_result_details", lambda *args, **kwargs: [])
+
+        def worker():
+            start.wait()
+            return connected_db.search("concurrent", limit=5, use_embeddings=True, embeddings_manager=em)
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            results = list(executor.map(lambda _: worker(), range(4)))
+
+        assert calls == 1
+        assert results == [([], None)] * 4
+
+    def test_write_invalidates_cache(self, connected_db, sample_paper):
+        em = Mock()
+        em.query_ids_within_distance.return_value = []
+
+        connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+        connected_db.add_paper(sample_paper)
+        connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+
+        assert em.query_ids_within_distance.call_count == 2
+
+    def test_deep_copy_isolation(self, connected_db, sample_paper):
+        uid = connected_db.add_paper(sample_paper)
+        em = Mock()
+        em.query_ids_within_distance.return_value = [(uid, 0.2)]
+
+        first, _ = connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+        first[0]["title"] = "mutated"
+
+        second, _ = connected_db.search("transformer", limit=5, use_embeddings=True, embeddings_manager=em)
+
+        assert second[0]["title"] == sample_paper.title
+        em.query_ids_within_distance.assert_called_once()
+
+
+class TestGetYearCounts:
+    """Tests for grouped year statistics."""
+
+    def test_counts_match_get_stats(self, connected_db, sample_paper, sample_paper_minimal):
+        """Grouped counts match per-year get_stats values."""
+        connected_db.add_paper(sample_paper)
+        connected_db.add_paper(sample_paper_minimal)
+
+        counts = connected_db.get_year_counts()
+        assert set(counts) == {2024, 2025}
+        for year, values in counts.items():
+            stats = connected_db.get_stats(year=year)
+            assert values["total_papers"] == stats["total_papers"]
+            assert values["presentations"] == stats["presentations"]
+
+    def test_filters_by_conference_and_years(self, connected_db, sample_paper, sample_paper_minimal):
+        connected_db.add_paper(sample_paper)
+        connected_db.add_paper(sample_paper_minimal)
+
+        assert connected_db.get_year_counts(conference="NeurIPS") == {2025: {"total_papers": 1, "presentations": 1}}
+        assert connected_db.get_year_counts(years=[2024]) == {2024: {"total_papers": 1, "presentations": 1}}
+
+    def test_empty_database_returns_empty_mapping(self, connected_db):
+        assert connected_db.get_year_counts() == {}
+
+
+class TestConferenceYearLocationCache:
+    """Tests for conference/year/location metadata caching."""
+
+    def test_repeated_calls_use_cache(self, connected_db, sample_paper):
+        from abstracts_explorer.profiling import SqlProfiler
+
+        connected_db.add_paper(sample_paper)
+
+        with SqlProfiler() as profiler:
+            with profiler.case("first"):
+                first = connected_db.get_conference_year_locations()
+            with profiler.case("second"):
+                second = connected_db.get_conference_year_locations()
+
+        stats = {case.label: case.statement_count for case in profiler.results()}
+        assert stats["first"] == 1
+        assert stats["second"] == 0
+        assert first == second
+
+
+class TestScopeUidCache:
+    """Tests for the process-global scope to UID cache."""
+
+    def test_repeated_resolution_uses_cache(self, connected_db, sample_paper):
+        from abstracts_explorer.profiling import SqlProfiler
+
+        connected_db.add_paper(sample_paper)
+
+        with SqlProfiler() as profiler:
+            with profiler.case("first"):
+                first = connected_db.get_paper_uids({"year": 2025})
+            with profiler.case("second"):
+                second = connected_db.get_paper_uids({"year": 2025})
+
+        stats = {case.label: case.statement_count for case in profiler.results()}
+        assert stats["first"] == 1
+        assert stats["second"] == 0
+        assert first == second
+
+    def test_cached_values_are_copies(self, connected_db, sample_paper):
+        connected_db.add_paper(sample_paper)
+
+        first = connected_db.get_paper_uids({"year": 2025})
+        first.append("mutated")
+
+        second = connected_db.get_paper_uids({"year": 2025})
+        assert len(second) == 1
+        assert "mutated" not in second
+
+    def test_write_invalidates_scope_cache(self, connected_db, sample_paper, sample_paper_minimal):
+        connected_db.add_paper(sample_paper)
+        assert len(connected_db.get_paper_uids()) == 1
+
+        connected_db.add_paper(sample_paper_minimal)
+        assert len(connected_db.get_paper_uids()) == 2
+
+
+class TestPaperLookupHelpers:
+    """Tests for title and lightweight scope lookups."""
+
+    def test_get_paper_by_title_exact_case_insensitive(self, connected_db, sample_paper):
+        connected_db.add_paper(sample_paper)
+
+        paper = connected_db.get_paper_by_title("test paper")
+        assert paper is not None
+        assert paper["title"] == "Test Paper"
+
+    def test_get_paper_by_title_with_conference_and_year(self, connected_db, sample_paper, sample_paper_minimal):
+        connected_db.add_paper(sample_paper)
+        connected_db.add_paper(sample_paper_minimal)
+
+        assert connected_db.get_paper_by_title("Test Paper", conference="ICLR") is None
+        assert connected_db.get_paper_by_title("Test Paper", conference="NeurIPS", year=2025) is not None
+
+    def test_get_paper_by_title_missing(self, connected_db, sample_paper):
+        connected_db.add_paper(sample_paper)
+        assert connected_db.get_paper_by_title("Nonexistent") is None
+
+    def test_get_paper_scopes_by_uids(self, connected_db, sample_paper):
+        uid = connected_db.add_paper(sample_paper)
+
+        scopes = connected_db.get_paper_scopes_by_uids([uid, "missing"])
+        assert scopes == {uid: {"conference": "NeurIPS", "year": 2025}}

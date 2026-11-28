@@ -161,8 +161,9 @@ them from `static/modules/`.
 
 ## Architecture
 
-- **Database**: SQLAlchemy 2.0+, SQLite default / PostgreSQL supported. Models:
-  `Paper` (indexed title/year/openreview id), `EmbeddingsMetadata`,
+- **Database**: SQLAlchemy 2.0+, SQLite default / PostgreSQL supported. SQLite
+  requires >= 3.32 (32766 bind parameters); older versions fail fast at connect.
+  Models: `Paper` (indexed title/year/openreview id), `EmbeddingsMetadata`,
   `ClusteringCache`. Schema via `metadata.create_all()`.
 - **Embeddings**: ChromaDB stores paper UIDs, vectors, and SHA-256 content
   hashes only. The SQL database is the single source of truth for paper

@@ -32,6 +32,7 @@ def _paper(
         "year": year,
         "conference": conference,
         "keywords": keywords or ["transformers", "alignment"],
+        "generated_keywords": keywords or ["transformers", "alignment"],
     }
 
 
@@ -120,6 +121,16 @@ class TestSummarizeInterestingPapers:
 
         assert summary["total_interesting"] == 0
         assert summary["warning"]
+
+    def test_top_keywords_use_generated_keywords_not_source_keywords(self):
+        paper = _paper("p1", keywords=["source keyword"])
+        paper["generated_keywords"] = ["generated keyword"]
+        db = _mock_db([paper])
+
+        summary = summarize_interesting_papers(db, priorities={"p1": {"priority": 5}}, conference="ICLR")
+
+        assert "generated keyword" in summary["top_keywords"]
+        assert "source keyword" not in summary["top_keywords"]
 
 
 class TestRecommendRelatedPapers:

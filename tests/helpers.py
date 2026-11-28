@@ -5,10 +5,13 @@ This module contains common utility functions used across multiple test files
 to reduce code duplication and ensure consistency.
 """
 
+import copy
 import functools
+import json
 import socket
 import threading
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -120,6 +123,186 @@ def reset_lm_studio_availability_cache():
     """Reset the cached result of LM Studio availability check."""
     global _lm_studio_available_cache
     _lm_studio_available_cache = None
+
+
+ORCID_FIXTURE_ID = "0000-0002-2315-9247"
+ORCID_FIXTURES_DIR = Path(__file__).parent / "fixtures" / "orcid"
+
+
+def get_orcid_fixture_path(orcid_id: str = ORCID_FIXTURE_ID) -> Path:
+    """
+    Return the directory containing recorded ORCID fixtures for *orcid_id*.
+
+    Parameters
+    ----------
+    orcid_id : str, optional
+        Normalized ORCID iD (default: the shared test record).
+
+    Returns
+    -------
+    Path
+        Directory containing ``works.json``, ``keywords.json``, ``person.json``,
+        and ``suggested_terms.json``.
+    """
+    return ORCID_FIXTURES_DIR / orcid_id
+
+
+def load_orcid_fixture(name: str, orcid_id: str = ORCID_FIXTURE_ID) -> dict[str, Any]:
+    """
+    Load one recorded ORCID fixture payload.
+
+    Parameters
+    ----------
+    name : str
+        Fixture base name without ``.json`` (``works``, ``keywords``,
+        ``person``, or ``suggested_terms``).
+    orcid_id : str, optional
+        Normalized ORCID iD (default: the shared test record).
+
+    Returns
+    -------
+    dict
+        Parsed JSON payload.
+    """
+    path = get_orcid_fixture_path(orcid_id) / f"{name}.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_orcid_fixture_payloads(orcid_id: str = ORCID_FIXTURE_ID) -> dict[str, dict[str, Any]]:
+    """
+    Load the recorded ORCID API payloads used by ``_get_json``.
+
+    Parameters
+    ----------
+    orcid_id : str, optional
+        Normalized ORCID iD (default: the shared test record).
+
+    Returns
+    -------
+    dict
+        Mapping of endpoint name (``works``, ``keywords``, ``person``) to its
+        recorded JSON payload.
+    """
+    return {name: load_orcid_fixture(name, orcid_id) for name in ("works", "keywords", "person")}
+
+
+def patch_orcid_get_json(monkeypatch: pytest.MonkeyPatch, orcid_id: str = ORCID_FIXTURE_ID) -> None:
+    """
+    Patch the ORCID client to read recorded payloads instead of the live API.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Pytest monkeypatch fixture used to replace ``_get_json``.
+    orcid_id : str, optional
+        Normalized ORCID iD (default: the shared test record).
+    """
+    import abstracts_explorer.orcid as orcid_module
+
+    payloads = load_orcid_fixture_payloads(orcid_id)
+
+    def _fake_get_json(url: str, *, timeout: float) -> dict[str, Any]:
+        for endpoint, payload in payloads.items():
+            if url.rstrip("/").endswith(f"/{endpoint}"):
+                return copy.deepcopy(payload)
+        raise AssertionError(f"Unexpected ORCID fixture URL: {url}")
+
+    monkeypatch.setattr(orcid_module, "_get_json", _fake_get_json)
+
+
+def patch_orcid_chat_terms(monkeypatch: pytest.MonkeyPatch, orcid_id: str = ORCID_FIXTURE_ID) -> None:
+    """
+    Patch ORCID term generation to return the recorded LLM output.
+
+    This affects only the ORCID module; RAG chat continues to use the real
+    configured chat model.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Pytest monkeypatch fixture used to replace ``chat_completion_text``.
+    orcid_id : str, optional
+        Normalized ORCID iD (default: the shared test record).
+    """
+    import abstracts_explorer.orcid as orcid_module
+
+    raw = json.dumps(load_orcid_fixture("suggested_terms", orcid_id))
+    monkeypatch.setattr(orcid_module, "chat_completion_text", lambda **kwargs: raw)
+
+
+def build_orcid_fixture_record(orcid_id: str = ORCID_FIXTURE_ID) -> dict[str, Any]:
+    """
+    Build a parsed ORCID record from the recorded fixture payloads.
+
+    Parameters
+    ----------
+    orcid_id : str, optional
+        Normalized ORCID iD (default: the shared test record).
+
+    Returns
+    -------
+    dict
+        Parsed record in the shape returned by ``fetch_orcid_record``.
+    """
+    from abstracts_explorer.orcid import _parse_keywords, _parse_name, _parse_works
+
+    payloads = load_orcid_fixture_payloads(orcid_id)
+    return {
+        "orcid": orcid_id,
+        "name": _parse_name(payloads["person"]),
+        "works": _parse_works(payloads["works"]),
+        "keywords": _parse_keywords(payloads["keywords"]),
+    }
+
+
+def install_orcid_fixture_cache(
+    orcid_id: str = ORCID_FIXTURE_ID,
+    *,
+    max_terms: int = 15,
+    min_year: int | None = None,
+    max_works: int = 100,
+) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    """
+    Prepopulate the process-global ORCID cache with recorded fixture data.
+
+    The record is stored under the same key that ``fetch_orcid_record`` uses,
+    and the recorded LLM terms are stored under the key that
+    ``suggest_search_terms_from_orcid`` uses.  This keeps local tests offline.
+
+    Parameters
+    ----------
+    orcid_id : str, optional
+        Normalized ORCID iD (default: the shared test record).
+    max_terms : int, optional
+        Term limit for the cached recommendation (default: 15).
+    min_year : int, optional
+        Minimum publication year for the cached recommendation.
+    max_works : int, optional
+        Work limit for the cached recommendation (default: 100).
+
+    Returns
+    -------
+    tuple of (dict, list of dict)
+        Cached record and validated term records.
+    """
+    import abstracts_explorer.orcid as orcid_module
+
+    record = build_orcid_fixture_record(orcid_id)
+    terms: list[dict[str, str]] = []
+    for item in load_orcid_fixture("suggested_terms", orcid_id).get("search_terms") or []:
+        term = " ".join(str(item.get("term") or "").split()).strip("\"' ")
+        if not term:
+            continue
+        reason = " ".join(str(item.get("reason") or "").split())
+        terms.append({"term": term, "reason": reason, "source": "llm"})
+        if len(terms) >= max_terms:
+            break
+
+    ttl = get_config().metadata_cache_ttl
+    orcid_module._ORCID_CACHE.set(f"orcid:{orcid_id}", record, ttl)
+    terms_key = f"orcid-terms:{orcid_id}:{max_terms}:{min_year}:{max_works}"
+    orcid_module._ORCID_CACHE.set(terms_key, terms, ttl)
+    return record, terms
 
 
 def mock_plugin_current_year_probe(monkeypatch: pytest.MonkeyPatch) -> None:

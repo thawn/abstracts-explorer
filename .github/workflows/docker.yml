@@ -9,6 +9,7 @@ on:
       - 'v*.*.*'
     paths:
       - 'Dockerfile'
+      - 'Dockerfile.profiling'
       - 'docker-compose.yml'
       - '.dockerignore'
       - 'src/**'
@@ -27,6 +28,7 @@ on:
       - develop
     paths:
       - 'Dockerfile'
+      - 'Dockerfile.profiling'
       - 'docker-compose.yml'
       - '.dockerignore'
       - 'src/**'
@@ -130,6 +132,49 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: true
           sbom: true
+
+      - name: Extract metadata (tags, labels) for profiling image
+        id: meta-profiling
+        if: env.PUSH_IMAGE == 'true'
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}', env.REGISTRY_DOCKERHUB, env.IMAGE_NAME) || '' }}
+          # Add a -profiling suffix to every normal-image tag. onlatest also
+          # renames the `latest` tag to `latest-profiling` so the profiling
+          # image never shadows the production image.
+          flavor: |
+            suffix=-profiling,onlatest=true
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=sha-,format=short
+          labels: |
+            org.opencontainers.image.title=Abstracts Explorer (profiling)
+            org.opencontainers.image.description=Profiling build of Abstracts Explorer (py-spy, pyinstrument)
+            org.opencontainers.image.vendor=thawn
+
+      - name: Build and push profiling image
+        id: build-profiling
+        if: env.PUSH_IMAGE == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.profiling
+          platforms: linux/amd64,linux/arm64
+          push: true
+          # Layer on the exact image built and pushed in this run (by digest),
+          # never a stale published tag such as :latest.
+          build-args: |
+            BASE_IMAGE=${{ env.REGISTRY_GHCR }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          tags: ${{ steps.meta-profiling.outputs.tags }}
+          labels: ${{ steps.meta-profiling.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Generate artifact attestation
         if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/')

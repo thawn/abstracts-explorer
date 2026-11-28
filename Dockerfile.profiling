@@ -1,0 +1,34 @@
+# Profiling image for Abstracts Explorer.
+#
+# This is a thin layer on top of the production image. It only adds the
+# profiling tools (py-spy, pyinstrument) and the scripts/ directory needed by
+# scripts/profile_web_requests.py and scripts/profile_db_access.py. The
+# production image is reused as-is via the BASE_IMAGE build argument, so no
+# frontend/Python build stages are duplicated here.
+#
+# Build:
+#   podman build -t localhost/abstracts-explorer:develop .
+#   podman build \
+#     --build-arg BASE_IMAGE=localhost/abstracts-explorer:develop \
+#     -f Dockerfile.profiling -t localhost/abstracts-explorer:profiling .
+#
+# In CI, BASE_IMAGE points at the digest of the image built and pushed in the
+# same workflow run, so the profiling image always layers on that exact build.
+
+ARG BASE_IMAGE=localhost/abstracts-explorer:develop
+FROM ${BASE_IMAGE}
+
+# Install profiling tools into the existing virtual environment. The runtime
+# image does not ship uv/pip into the venv, so borrow the uv binary.
+USER root
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+RUN uv pip install --python /app/.venv/bin/python py-spy pyinstrument \
+    && chown -R abstracts:abstracts /app/.venv
+
+# Ship the profiling harness scripts (not present in the production image).
+COPY --chown=abstracts:abstracts scripts /app/scripts
+
+USER abstracts
+
+# ENTRYPOINT, CMD, HEALTHCHECK, PORT, PATH, PYTHONPATH and .env are all
+# inherited from the production base image.

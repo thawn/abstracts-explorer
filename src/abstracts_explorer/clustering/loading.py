@@ -8,7 +8,8 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from abstracts_explorer.clustering.errors import ClusteringError
-from abstracts_explorer.embeddings.batching import ID_BATCH_SIZE, iter_batches
+from abstracts_explorer.embeddings.batching import EMBEDDING_FETCH_BATCH_SIZE, iter_batches
+from abstracts_explorer.profiling import profile_span
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ class LoadingMixin:
             )
 
             self.paper_ids = paper_ids
-            self.embeddings = np.array(embeddings)
+            self.embeddings = np.asarray(embeddings, dtype=np.float32)
             self.metadatas = metadatas
 
             logger.info(f"Loaded {len(self.paper_ids)} embeddings with dimension {self.embeddings.shape[1]}")
@@ -94,25 +95,30 @@ class LoadingMixin:
         get_kwargs: Dict[str, Any] = {"include": ["embeddings"]}
         if limit:
             get_kwargs["limit"] = limit
-        results = self.embeddings_manager.collection.get(**get_kwargs)
-        return results.get("ids") or [], results.get("embeddings")
+        with profile_span("chroma.get", "chroma", ids=None, limit=limit):
+            results = self.embeddings_manager.collection.get(**get_kwargs)
+        embeddings = results.get("embeddings")
+        if embeddings is not None:
+            embeddings = np.asarray(embeddings, dtype=np.float32)
+        return results.get("ids") or [], embeddings
 
     def _fetch_embeddings_by_ids(self, ids: List[str], limit: Optional[int]) -> tuple[List[str], List[Any]]:
         """Fetch embeddings for explicit paper UIDs in batches."""
         batched_ids: List[str] = []
         batched_embeddings: List[Any] = []
         remaining = limit
-        for batch in iter_batches(ids, ID_BATCH_SIZE):
+        for batch in iter_batches(ids, EMBEDDING_FETCH_BATCH_SIZE):
             batch_kwargs: Dict[str, Any] = {"include": ["embeddings"], "ids": list(batch)}
             if remaining:
                 batch_kwargs["limit"] = remaining
-            batch_results = self.embeddings_manager.collection.get(**batch_kwargs)
+            with profile_span("chroma.get", "chroma", ids=len(batch), limit=remaining):
+                batch_results = self.embeddings_manager.collection.get(**batch_kwargs)
             batch_ids = batch_results.get("ids") or []
             batch_embeddings = batch_results.get("embeddings")
             if batch_embeddings is None:
                 continue
             batched_ids.extend(batch_ids)
-            batched_embeddings.extend(batch_embeddings)
+            batched_embeddings.extend(np.asarray(batch_embeddings, dtype=np.float32))
             if remaining:
                 remaining -= len(batch_ids)
                 if remaining <= 0:

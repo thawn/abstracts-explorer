@@ -31,7 +31,8 @@ from abstracts_explorer.clustering import (
 )
 from abstracts_explorer.embeddings import QueryEmbedding
 from abstracts_explorer.export_utils import export_papers_to_zip
-from abstracts_explorer.paper_utils import extract_top_keywords
+from abstracts_explorer.paper_utils import extract_top_keywords, top_keywords_from_papers
+from abstracts_explorer.profiling import profile_span
 from abstracts_explorer.web_ui import request_services as services
 from abstracts_explorer.web_ui.request_services import (
     _CHAT_SESSION_CACHE_MAX,  # noqa: F401  (re-exported for tests)
@@ -52,6 +53,7 @@ from abstracts_explorer.web_ui.api_utils import (
     get_json_object,
 )
 from abstracts_explorer.web_ui.rate_limit import enforce_client_rate_limit
+from abstracts_explorer.web_ui.profiling import init_profiling
 from abstracts_explorer.web_ui.warmup import warm_up
 
 # Import version
@@ -276,9 +278,9 @@ def health():
         JSON response with status and HTTP status code
     """
     try:
-        # Check if database is accessible
+        # Cheap connectivity check; do not count papers on every probe.
         db = services.get_database()
-        db.get_paper_count()
+        db.ping()
         return jsonify({"status": "healthy", "service": "abstracts-explorer"}), 200
     except Exception as e:
         # Log the actual error for debugging
@@ -536,7 +538,9 @@ def search():
         include_total=use_embeddings,
     )
 
-    related_topics = extract_top_keywords(papers)
+    related_topics = top_keywords_from_papers(papers)
+    if not related_topics:
+        related_topics = extract_top_keywords(papers)
 
     response_data = {
         "papers": papers,
@@ -923,11 +927,12 @@ def topic_evolution():
 
     enforce_client_rate_limit(_client_id())
     try:
-        result_json = mcp_get_topic_evolution(
-            topic_keywords=topic_keywords,
-            conferences=conferences,
-            distance_threshold=distance_threshold,
-        )
+        with profile_span("mcp.get_topic_evolution", "tool", conferences=conferences):
+            result_json = mcp_get_topic_evolution(
+                topic_keywords=topic_keywords,
+                conferences=conferences,
+                distance_threshold=distance_threshold,
+            )
     except ToolError as exc:
         return jsonify({"error": str(exc)})
 
@@ -954,15 +959,8 @@ def papers_per_year():
     conference = request.args.get("conference")
     database = services.get_database()
 
-    if conference:
-        years = sorted(database.get_years(conference=conference))
-    else:
-        years = sorted(database.get_years())
-
-    year_counts = {}
-    for year in years:
-        stats = database.get_stats(year=year, conference=conference)
-        year_counts[year] = stats["total_papers"]
+    counts = database.get_year_counts(conference=conference)
+    year_counts = {year: values["total_papers"] for year, values in sorted(counts.items())}
 
     return jsonify({"year_counts": year_counts, "conference": conference})
 
@@ -1273,6 +1271,8 @@ def run_server(host="127.0.0.1", port=5001, debug=False, dev=False, threads=None
             print("  abstracts-explorer embeddings create", file=sys.stderr)
             raise FileNotFoundError(f"Database not found: {db_path}")
     # For PostgreSQL, we can't check file existence - connection will be validated at runtime
+
+    init_profiling(app)
 
     # Prime the database connection, schema cache, and metadata queries so the
     # first page load does not pay the cold-start cost.

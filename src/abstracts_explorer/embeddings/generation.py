@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from typing import Any, Optional
 
 from abstracts_explorer.embeddings.errors import EmbeddingsError
+from abstracts_explorer.profiling import profile_span
 from abstracts_explorer.embeddings.tokens import (
     _CONTEXT_RETRY_SHRINK,
     _MAX_CONTEXT_RETRIES,
@@ -27,6 +28,7 @@ class GenerationMixin:
     max_input_tokens: int
     _learned_token_budget: Optional[int]
     model_name: str
+    backend_url: str
     openai_client: Any
 
     def _effective_token_budget(self) -> int:
@@ -166,7 +168,8 @@ class GenerationMixin:
         attempt = 0
         while True:
             try:
-                response = self.openai_client.embeddings.create(model=self.model_name, input=prepared_text)
+                with profile_span("embedding.generate", "embedding", model=self.model_name, batch=False):
+                    response = self.openai_client.embeddings.create(model=self.model_name, input=prepared_text)
                 if not response.data:
                     raise EmbeddingsError("No embedding data in API response")
 
@@ -187,6 +190,44 @@ class GenerationMixin:
                     attempt,
                     _MAX_CONTEXT_RETRIES,
                 )
+
+    def generate_query_embedding(self, text: str) -> list[float]:
+        """
+        Generate an embedding for a search query using the process-global cache.
+
+        Query text is normalized (whitespace-collapsed and case-folded) before
+        the cache lookup so equivalent queries share one backend call. Document
+        and ingestion embeddings are intentionally not cached here.
+
+        Parameters
+        ----------
+        text : str
+            Query text to embed.
+
+        Returns
+        -------
+        list of float
+            Query embedding vector.
+
+        Raises
+        ------
+        EmbeddingsError
+            If embedding generation fails.
+
+        Examples
+        --------
+        >>> em = EmbeddingsManager()
+        >>> embedding = em.generate_query_embedding("Graph  Neural Networks")
+        >>> len(embedding)
+        4096
+        """
+        from abstracts_explorer.cache import get_or_compute_query_embedding
+
+        if not text or not text.strip():
+            raise EmbeddingsError("Cannot generate embedding for empty text")
+
+        signature = (self.backend_url, self.model_name)
+        return get_or_compute_query_embedding(signature, text, lambda: self.generate_embedding(text))
 
     def generate_embeddings(self, texts: Sequence[str]) -> list[list[float]]:
         """
@@ -224,7 +265,14 @@ class GenerationMixin:
 
         fallback_reason: Optional[str] = None
         try:
-            response = self.openai_client.embeddings.create(model=self.model_name, input=prepared)
+            with profile_span(
+                "embedding.generate_batch",
+                "embedding",
+                model=self.model_name,
+                batch=True,
+                texts=len(prepared),
+            ):
+                response = self.openai_client.embeddings.create(model=self.model_name, input=prepared)
             if len(response.data) != len(prepared):
                 fallback_reason = "unexpected number of embeddings in API response"
             else:

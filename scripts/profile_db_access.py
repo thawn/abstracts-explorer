@@ -37,7 +37,7 @@ from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.embeddings import EmbeddingsManager
 from abstracts_explorer.mcp_tools import execute_mcp_tool
 from abstracts_explorer.plugin import LightweightPaper
-from tools.profiling import (
+from abstracts_explorer.profiling import (
     AggregatedCase,
     SqlProfiler,
     explain_statement,
@@ -244,7 +244,7 @@ def _llm_reachable(em: EmbeddingsManager, timeout: float = 3.0) -> bool:
         return False
     try:
         client = OpenAI(
-            base_url=f"{em.lm_studio_url}/v1",
+            base_url=f"{em.backend_url}/v1",
             api_key=em.llm_backend_auth_token or "lm-studio-local",
             timeout=timeout,
         )
@@ -346,9 +346,8 @@ def instrument_database(profiler: SqlProfiler) -> Callable[[], None]:
         "get_sessions",
         "get_stats",
         "get_years",
-        "search_papers",
-        "search_papers_keyword",
-        "search_papers_semantic",
+        "keyword_search",
+        "search",
     ]
     originals: Dict[str, Callable[..., Any]] = {}
 
@@ -403,25 +402,25 @@ def raw_cases(db: DatabaseManager, scope: Scope, args: argparse.Namespace) -> Li
     def add(label: str, func: Callable[[], Any]) -> None:
         cases.append((label, func))
 
-    add("raw:search.keyword.unfiltered", lambda: db.search_papers(keyword=topic, limit=50))
+    add("raw:search.keyword.unfiltered", lambda: db.keyword_search(keyword=topic, limit=50))
     if conference:
         add(
             "raw:search.keyword.conference",
-            lambda: db.search_papers(keyword=topic, conferences=[conference], limit=50),
+            lambda: db.keyword_search(keyword=topic, conferences=[conference], limit=50),
         )
         add(
             "raw:search.keyword.conference_year",
-            lambda: db.search_papers(
+            lambda: db.keyword_search(
                 keyword=topic, conferences=[conference], years=[year] if year else None, limit=50
             ),
         )
         add(
             "raw:search.field.authors",
-            lambda: db.search_papers(field_filters={"authors": scope.author_token}, limit=50),
+            lambda: db.keyword_search(field_filters={"authors": scope.author_token}, limit=50),
         )
         add(
             "raw:search.field.title",
-            lambda: db.search_papers(field_filters={"title": topic}, limit=50),
+            lambda: db.keyword_search(field_filters={"title": topic}, limit=50),
         )
         add(
             "raw:list.conference_year",

@@ -136,3 +136,32 @@ class TestFormatSearchResults:
 
         assert len(papers) == 1
         assert papers[0]["abstract"] == "From DB"
+
+
+class TestTopKeywordsFromPapers:
+    """Tests for runtime aggregation of stored generated keywords."""
+
+    def test_aggregates_case_insensitively_and_preserves_first_spelling(self):
+        from abstracts_explorer.paper_utils import top_keywords_from_papers
+
+        papers = [
+            {"generated_keywords": ["Deep Learning", "Transformers"]},
+            {"generated_keywords": ["deep learning", "Alignment"]},
+            {"generated_keywords": ["DEEP LEARNING"]},
+        ]
+
+        result = top_keywords_from_papers(papers, n_keywords=3)
+
+        assert result == ["Deep Learning", "Transformers", "Alignment"]
+
+    def test_returns_empty_when_no_generated_keywords(self):
+        from abstracts_explorer.paper_utils import top_keywords_from_papers
+
+        assert top_keywords_from_papers([{"keywords": ["source"]}]) == []
+
+    def test_ignores_source_keywords(self):
+        from abstracts_explorer.paper_utils import top_keywords_from_papers
+
+        papers = [{"keywords": ["source"], "generated_keywords": ["generated"]}]
+
+        assert top_keywords_from_papers(papers) == ["generated"]

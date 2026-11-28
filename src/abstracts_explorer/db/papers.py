@@ -22,6 +22,7 @@ from abstracts_explorer.db_models import (
     Paper,
 )
 
+from abstracts_explorer.constants import MAX_BIND_PARAMETERS
 from abstracts_explorer.db.errors import DatabaseError
 from abstracts_explorer.db.filters import WhereFilterMixin, _filter_has_key
 from abstracts_explorer.utils.hashing import paper_content_hash
@@ -237,8 +238,8 @@ class PapersMixin(WhereFilterMixin):
 
             existing_uids: set[str] = set()
             uids = [uid for uid, _ in prepared]
-            for start in range(0, len(uids), 500):
-                batch = uids[start : start + 500]
+            for start in range(0, len(uids), MAX_BIND_PARAMETERS):
+                batch = uids[start : start + MAX_BIND_PARAMETERS]
                 existing_uids.update(
                     self.session.execute(select(Paper.uid).where(Paper.uid.in_(batch))).scalars().all()
                 )
@@ -479,8 +480,8 @@ class PapersMixin(WhereFilterMixin):
             return {}
         try:
             hashes: Dict[str, Optional[str]] = {}
-            for start in range(0, len(uids), 500):
-                batch = uids[start : start + 500]
+            for start in range(0, len(uids), MAX_BIND_PARAMETERS):
+                batch = uids[start : start + MAX_BIND_PARAMETERS]
                 stmt: Any = select(Paper.uid, Paper.content_hash).where(Paper.uid.in_(batch))
                 for row in self.session.execute(stmt):
                     hashes[str(row.uid)] = row.content_hash
@@ -513,8 +514,8 @@ class PapersMixin(WhereFilterMixin):
             return {}
         try:
             grouped: Dict[str, set] = {}
-            for start in range(0, len(content_hashes), 500):
-                batch = content_hashes[start : start + 500]
+            for start in range(0, len(content_hashes), MAX_BIND_PARAMETERS):
+                batch = content_hashes[start : start + MAX_BIND_PARAMETERS]
                 stmt: Any = (
                     select(Paper.content_hash, Paper.location)
                     .where(Paper.content_hash.in_(batch), Paper.location.is_not(None))
@@ -538,6 +539,9 @@ class PapersMixin(WhereFilterMixin):
         """
         Return paper UIDs matching ``where_filters``.
 
+        Results are cached in the process-global scope→UID cache. Extremely
+        large scopes are returned without caching.
+
         Parameters
         ----------
         where_filters : dict, optional
@@ -555,18 +559,117 @@ class PapersMixin(WhereFilterMixin):
         DatabaseError
             If the query fails.
         """
+        from abstracts_explorer.cache import cache_key_text, get_or_compute_scope_uids
+
+        normalized_filters = self._normalize_where_filters(where_filters)
+        cache_key = (
+            self.database_url,
+            "scope_uids",
+            cache_key_text(normalized_filters),
+            int(limit),
+        )
+
+        def _compute() -> List[str]:
+            try:
+                stmt: Any = select(Paper.uid)
+                conditions = self._build_where_conditions(normalized_filters)
+                if conditions:
+                    stmt = stmt.where(and_(*conditions))
+                if limit:
+                    stmt = stmt.limit(limit)
+                return list(self.session.execute(stmt).scalars().all())
+            except DatabaseError:
+                raise
+            except Exception as e:
+                raise self._db_error("Failed to retrieve paper UIDs", e)
+
+        return get_or_compute_scope_uids(cache_key, _compute)
+
+    def get_paper_by_title(
+        self,
+        title: str,
+        conference: Optional[str] = None,
+        year: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a paper by an exact, case-insensitive title match.
+
+        Parameters
+        ----------
+        title : str
+            Full paper title.
+        conference : str, optional
+            Restrict the lookup to this conference.
+        year : int, optional
+            Restrict the lookup to this year.
+
+        Returns
+        -------
+        dict or None
+            Paper data, or ``None`` when no exact title match exists.
+
+        Raises
+        ------
+        DatabaseError
+            If the query fails.
+        """
+        if not title:
+            return None
+
         try:
-            stmt: Any = select(Paper.uid)
-            conditions = self._build_where_conditions(where_filters)
-            if conditions:
-                stmt = stmt.where(and_(*conditions))
-            if limit:
-                stmt = stmt.limit(limit)
-            return list(self.session.execute(stmt).scalars().all())
+            conditions: list = [func.lower(Paper.title) == func.lower(title)]
+            if conference is not None:
+                conditions.append(Paper.conference == conference)
+            if year is not None:
+                conditions.append(Paper.year == int(year))
+            stmt: Any = select(Paper).where(and_(*conditions)).limit(1)
+            paper = self.session.execute(stmt).scalar_one_or_none()
+            return self._paper_to_dict(paper) if paper is not None else None
         except DatabaseError:
             raise
         except Exception as e:
-            raise self._db_error("Failed to retrieve paper UIDs", e)
+            raise self._db_error("Failed to retrieve paper by title", e)
+
+    def get_paper_scopes_by_uids(self, uids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """
+        Return lightweight conference/year scopes for the given UIDs.
+
+        Only ``uid``, ``conference``, and ``year`` are selected, avoiding
+        hydration of abstracts and other large fields.
+
+        Parameters
+        ----------
+        uids : list of str
+            Paper UIDs to look up.
+
+        Returns
+        -------
+        dict
+            Mapping of UID to ``{"conference": str or None, "year": int or None}``.
+            Unknown UIDs are omitted.
+
+        Raises
+        ------
+        DatabaseError
+            If the query fails.
+        """
+        if not uids:
+            return {}
+        try:
+            scopes: Dict[str, Dict[str, Any]] = {}
+            for start in range(0, len(uids), MAX_BIND_PARAMETERS):
+                batch = uids[start : start + MAX_BIND_PARAMETERS]
+                stmt: Any = select(Paper.uid, Paper.conference, Paper.year).where(Paper.uid.in_(batch))
+                for row in self.session.execute(stmt):
+                    scopes[str(row.uid)] = {
+                        "conference": row.conference,
+                        "year": int(row.year) if row.year is not None else None,
+                    }
+            return scopes
+        except DatabaseError:
+            raise
+        except Exception as e:
+            raise self._db_error("Failed to retrieve paper scopes", e)
 
     def get_paper_summaries_by_uids(self, uids: List[str]) -> List[Dict[str, Any]]:
         """
@@ -581,8 +684,8 @@ class PapersMixin(WhereFilterMixin):
         -------
         list of dict
             Dictionaries with ``uid``, ``title``, ``abstract``, ``year``,
-            ``conference``, ``session``, ``location``, and ``content_hash``.
-            Results follow input order.
+            ``conference``, ``session``, ``location``, ``content_hash``, and
+            ``generated_keywords``. Results follow input order.
 
         Raises
         ------
@@ -594,8 +697,8 @@ class PapersMixin(WhereFilterMixin):
 
         try:
             summaries: Dict[str, Dict[str, Any]] = {}
-            for start in range(0, len(uids), 500):
-                batch = uids[start : start + 500]
+            for start in range(0, len(uids), MAX_BIND_PARAMETERS):
+                batch = uids[start : start + MAX_BIND_PARAMETERS]
                 stmt: Any = select(
                     Paper.uid,
                     Paper.title,
@@ -605,6 +708,7 @@ class PapersMixin(WhereFilterMixin):
                     Paper.session,
                     Paper.location,
                     Paper.content_hash,
+                    Paper.generated_keywords,
                 ).where(Paper.uid.in_(batch))
                 for row in self.session.execute(stmt):
                     summaries[str(row.uid)] = {
@@ -616,6 +720,7 @@ class PapersMixin(WhereFilterMixin):
                         "session": row.session or "",
                         "location": row.location,
                         "content_hash": row.content_hash,
+                        "generated_keywords": deserialize_keywords_from_string(str(row.generated_keywords or "")),
                     }
             return [summaries[uid] for uid in uids if uid in summaries]
         except DatabaseError:
@@ -668,10 +773,10 @@ class PapersMixin(WhereFilterMixin):
         if not uids:
             return []
 
-        # Query in fixed-size batches to stay well below DB parameter limits
+        # Queries here bind only the IN-list values, so MAX_BIND_PARAMETERS is safe.
         papers: List[Dict[str, Any]] = []
-        for start in range(0, len(uids), 500):
-            batch = uids[start : start + 500]
+        for start in range(0, len(uids), MAX_BIND_PARAMETERS):
+            batch = uids[start : start + MAX_BIND_PARAMETERS]
             papers.extend(self.get_paper({"uid": {"$in": batch}}, limit=0))
         by_uid = {paper["uid"]: paper for paper in papers}
         return [by_uid[uid] for uid in uids if uid in by_uid]
@@ -717,6 +822,7 @@ class PapersMixin(WhereFilterMixin):
             "url": paper.url,
             "room_name": paper.room_name,
             "keywords": deserialize_keywords_from_string(str(paper.keywords or "")),
+            "generated_keywords": deserialize_keywords_from_string(str(paper.generated_keywords or "")),
             "starttime": str(paper.starttime) if paper.starttime is not None else None,
             "endtime": str(paper.endtime) if paper.endtime is not None else None,
             "award": paper.award,
@@ -787,8 +893,8 @@ class PapersMixin(WhereFilterMixin):
 
         try:
             count = 0
-            for start in range(0, len(uids), 500):
-                batch = uids[start : start + 500]
+            for start in range(0, len(uids), MAX_BIND_PARAMETERS):
+                batch = uids[start : start + MAX_BIND_PARAMETERS]
                 result = self.session.execute(delete(Paper).where(Paper.uid.in_(batch)))
                 count += getattr(result, "rowcount", 0) or 0
             self.session.commit()

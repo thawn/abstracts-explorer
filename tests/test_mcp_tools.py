@@ -799,7 +799,9 @@ class TestExecuteMCPToolE2E:
                 "abstract": "",
             },
         ]
-        mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 100}
+        mock_db.get_year_counts.return_value = {
+            year: {"total_papers": 100, "presentations": 100} for year in (2022, 2023, 2024)
+        }
 
         with (
             patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager", return_value=mock_em),
@@ -827,9 +829,13 @@ class TestExecuteMCPToolE2E:
         mock_em.query_ids_within_distance.return_value = [("p1", 0.5), ("p2", 1.0)]
         mock_db = Mock()
         mock_db.resolve_paper_uids.return_value = ["p1", "p2"]
+        mock_db.get_paper_scopes_by_uids.return_value = {
+            "p1": {"conference": "NeurIPS", "year": 2025},
+            "p2": {"conference": "NeurIPS", "year": 2025},
+        }
         mock_db.get_result_details.return_value = [
-            {"uid": "p1", "title": "Paper 1", "year": 2025, "conference": "NeurIPS"},
-            {"uid": "p2", "title": "Paper 2", "year": 2025, "conference": "NeurIPS"},
+            {"uid": "p1", "title": "Paper 1", "year": 2025, "conference": "NeurIPS", "distance": 0.5},
+            {"uid": "p2", "title": "Paper 2", "year": 2025, "conference": "NeurIPS", "distance": 1.0},
         ]
 
         with (
@@ -855,7 +861,10 @@ class TestExecuteMCPToolE2E:
         mock_em.query_ids_within_distance.return_value = [("p1", 0.5)]
         mock_db = Mock()
         mock_db.resolve_paper_uids.return_value = ["p1"]
-        mock_db.get_result_details.return_value = [{"uid": "p1", "title": "P", "year": 2025, "conference": "NeurIPS"}]
+        mock_db.get_paper_scopes_by_uids.return_value = {"p1": {"conference": "NeurIPS", "year": 2025}}
+        mock_db.get_result_details.return_value = [
+            {"uid": "p1", "title": "P", "year": 2025, "conference": "NeurIPS", "distance": 0.5}
+        ]
 
         with (
             patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager", return_value=mock_em),
@@ -948,7 +957,8 @@ class TestExecuteMCPToolE2E:
     def test_get_paper_details_real_execution_by_title(self):
         """get_paper_details executes end-to-end with mocked DatabaseManager."""
         mock_db = Mock()
-        mock_db.keyword_search.return_value = [
+        mock_db.get_paper_by_title.return_value = None
+        mock_db.get_paper.return_value = [
             {
                 "uid": "abc123",
                 "original_id": "neurips2023/abc",
@@ -1717,3 +1727,89 @@ def test_select_hierarchy_level_derives_from_tree():
 
     assert level is not None
     assert level["level"] == MCP_HIERARCHY_LEVEL
+
+
+def _topic_evolution_mocks():
+    """Build shared mock resources for topic-evolution cache tests."""
+    mock_em = Mock()
+    mock_em.query_ids_within_distance.return_value = [("a1", 0.1)]
+    mock_db = Mock()
+    mock_db.database_url = "sqlite:///topic-cache.db"
+    mock_db.get_years.return_value = [2023]
+    mock_db.resolve_paper_uids.return_value = ["a1"]
+    mock_db.get_paper_summaries_by_uids.return_value = [
+        {
+            "uid": "a1",
+            "title": "Paper 2023",
+            "session": "ML",
+            "year": 2023,
+            "conference": "NeurIPS",
+            "abstract": "",
+        }
+    ]
+    mock_db.get_year_counts.return_value = {2023: {"total_papers": 100, "presentations": 100}}
+    return mock_em, mock_db
+
+
+def _execute_topic_evolution(mock_em, mock_db, topic: str = "transformers") -> str:
+    """Execute get_topic_evolution against shared mock resources."""
+    with (
+        patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager", return_value=mock_em),
+        patch("abstracts_explorer.mcp.shared_dependencies.DatabaseManager", return_value=mock_db),
+        patch("abstracts_explorer.mcp.shared_dependencies.get_config") as mock_cfg,
+    ):
+        mock_cfg.return_value = Mock(collection_name="papers")
+        return execute_mcp_tool("get_topic_evolution", {"topic_keywords": topic, "conferences": ["NeurIPS"]})
+
+
+class TestTopicEvolutionResultCache:
+    """Process-global topic-evolution result cache behavior."""
+
+    def test_cache_hit(self):
+        mock_em, mock_db = _topic_evolution_mocks()
+
+        first = _execute_topic_evolution(mock_em, mock_db)
+        second = _execute_topic_evolution(mock_em, mock_db)
+
+        assert first == second
+        mock_em.query_ids_within_distance.assert_called_once()
+        mock_db.get_years.assert_called_once()
+
+    def test_different_topic_misses(self):
+        mock_em, mock_db = _topic_evolution_mocks()
+
+        _execute_topic_evolution(mock_em, mock_db, "transformers")
+        _execute_topic_evolution(mock_em, mock_db, "attention")
+
+        assert mock_em.query_ids_within_distance.call_count == 2
+
+    def test_ttl_expiry(self, monkeypatch):
+        from abstracts_explorer import cache as cache_module
+        from tests.test_cache import FakeClock
+
+        clock = FakeClock()
+        monkeypatch.setattr(
+            cache_module,
+            "TOPIC_EVOLUTION_RESULT_CACHE",
+            cache_module.TtlLruCache(max_entries=10, clock=clock),
+        )
+        mock_em, mock_db = _topic_evolution_mocks()
+
+        _execute_topic_evolution(mock_em, mock_db)
+        _execute_topic_evolution(mock_em, mock_db)
+        assert mock_em.query_ids_within_distance.call_count == 1
+
+        clock.advance(10**9)
+        _execute_topic_evolution(mock_em, mock_db)
+        assert mock_em.query_ids_within_distance.call_count == 2
+
+    def test_invalidation(self):
+        from abstracts_explorer import cache as cache_module
+
+        mock_em, mock_db = _topic_evolution_mocks()
+
+        _execute_topic_evolution(mock_em, mock_db)
+        cache_module.invalidate_result_caches()
+        _execute_topic_evolution(mock_em, mock_db)
+
+        assert mock_em.query_ids_within_distance.call_count == 2

@@ -91,6 +91,24 @@ abstracts-explorer data download --conference chi --year 2024 --input-file chi_2
 abstracts-explorer data download --list-plugins
 ```
 
+Each downloaded `(conference, year)` unit also generates TF-IDF
+`generated_keywords` for the new papers. To backfill an existing database
+(including staging), use the script-only helper; it is safe to re-run and adds
+the column when missing:
+
+```bash
+# Preview changes
+uv run python scripts/backfill_generated_keywords.py --dry-run --json
+
+# Fill missing keywords, or regenerate with --force for a single scope
+uv run python scripts/backfill_generated_keywords.py
+uv run python scripts/backfill_generated_keywords.py --conference NeurIPS --year 2025 --force
+```
+
+In a Podman deployment the `scripts/` directory is not part of the image; stream
+the script from the matching repository ref instead. See
+[Run repository helper scripts](docker.md#run-repository-helper-scripts).
+
 ### data delete
 
 Delete all data for a specific conference and year from every database
@@ -465,6 +483,12 @@ abstracts-explorer pipeline run --ignore-embedding-model-mismatch --embedding-mo
 # Do not overlap embeddings and clustering
 abstracts-explorer pipeline run --serial-post-process
 ```
+
+Pipeline downloads generate `generated_keywords` automatically. Run
+`uv run python scripts/backfill_generated_keywords.py` once for pre-existing
+databases; see `data download` above for the available backfill options. For
+container deployments, see
+[Run repository helper scripts](docker.md#run-repository-helper-scripts).
 
 ## serve
 

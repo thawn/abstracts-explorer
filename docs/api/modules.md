@@ -46,5 +46,5 @@ for stable imports:
 - `abstracts_explorer.cli` — `main.py` dispatch, `parsers.py` wiring, per-command modules
 - `abstracts_explorer.utils` — shared time/json/url/conference/presentation helpers
 
-The development-only SQL profiler lives in `tools/profiling.py` and is not
-shipped in the wheel.
+The SQL and request profilers live in `abstracts_explorer.profiling`. Web
+request profiling is opt-in via `WEB_PROFILE=1`.

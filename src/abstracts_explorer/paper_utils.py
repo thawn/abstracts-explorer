@@ -6,6 +6,7 @@ This module provides shared utilities for formatting papers from various sources
 """
 
 import logging
+from collections import Counter
 from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
@@ -194,3 +195,38 @@ def extract_top_keywords(
         return keywords[:n_keywords]
     except Exception:
         return []
+
+
+def top_keywords_from_papers(papers: list, n_keywords: int = 5) -> list:
+    """
+    Aggregate stored generated keywords from a list of papers.
+
+    Counting is case-insensitive, while the first spelling encountered for a
+    term is preserved in the result.  Source ``keywords`` are intentionally
+    ignored; use :func:`extract_top_keywords` as a fallback for inputs that do
+    not carry generated keywords (for example ORCID works).
+
+    Parameters
+    ----------
+    papers : list
+        List of paper dicts with an optional ``generated_keywords`` list.
+    n_keywords : int, optional
+        Number of top keywords to return (default: 5).
+
+    Returns
+    -------
+    list
+        Keyword strings ordered by descending frequency.  Returns an empty list
+        when no paper has generated keywords.
+    """
+    counts: Counter[str] = Counter()
+    spelling: Dict[str, str] = {}
+    for paper in papers:
+        for keyword in paper.get("generated_keywords") or []:
+            cleaned = str(keyword).strip()
+            if not cleaned:
+                continue
+            key = cleaned.casefold()
+            counts[key] += 1
+            spelling.setdefault(key, cleaned)
+    return [spelling[key] for key, _ in counts.most_common(n_keywords)]

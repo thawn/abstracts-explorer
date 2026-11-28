@@ -38,17 +38,54 @@ def _reset_global_rate_limiter():
 @pytest.fixture(autouse=True)
 def _reset_process_caches():
     """Reset process-level schema and metadata caches between tests."""
+    from abstracts_explorer.cache import reset_all_caches
     from abstracts_explorer.database import reset_metadata_cache, reset_schema_cache
     from abstracts_explorer.orcid import _ORCID_CACHE, reset_orcid_llm_client
 
     reset_schema_cache()
     reset_metadata_cache()
+    reset_all_caches()
     _ORCID_CACHE.clear()
     yield
     reset_schema_cache()
     reset_metadata_cache()
+    reset_all_caches()
     _ORCID_CACHE.clear()
     reset_orcid_llm_client()
+
+
+@pytest.fixture(autouse=True)
+def _block_live_orcid_requests(request, monkeypatch):
+    """Fail local tests that try to contact orcid.org instead of using fixtures."""
+    import os
+
+    if request.node.get_closest_marker("staging") is not None:
+        return
+    if os.environ.get("ALLOW_LIVE_ORCID") == "1":
+        return
+
+    import requests
+
+    original_get = requests.get
+
+    def guarded_get(url, *args, **kwargs):
+        if isinstance(url, str) and "orcid.org" in url:
+            raise AssertionError(
+                "Live ORCID requests are disabled in local tests. "
+                "Use the recorded fixtures in tests/fixtures/orcid/."
+            )
+        return original_get(url, *args, **kwargs)
+
+    monkeypatch.setattr(requests, "get", guarded_get)
+    yield
+
+
+@pytest.fixture
+def orcid_fixture_cache(_reset_process_caches):
+    """Seed the ORCID cache from permanent fixtures after the autouse reset."""
+    from tests.helpers import install_orcid_fixture_cache
+
+    return install_orcid_fixture_cache()
 
 
 @pytest.fixture(autouse=True)

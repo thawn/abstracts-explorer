@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from abstracts_explorer.config import get_config
 from abstracts_explorer.database import DatabaseManager
+from abstracts_explorer.keywords.generation import generate_keywords_for_scope
 from abstracts_explorer.plugins import (
     DownloaderPlugin,
     LightweightPaper,
@@ -207,6 +208,17 @@ def download_command(
                     db.create_tables()
                     count = db.add_papers(papers)
                     print(f"✅ Loaded {count:,} papers into database")
+                    if papers:
+                        unit_conference = papers[0].conference or plugin.plugin_name
+                        try:
+                            generate_keywords_for_scope(db, unit_conference, yr)
+                        except Exception as keyword_error:
+                            logger.warning(
+                                "Keyword generation failed for %s %s: %s",
+                                unit_conference,
+                                yr,
+                                keyword_error,
+                            )
 
                 total_papers += len(papers)
 

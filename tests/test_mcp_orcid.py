@@ -10,6 +10,7 @@ import pytest
 from abstracts_explorer.mcp.errors import ToolError
 from abstracts_explorer.mcp_server import suggest_search_terms_from_orcid
 from abstracts_explorer.orcid import OrcidError
+from tests.helpers import ORCID_FIXTURE_ID
 
 
 class TestSuggestSearchTermsFromOrcidTool:
@@ -60,3 +61,13 @@ class TestSuggestSearchTermsFromOrcidTool:
 
         with pytest.raises(ToolError, match="ORCID search-term suggestion failed"):
             suggest_search_terms_from_orcid("0000-0002-2315-9247")
+
+
+def test_uses_recorded_orcid_fixture(orcid_fixture_cache):
+    """The MCP tool serves recorded terms without live ORCID or LLM calls."""
+    result = json.loads(suggest_search_terms_from_orcid(ORCID_FIXTURE_ID))
+
+    assert result["orcid"] == ORCID_FIXTURE_ID
+    assert result["source"] == "llm"
+    assert result["suggested_terms"]
+    assert all(item["source"] == "llm" for item in result["suggested_terms"])

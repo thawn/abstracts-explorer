@@ -1390,6 +1390,7 @@ class TestLoadEmbeddings:
         db.resolve_paper_uids.assert_not_called()
         assert manager.paper_ids == ["u1", "u2"]
         assert manager.embeddings.shape == (2, 2)
+        assert manager.embeddings.dtype == np.float32
 
     def test_filtered_load_uses_batches_and_stops_at_limit(self, mocker):
         manager, em, db = self._manager(mocker)
@@ -1407,6 +1408,26 @@ class TestLoadEmbeddings:
             ids=["u1", "u2"],
             limit=1,
         )
+
+    def test_filtered_load_batches_by_embedding_fetch_size(self, mocker, monkeypatch):
+        monkeypatch.setattr("abstracts_explorer.clustering.loading.EMBEDDING_FETCH_BATCH_SIZE", 1)
+        manager, em, db = self._manager(mocker)
+        db.resolve_paper_uids.return_value = ["u1", "u2"]
+        em.collection.get.side_effect = [
+            {"ids": ["u1"], "embeddings": [[0.1, 0.2]]},
+            {"ids": ["u2"], "embeddings": [[0.3, 0.4]]},
+        ]
+        db.get_paper_summaries_by_uids.return_value = [
+            _summary("u1", content_hash=_HASH_A),
+            _summary("u2", content_hash=_HASH_B),
+        ]
+        db.get_locations_by_content_hashes.return_value = {}
+
+        loaded = manager.load_embeddings(conferences=["A"])
+
+        assert loaded == 2
+        assert em.collection.get.call_count == 2
+        assert manager.embeddings.dtype == np.float32
 
     def test_filters_resolve_to_no_ids(self, mocker):
         manager, em, db = self._manager(mocker)
