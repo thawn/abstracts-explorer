@@ -39,6 +39,18 @@ The workflow creates the following tags following best practices:
 | `X.Y.Z-<pre>` | Prerelease tags | `1.0.0-RC1` | Full version only; does not update `latest`/major/minor |
 | `sha-*` | All builds | `sha-5f8567d` | Git commit SHA (short) |
 | `pr-*` | Pull requests | `pr-123` | Pull request number |
+| `<tag>-profiling` | Whenever the image is pushed | `develop-profiling`, `sha-5f8567d-profiling` | Thin profiling layer (py-spy, pyinstrument) on the same-run image |
+
+### Profiling image
+
+For every build that pushes the production image, the workflow also builds and
+pushes a `<tag>-profiling` variant (e.g. `develop-profiling`,
+`sha-5f8567d-profiling`, `1.0.0-profiling`, `latest-profiling`). It is a thin
+layer over the image built in the same run, referenced by its manifest digest,
+so it always matches that exact build. `Dockerfile.profiling` only adds
+`py-spy`, `pyinstrument`, and the `scripts/` directory; production images are
+unchanged. Fork pull requests skip the profiling build because their production
+image is not pushed.
 
 ### Tagging Best Practices
 

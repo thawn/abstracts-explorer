@@ -351,15 +351,28 @@ Available tags (following container best practices):
 - `v*` - Major version (e.g., `v0`)
 - `sha-*` - Specific commit SHA for traceability (e.g., `sha-5f8567d`)
 - `pr-*` - Pull request builds for testing (e.g., `pr-40`)
+- `<tag>-profiling` - Profiling variant of any pushed tag (e.g., `develop-profiling`, `1.0.0-profiling`)
 
 ### Profiling image
 
 `Dockerfile.profiling` builds a non-production image with `py-spy`,
-`pyinstrument`, and the `scripts/` directory.  Production images stay unchanged.
+`pyinstrument`, and the `scripts/` directory. Production images stay unchanged.
+
+It is a thin layer on top of the production image, selected with the
+`BASE_IMAGE` build argument. Build the production image first, then the
+profiling image from its local tag:
 
 ```bash
-podman build -f Dockerfile.profiling -t localhost/abstracts-explorer:profiling .
+podman build -t localhost/abstracts-explorer:develop .
+podman build \
+  --build-arg BASE_IMAGE=localhost/abstracts-explorer:develop \
+  -f Dockerfile.profiling -t localhost/abstracts-explorer:profiling .
 ```
+
+CI publishes a `<tag>-profiling` image (e.g. `develop-profiling`,
+`sha-5f8567d-profiling`) layered on the exact image built in the same run,
+referenced by its manifest digest. Pull e.g.
+`ghcr.io/thawn/abstracts-explorer:develop-profiling`.
 
 Use it for request/SQL/CPU profiling only.  Web request profiling is enabled
 with `WEB_PROFILE=1`; see `PLAN.md` for the full local and staging workflow.
