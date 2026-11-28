@@ -135,6 +135,28 @@ For container deployments, see [Docker: Create PostgreSQL search indexes](docker
     reloads metadata immediately; otherwise entries expire after the TTL.
   - Local writes (adding or deleting papers) invalidate cached metadata and
     result entries immediately.
+  - ORCID public-record lookups and generated ORCID search terms are also
+    cached with this TTL.
+
+##### Query embedding cache
+
+- **QUERY_EMBEDDING_CACHE_MAX_ENTRIES**: Maximum number of normalized query
+  strings whose embeddings are cached in each process (default: `1024`).
+  - The cache is an LRU with no TTL. Repeated and concurrent semantic searches
+    for the same normalized query reuse one embedding request.
+  - Only query embeddings are cached. Document/ingestion embeddings are never
+    cached.
+  - The cache is bypassed when the embedding backend URL or model name changes.
+
+##### Search and topic-evolution result cache
+
+- **SEARCH_CACHE_MAX_BYTES**: Total-byte cap for cached semantic-search and
+  topic-evolution results in each process (default: `268435456`, 256 MiB).
+  - Entries use `METADATA_CACHE_TTL` and a 1024-entry LRU. Individual results
+    larger than about 1 MiB are not cached. Set to `0` to disable the byte cap.
+  - Caches are process-local and thread-safe. Local database or embedding writes
+    invalidate them immediately; writes from another process may remain stale
+    until the TTL expires. Restart the web server after external imports.
 
 #### Embedding Database
 

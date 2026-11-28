@@ -1,0 +1,36 @@
+{
+  "search_terms": [
+    {
+      "term": "network-based biocomputation",
+      "reason": "Repeated topic in recent ORCID works"
+    },
+    {
+      "term": "molecular agents",
+      "reason": "Agents used in biocomputation devices"
+    },
+    {
+      "term": "microfluidic channel networks",
+      "reason": "Hardware platform for molecular computation"
+    },
+    {
+      "term": "nanolithographic fabrication",
+      "reason": "Fabrication technique in ORCID works"
+    },
+    {
+      "term": "functional nanostructures",
+      "reason": "Nanostructure integration topic"
+    },
+    {
+      "term": "energy-efficient computing",
+      "reason": "Fundamental energy cost of computing"
+    },
+    {
+      "term": "machine learning data management",
+      "reason": "Recent data management and ML work"
+    },
+    {
+      "term": "nanoparticle integration",
+      "reason": "Nanoparticle integration into devices"
+    }
+  ]
+}

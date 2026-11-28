@@ -18,11 +18,12 @@ from pathlib import Path
 from playwright.sync_api import Page, TimeoutError, expect
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.mcp import close_mcp_resources
-from abstracts_explorer.orcid import OrcidError, fetch_orcid_record
 from abstracts_explorer.rag import shutdown_tool_executor
 from tests.helpers import (
     raw_query,
     find_free_port,
+    patch_orcid_chat_terms,
+    patch_orcid_get_json,
     requires_lm_studio,
     stop_test_server,
 )
@@ -1112,12 +1113,14 @@ class TestWebUIE2E:
             assert chat_input_after.input_value() == ""
 
     @requires_lm_studio
-    def test_chat_orcid_search_terms(self, web_server, page: Page):
+    def test_chat_orcid_search_terms(self, web_server, page: Page, monkeypatch, orcid_fixture_cache):
         """
-        Test that chat can find interesting papers from a real public ORCID record.
+        Test that chat can find interesting papers from a recorded ORCID record.
 
-        The test uses the live ORCID API and the configured chat model.  It
-        skips when either service is unavailable.
+        The ORCID record and suggested terms come from permanent fixtures, so
+        the test does not contact the live ORCID API or use the chat model for
+        ORCID term generation.  The RAG chat itself still requires the
+        configured chat model.
 
         Parameters
         ----------
@@ -1125,14 +1128,14 @@ class TestWebUIE2E:
             Web server fixture (base_url, port)
         page : playwright.sync_api.Page
             Playwright page
+        monkeypatch : pytest.MonkeyPatch
+            Installs offline ORCID payload and term responses.
+        orcid_fixture_cache : tuple
+            Recorded ORCID record and terms seeded into the process cache.
         """
         base_url, _ = web_server
-
-        try:
-            record = fetch_orcid_record(_ORCID_ID, timeout=30)
-        except OrcidError as exc:
-            pytest.skip(f"ORCID public API unavailable: {exc}")
-        assert record["works"], "Expected public works on the ORCID record"
+        patch_orcid_get_json(monkeypatch)
+        patch_orcid_chat_terms(monkeypatch)
 
         page.goto(base_url)
         page.locator("#tab-chat").click()
