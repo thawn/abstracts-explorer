@@ -5,12 +5,18 @@ Batch-size constants and iteration helpers.
 from collections.abc import Iterator, Sequence
 from typing import Any
 
+from abstracts_explorer.constants import MAX_BIND_PARAMETERS
+
 # Maximum number of results to request from ChromaDB in a single query.
-# Prevents "too many SQL variables" errors in the underlying SQLite backend.
-MAX_QUERY_RESULTS = 32766  # this is the maximum for sqlite 3.32 and above
+# ChromaDB bundles SQLite >= 3.32, which accepts up to 32766 bound parameters.
+MAX_QUERY_RESULTS = MAX_BIND_PARAMETERS
 
 IO_BATCH_SIZE = 1000
-ID_BATCH_SIZE = 500
+
+# Maximum number of full embedding vectors fetched from ChromaDB in one call.
+# Bounds the transient payload of collection.get(include=["embeddings"]).
+EMBEDDING_FETCH_BATCH_SIZE = 5000
+
 EMBED_BATCH_SIZE = 128
 
 

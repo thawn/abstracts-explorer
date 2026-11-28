@@ -7,7 +7,7 @@ import threading
 from itertools import takewhile
 from typing import Any, Optional
 
-from abstracts_explorer.embeddings.batching import ID_BATCH_SIZE, MAX_QUERY_RESULTS, iter_batches
+from abstracts_explorer.embeddings.batching import MAX_QUERY_RESULTS, iter_batches
 from abstracts_explorer.embeddings.errors import EmbeddingsError, translate_errors
 
 logger = logging.getLogger(__name__)
@@ -133,7 +133,7 @@ class QueryMixin:
             return list(zip(paper_ids, distances))
 
         merged: list[PaperMatch] = []
-        for batch in iter_batches(ids, ID_BATCH_SIZE):
+        for batch in iter_batches(ids, MAX_QUERY_RESULTS):
             batch_limit = min(request_limit, len(batch))
             if batch_limit <= 0:
                 break

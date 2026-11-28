@@ -3,10 +3,13 @@ Embedding ingestion: embed papers from the database and upsert vectors.
 """
 
 import logging
+from collections.abc import Sequence
 from typing import Any, Callable, Optional
 
+import numpy as np
+
 from abstracts_explorer.database import DatabaseManager
-from abstracts_explorer.embeddings.batching import EMBED_BATCH_SIZE, ID_BATCH_SIZE, iter_batches
+from abstracts_explorer.embeddings.batching import EMBED_BATCH_SIZE, EMBEDDING_FETCH_BATCH_SIZE, iter_batches
 from abstracts_explorer.embeddings.errors import translate_errors
 from abstracts_explorer.embeddings.hashing import hash_text
 from abstracts_explorer.utils.disk_utils import ensure_free_space
@@ -63,7 +66,7 @@ class IngestMixin:
         return embedding_text
 
     @require_writable()
-    def _store_embeddings(self, ids: list[str], documents: list[str], embeddings: list[list[float]]) -> None:
+    def _store_embeddings(self, ids: list[str], documents: list[str], embeddings: Sequence[Any]) -> None:
         """Create or replace records in the collection (upsert semantics)."""
         self.collection.upsert(ids=ids, embeddings=embeddings, documents=documents)
 
@@ -205,7 +208,7 @@ class IngestMixin:
             return 0
 
         vectors_by_representative: dict[str, Any] = {}
-        for batch in iter_batches(list(duplicate_groups), ID_BATCH_SIZE):
+        for batch in iter_batches(list(duplicate_groups), EMBEDDING_FETCH_BATCH_SIZE):
             try:
                 records = self._get_records(list(batch), ["embeddings"])
             except Exception as e:
@@ -216,7 +219,7 @@ class IngestMixin:
             if embeddings is None:
                 continue
             for representative_uid, vector in zip(ids, embeddings):
-                vectors_by_representative[str(representative_uid)] = vector
+                vectors_by_representative[str(representative_uid)] = np.asarray(vector, dtype=np.float32)
 
         copied = 0
         pending_ids: list[str] = []

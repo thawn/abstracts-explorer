@@ -84,7 +84,7 @@ them with `--no-verify` unless explicitly asked.
 
 ## Architecture Notes
 
-- DB: SQLAlchemy 2.0+, SQLite default / PostgreSQL supported. Models: `Paper`, `EmbeddingsMetadata`, `ClusteringCache`.
+- DB: SQLAlchemy 2.0+, SQLite default / PostgreSQL supported. SQLite >= 3.32 is required (32766 bind parameters; enforced at connect). Models: `Paper`, `EmbeddingsMetadata`, `ClusteringCache`.
 - Clustering: the pipeline is fixed to BERTopic with Agglomerative clustering (ward linkage, distance threshold 0.5) on 5-D UMAP embeddings; a separate 2-D UMAP supplies visualization coordinates. Shared constants live in `clustering/constants.py` (`DEFAULT_CLUSTERING_*`). LLM labels are used for flat and merged hierarchy topics, with retry and keyword fallback. The DB caches the complete JSON payload; Plotly runs only in the browser.
 - MCP: `MCPServer` from the `mcp` package; RAG chat auto-invokes MCP tools.
 - Web UI: Flask 3.0+, 20+ API routes in `web_ui/app.py` (frontend calls from `web_ui/static/modules/`), TypeScript modules bundled by esbuild (basic Plotly build lazy-loaded on first chart), Waitress in production.

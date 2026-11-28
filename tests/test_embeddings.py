@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import httpx2
+import numpy as np
 import pytest
 from filelock import ReadWriteLock
 from unittest.mock import Mock
@@ -19,6 +20,7 @@ from abstracts_explorer.embeddings import (
     hash_text,
     is_content_hash,
 )
+from abstracts_explorer.embeddings.batching import EMBEDDING_FETCH_BATCH_SIZE, MAX_QUERY_RESULTS
 from abstracts_explorer.embeddings.tokens import count_tokens as _count_tokens
 from tests.conftest import set_test_db
 from tests.helpers import FakeTime
@@ -1887,15 +1889,15 @@ class TestDistanceHelpers:
         )
         assert manager._collection.query.call_args.kwargs["ids"] == ["paper-a", "paper-b"]
 
+    @staticmethod
+    def _fake_batch_query(**kwargs):
+        batch = kwargs["ids"]
+        return {"ids": [batch], "distances": [[0.1] * len(batch)]}
+
     def test_large_id_lists_are_queried_in_batches(self):
         manager = self._make_manager()
-        ids = [f"paper-{index}" for index in range(600)]
-
-        def fake_query(**kwargs):
-            batch = kwargs["ids"]
-            return {"ids": [batch], "distances": [[0.1] * len(batch)]}
-
-        manager._collection.query.side_effect = fake_query
+        ids = [f"paper-{index}" for index in range(MAX_QUERY_RESULTS + 1)]
+        manager._collection.query.side_effect = self._fake_batch_query
 
         result = manager.query_ids_within_distance(
             QueryEmbedding("query", manager),
@@ -1904,7 +1906,22 @@ class TestDistanceHelpers:
         )
 
         assert manager._collection.query.call_count == 2
-        assert len(result) == 600
+        assert len(result) == MAX_QUERY_RESULTS
+
+    def test_moderate_id_lists_are_queried_once(self):
+        """A conference-sized filter must not fan out into many Chroma queries."""
+        manager = self._make_manager()
+        ids = [f"paper-{index}" for index in range(6000)]
+        manager._collection.query.side_effect = self._fake_batch_query
+
+        result = manager.query_ids_within_distance(
+            QueryEmbedding("query", manager),
+            distance_threshold=1.0,
+            ids=ids,
+        )
+
+        assert manager._collection.query.call_count == 1
+        assert len(result) == 6000
 
     def test_empty_ids_returns_empty(self):
         manager = self._make_manager()
@@ -1919,6 +1936,38 @@ class TestDistanceHelpers:
         manager = self._make_manager()
         manager._collection.query.return_value = {"ids": [[]], "distances": [[]]}
         assert manager.query_ids_within_distance(QueryEmbedding("query", manager)) == []
+
+
+class TestRepresentativeEmbeddingFetch:
+    """Tests for fetching representative embeddings during dedupe ingestion."""
+
+    @staticmethod
+    def _make_manager() -> EmbeddingsManager:
+        manager = object.__new__(EmbeddingsManager)
+        manager._get_records = Mock()
+        manager._store_embeddings = Mock()
+        return manager
+
+    def test_embedding_fetch_batch_size_is_5000(self):
+        assert EMBEDDING_FETCH_BATCH_SIZE == 5000
+
+    def test_representative_fetch_is_batched_and_cast_to_float32(self, monkeypatch):
+        monkeypatch.setattr("abstracts_explorer.embeddings.ingest.EMBEDDING_FETCH_BATCH_SIZE", 2)
+        manager = self._make_manager()
+
+        def fake_get_records(ids, include):
+            return {"ids": list(ids), "embeddings": [np.array([0.1, 0.2], dtype=np.float64) for _ in ids]}
+
+        manager._get_records.side_effect = fake_get_records
+        duplicate_groups = {f"rep-{index}": [f"dup-{index}"] for index in range(3)}
+        texts = {f"dup-{index}": f"duplicate text {index}" for index in range(3)}
+
+        copied = manager._copy_representative_embeddings(duplicate_groups, texts)
+
+        assert copied == 3
+        assert manager._get_records.call_count == 2
+        stored = manager._store_embeddings.call_args.kwargs["embeddings"]
+        assert all(vector.dtype == np.float32 for vector in stored)
 
 
 class TestEmbeddingInputTruncation:

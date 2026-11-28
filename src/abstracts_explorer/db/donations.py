@@ -16,6 +16,7 @@ from abstracts_explorer.db_models import (
     ChatDonation,
 )
 
+from abstracts_explorer.constants import MAX_BIND_PARAMETERS
 from abstracts_explorer.db.errors import DatabaseError
 from abstracts_explorer.db.session import SessionMixin
 
@@ -409,8 +410,8 @@ class DonationsMixin(SessionMixin):
                 count = getattr(result, "rowcount", 0) or 0
             else:
                 count = 0
-                for start in range(0, len(ids), 500):
-                    batch = ids[start : start + 500]
+                for start in range(0, len(ids), MAX_BIND_PARAMETERS):
+                    batch = ids[start : start + MAX_BIND_PARAMETERS]
                     result = self.session.execute(delete(ChatDonation).where(ChatDonation.id.in_(batch)))
                     count += getattr(result, "rowcount", 0) or 0
             self.session.commit()
@@ -455,8 +456,8 @@ class DonationsMixin(SessionMixin):
                 count = getattr(result, "rowcount", 0) or 0
             else:
                 count = 0
-                for start in range(0, len(ids), 500):
-                    batch = ids[start : start + 500]
+                for start in range(0, len(ids), MAX_BIND_PARAMETERS):
+                    batch = ids[start : start + MAX_BIND_PARAMETERS]
                     result = self.session.execute(delete(ValidationData).where(ValidationData.id.in_(batch)))
                     count += getattr(result, "rowcount", 0) or 0
             self.session.commit()

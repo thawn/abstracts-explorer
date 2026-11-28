@@ -3,6 +3,8 @@
 ## Requirements
 
 - Python 3.12 or higher
+- SQLite 3.32 or higher (only when using SQLite as the paper database; see
+  [Database Configuration](configuration.md#database-configuration))
 - [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
 - Node.js 14 or higher (for web UI)
 - npm package manager

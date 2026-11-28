@@ -3,6 +3,7 @@ Session and schema lifecycle for DatabaseManager.
 """
 
 import logging
+import sqlite3
 import threading
 from pathlib import Path
 from typing import Any, Optional
@@ -30,6 +31,25 @@ _SCHEMA_READY_URLS: set[str] = set()
 _SCHEMA_LOCK = threading.Lock()
 _SCHEMA_CREATE_LOCK = threading.Lock()
 _METADATA_CACHE = MetadataCache()
+
+# SQLite 3.32.0 raised the default SQLITE_MAX_VARIABLE_NUMBER from 999 to 32766.
+MIN_SQLITE_VERSION = (3, 32, 0)
+
+
+def _require_supported_sqlite() -> None:
+    """
+    Ensure the interpreter's SQLite supports large ``IN (...)`` lists.
+
+    Raises
+    ------
+    DatabaseError
+        If the SQLite version is below :data:`MIN_SQLITE_VERSION`.
+    """
+    if sqlite3.sqlite_version_info < MIN_SQLITE_VERSION:
+        raise DatabaseError(
+            f"SQLite >= {'.'.join(map(str, MIN_SQLITE_VERSION))} is required "
+            f"(found {sqlite3.sqlite_version}); upgrade SQLite/Python or use PostgreSQL."
+        )
 
 
 def mask_database_url(url: str) -> str:
@@ -167,6 +187,9 @@ class SessionMixin:
                 is_sqlite = self.database_url.startswith("sqlite")
                 file_sqlite = self.database_url.startswith("sqlite:///")
                 memory_sqlite = ":memory:" in self.database_url
+
+                if is_sqlite:
+                    _require_supported_sqlite()
 
                 # Create parent directories for SQLite (writers only)
                 if file_sqlite and not self.read_only:

@@ -74,6 +74,17 @@ PostgreSQL connections use the `psycopg` v3 driver, which is installed with the
 package. Plain `postgresql://` URLs select this driver automatically; no
 `postgresql+psycopg://` prefix is required.
 
+!!! note "SQLite version requirement"
+    SQLite paper databases require **SQLite 3.32 or higher** (released
+    2020-05-22), where the default `SQLITE_MAX_VARIABLE_NUMBER` was raised from
+    999 to 32766. The application fails fast with a clear error when the
+    interpreter's SQLite is older.
+
+    The paper DB uses the SQLite library provided by the Python interpreter /
+    system, so upgrade Python or SQLite, or use PostgreSQL. This does not affect
+    ChromaDB: its wheel statically links a modern SQLite (3.46.0 on the pinned
+    ChromaDB release), independent of the system SQLite.
+
 ##### PostgreSQL search indexes
 
 Keyword search uses `ILIKE '%term%'` predicates on `title`, `abstract`,

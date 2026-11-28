@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import exc as sqlalchemy_exc
 from unittest.mock import Mock, patch
 
+from abstracts_explorer.constants import MAX_BIND_PARAMETERS
 from abstracts_explorer.database import DatabaseManager, DatabaseError, normalize_model_name
 from abstracts_explorer.embeddings import QueryEmbedding
 from abstracts_explorer.plugin import LightweightPaper
@@ -2653,3 +2654,96 @@ class TestGetPaperWhereFilters:
 
         assert connected_db.get_paper_count({"year": 2025}) == 1
         assert connected_db.get_paper_count({"conference": {"$in": ["NeurIPS", "ICLR"]}}) == 2
+
+
+class TestInClauseBatching:
+    """IN (...) lists must be chunked by ``MAX_BIND_PARAMETERS``."""
+
+    def test_max_bind_parameters_value(self):
+        assert MAX_BIND_PARAMETERS == 32766
+
+    def test_get_content_hashes_chunks(self, connected_db, sample_paper, monkeypatch):
+        import abstracts_explorer.db.papers as papers_module
+
+        monkeypatch.setattr(papers_module, "MAX_BIND_PARAMETERS", 1)
+        uid = connected_db.add_paper(sample_paper)
+
+        hashes = connected_db.get_content_hashes([uid, "missing"])
+
+        assert uid in hashes
+        assert "missing" not in hashes
+
+    def test_get_paper_summaries_chunks(self, connected_db, sample_paper, sample_paper_minimal, monkeypatch):
+        import abstracts_explorer.db.papers as papers_module
+
+        monkeypatch.setattr(papers_module, "MAX_BIND_PARAMETERS", 1)
+        uid1 = connected_db.add_paper(sample_paper)
+        uid2 = connected_db.add_paper(sample_paper_minimal)
+
+        summaries = connected_db.get_paper_summaries_by_uids([uid1, uid2])
+
+        assert [summary["uid"] for summary in summaries] == [uid1, uid2]
+
+    def test_delete_papers_by_uids_chunks(self, connected_db, sample_paper, sample_paper_minimal, monkeypatch):
+        import abstracts_explorer.db.papers as papers_module
+
+        monkeypatch.setattr(papers_module, "MAX_BIND_PARAMETERS", 1)
+        uid1 = connected_db.add_paper(sample_paper)
+        uid2 = connected_db.add_paper(sample_paper_minimal)
+
+        assert connected_db.delete_papers_by_uids([uid1, uid2]) == 2
+        assert connected_db.get_paper_count() == 0
+
+    def test_delete_chat_donations_chunks(self, connected_db, monkeypatch):
+        import abstracts_explorer.db.donations as donations_module
+
+        monkeypatch.setattr(donations_module, "MAX_BIND_PARAMETERS", 1)
+        id1 = connected_db.donate_chat_transcript("up", [{"role": "user", "text": "hi"}])
+        id2 = connected_db.donate_chat_transcript("down", [{"role": "user", "text": "bye"}])
+
+        assert connected_db.delete_chat_donations(ids=[id1, id2]) == 2
+        assert connected_db.get_chat_donations() == []
+
+    def test_delete_validation_data_chunks(self, connected_db, monkeypatch):
+        import abstracts_explorer.db.donations as donations_module
+
+        monkeypatch.setattr(donations_module, "MAX_BIND_PARAMETERS", 1)
+        connected_db.donate_validation_data({"uid1": {"priority": 5, "searchTerm": None}})
+        connected_db.donate_validation_data({"uid2": {"priority": 3, "searchTerm": None}})
+        ids = [entry["id"] for entry in connected_db.get_validation_data()]
+
+        assert connected_db.delete_validation_data(ids=ids) == 2
+        assert connected_db.get_validation_data() == []
+
+    def test_delete_clustering_cache_ids_chunks(self, connected_db, monkeypatch):
+        import abstracts_explorer.db.clustering_cache as cache_module
+
+        monkeypatch.setattr(cache_module, "MAX_BIND_PARAMETERS", 1)
+        for year in (2023, 2024, 2025):
+            connected_db.save_clustering_cache(
+                embedding_model="model1",
+                reduction_method="umap",
+                n_components=2,
+                clustering_method="agglomerative",
+                results={"points": [], "statistics": {"n_clusters": 1}},
+                n_clusters=1,
+                conference="AAAI",
+                year=year,
+            )
+        entries = connected_db.list_clustering_cache_entries(conference="AAAI")
+        delete_ids = [entry["id"] for entry in entries[:2]]
+
+        assert connected_db.delete_clustering_cache_ids(delete_ids) == 2
+
+
+class TestSQLiteVersionRequirement:
+    """SQLite paper databases must meet the documented minimum version."""
+
+    def test_old_sqlite_is_rejected(self, db_manager, monkeypatch):
+        import abstracts_explorer.db.session as session_module
+
+        monkeypatch.setattr(session_module.sqlite3, "sqlite_version_info", (3, 31, 0))
+        monkeypatch.setattr(session_module.sqlite3, "sqlite_version", "3.31.0")
+
+        with pytest.raises(DatabaseError, match="SQLite >= 3.32"):
+            db_manager.create_tables()

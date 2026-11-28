@@ -11,6 +11,7 @@ from sqlalchemy import select, delete, update, func, and_
 # Import Pydantic models from plugin framework
 
 # Import SQLAlchemy models
+from abstracts_explorer.constants import MAX_BIND_PARAMETERS
 from abstracts_explorer.db_models import ClusteringCache
 
 from abstracts_explorer.db.session import SessionMixin
@@ -506,9 +507,11 @@ class ClusteringCacheMixin(SessionMixin):
         if not ids:
             return 0
         try:
-            stmt = delete(ClusteringCache).where(ClusteringCache.id.in_(ids))
-            result = self.session.execute(stmt)
-            count = getattr(result, "rowcount", 0) or 0
+            count = 0
+            for start in range(0, len(ids), MAX_BIND_PARAMETERS):
+                batch = ids[start : start + MAX_BIND_PARAMETERS]
+                result = self.session.execute(delete(ClusteringCache).where(ClusteringCache.id.in_(batch)))
+                count += getattr(result, "rowcount", 0) or 0
             self.session.commit()
             logger.info("Deleted %d clustering cache entries", count)
             return count

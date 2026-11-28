@@ -22,6 +22,7 @@ from abstracts_explorer.db_models import (
     Paper,
 )
 
+from abstracts_explorer.constants import MAX_BIND_PARAMETERS
 from abstracts_explorer.db.errors import DatabaseError
 from abstracts_explorer.db.filters import WhereFilterMixin, _filter_has_key
 from abstracts_explorer.utils.hashing import paper_content_hash
@@ -237,8 +238,8 @@ class PapersMixin(WhereFilterMixin):
 
             existing_uids: set[str] = set()
             uids = [uid for uid, _ in prepared]
-            for start in range(0, len(uids), 500):
-                batch = uids[start : start + 500]
+            for start in range(0, len(uids), MAX_BIND_PARAMETERS):
+                batch = uids[start : start + MAX_BIND_PARAMETERS]
                 existing_uids.update(
                     self.session.execute(select(Paper.uid).where(Paper.uid.in_(batch))).scalars().all()
                 )
@@ -479,8 +480,8 @@ class PapersMixin(WhereFilterMixin):
             return {}
         try:
             hashes: Dict[str, Optional[str]] = {}
-            for start in range(0, len(uids), 500):
-                batch = uids[start : start + 500]
+            for start in range(0, len(uids), MAX_BIND_PARAMETERS):
+                batch = uids[start : start + MAX_BIND_PARAMETERS]
                 stmt: Any = select(Paper.uid, Paper.content_hash).where(Paper.uid.in_(batch))
                 for row in self.session.execute(stmt):
                     hashes[str(row.uid)] = row.content_hash
@@ -513,8 +514,8 @@ class PapersMixin(WhereFilterMixin):
             return {}
         try:
             grouped: Dict[str, set] = {}
-            for start in range(0, len(content_hashes), 500):
-                batch = content_hashes[start : start + 500]
+            for start in range(0, len(content_hashes), MAX_BIND_PARAMETERS):
+                batch = content_hashes[start : start + MAX_BIND_PARAMETERS]
                 stmt: Any = (
                     select(Paper.content_hash, Paper.location)
                     .where(Paper.content_hash.in_(batch), Paper.location.is_not(None))
@@ -594,8 +595,8 @@ class PapersMixin(WhereFilterMixin):
 
         try:
             summaries: Dict[str, Dict[str, Any]] = {}
-            for start in range(0, len(uids), 500):
-                batch = uids[start : start + 500]
+            for start in range(0, len(uids), MAX_BIND_PARAMETERS):
+                batch = uids[start : start + MAX_BIND_PARAMETERS]
                 stmt: Any = select(
                     Paper.uid,
                     Paper.title,
@@ -668,10 +669,10 @@ class PapersMixin(WhereFilterMixin):
         if not uids:
             return []
 
-        # Query in fixed-size batches to stay well below DB parameter limits
+        # Queries here bind only the IN-list values, so MAX_BIND_PARAMETERS is safe.
         papers: List[Dict[str, Any]] = []
-        for start in range(0, len(uids), 500):
-            batch = uids[start : start + 500]
+        for start in range(0, len(uids), MAX_BIND_PARAMETERS):
+            batch = uids[start : start + MAX_BIND_PARAMETERS]
             papers.extend(self.get_paper({"uid": {"$in": batch}}, limit=0))
         by_uid = {paper["uid"]: paper for paper in papers}
         return [by_uid[uid] for uid in uids if uid in by_uid]
@@ -787,8 +788,8 @@ class PapersMixin(WhereFilterMixin):
 
         try:
             count = 0
-            for start in range(0, len(uids), 500):
-                batch = uids[start : start + 500]
+            for start in range(0, len(uids), MAX_BIND_PARAMETERS):
+                batch = uids[start : start + MAX_BIND_PARAMETERS]
                 result = self.session.execute(delete(Paper).where(Paper.uid.in_(batch)))
                 count += getattr(result, "rowcount", 0) or 0
             self.session.commit()
