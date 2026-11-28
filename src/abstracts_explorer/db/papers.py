@@ -582,8 +582,8 @@ class PapersMixin(WhereFilterMixin):
         -------
         list of dict
             Dictionaries with ``uid``, ``title``, ``abstract``, ``year``,
-            ``conference``, ``session``, ``location``, and ``content_hash``.
-            Results follow input order.
+            ``conference``, ``session``, ``location``, ``content_hash``, and
+            ``generated_keywords``. Results follow input order.
 
         Raises
         ------
@@ -606,6 +606,7 @@ class PapersMixin(WhereFilterMixin):
                     Paper.session,
                     Paper.location,
                     Paper.content_hash,
+                    Paper.generated_keywords,
                 ).where(Paper.uid.in_(batch))
                 for row in self.session.execute(stmt):
                     summaries[str(row.uid)] = {
@@ -617,6 +618,7 @@ class PapersMixin(WhereFilterMixin):
                         "session": row.session or "",
                         "location": row.location,
                         "content_hash": row.content_hash,
+                        "generated_keywords": deserialize_keywords_from_string(str(row.generated_keywords or "")),
                     }
             return [summaries[uid] for uid in uids if uid in summaries]
         except DatabaseError:
@@ -718,6 +720,7 @@ class PapersMixin(WhereFilterMixin):
             "url": paper.url,
             "room_name": paper.room_name,
             "keywords": deserialize_keywords_from_string(str(paper.keywords or "")),
+            "generated_keywords": deserialize_keywords_from_string(str(paper.generated_keywords or "")),
             "starttime": str(paper.starttime) if paper.starttime is not None else None,
             "endtime": str(paper.endtime) if paper.endtime is not None else None,
             "award": paper.award,

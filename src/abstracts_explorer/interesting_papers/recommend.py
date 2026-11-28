@@ -39,7 +39,9 @@ def _seed_context(papers: List[Dict[str, Any]]) -> Dict[str, set[str]]:
     for paper in papers:
         authors.update(_normalise_token(author) for author in paper.get("authors") or [] if _normalise_token(author))
         keywords.update(
-            _normalise_token(keyword) for keyword in paper.get("keywords") or [] if _normalise_token(keyword)
+            _normalise_token(keyword)
+            for keyword in paper.get("generated_keywords") or []
+            if _normalise_token(keyword)
         )
         session = _normalise_token(paper.get("session"))
         if session:
@@ -65,7 +67,7 @@ def _recommendation_reasons(
     reasons: List[str] = []
 
     paper_keywords = {
-        _normalise_token(keyword) for keyword in paper.get("keywords") or [] if _normalise_token(keyword)
+        _normalise_token(keyword) for keyword in paper.get("generated_keywords") or [] if _normalise_token(keyword)
     }
     shared_keywords = sorted(paper_keywords & seed_context["keywords"])
     if shared_keywords:
@@ -166,7 +168,7 @@ def _fallback_recommendations(
     """Metadata/keyword-only fallback when embeddings are unavailable."""
     keyword_counts: Counter[str] = Counter()
     for paper in seed_papers:
-        for keyword in paper.get("keywords") or []:
+        for keyword in paper.get("generated_keywords") or []:
             cleaned = str(keyword).strip()
             if cleaned:
                 keyword_counts[cleaned] += 1

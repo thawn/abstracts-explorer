@@ -2455,6 +2455,7 @@ class TestPaperUidResolution:
             "session",
             "location",
             "content_hash",
+            "generated_keywords",
         }
 
     def test_find_paper_ids_within_distance_returns_matches(self, connected_db, sample_paper):

@@ -31,7 +31,7 @@ from abstracts_explorer.clustering import (
 )
 from abstracts_explorer.embeddings import QueryEmbedding
 from abstracts_explorer.export_utils import export_papers_to_zip
-from abstracts_explorer.paper_utils import extract_top_keywords
+from abstracts_explorer.paper_utils import extract_top_keywords, top_keywords_from_papers
 from abstracts_explorer.profiling import profile_span
 from abstracts_explorer.web_ui import request_services as services
 from abstracts_explorer.web_ui.request_services import (
@@ -538,7 +538,9 @@ def search():
         include_total=use_embeddings,
     )
 
-    related_topics = extract_top_keywords(papers)
+    related_topics = top_keywords_from_papers(papers)
+    if not related_topics:
+        related_topics = extract_top_keywords(papers)
 
     response_data = {
         "papers": papers,

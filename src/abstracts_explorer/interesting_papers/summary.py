@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from abstracts_explorer.database import DatabaseManager
 from abstracts_explorer.interesting_papers.constants import ABSTRACT_SNIPPET_LENGTH, MAX_SUMMARY_PAPERS
 from abstracts_explorer.interesting_papers.loading import _as_int, load_interesting_papers
-from abstracts_explorer.paper_utils import extract_top_keywords
+from abstracts_explorer.paper_utils import extract_top_keywords, top_keywords_from_papers
 from abstracts_explorer.utils.paper_presentation import truncate_abstract
 
 logger = logging.getLogger(__name__)
@@ -119,14 +119,7 @@ def summarize_interesting_papers(
     session_counts = Counter(str(paper.get("session") or "No session") for paper in papers)
     search_term_counts = Counter(str(paper.get("searchTerm") or "Unknown") for paper in papers)
 
-    keyword_counts: Counter[str] = Counter()
-    for paper in papers:
-        for keyword in paper.get("keywords") or []:
-            cleaned = str(keyword).strip()
-            if cleaned:
-                keyword_counts[cleaned] += 1
-
-    top_keywords = [keyword for keyword, _ in keyword_counts.most_common(15)]
+    top_keywords = top_keywords_from_papers(papers, n_keywords=15)
     if not top_keywords:
         top_keywords = extract_top_keywords(papers, n_keywords=10)
 

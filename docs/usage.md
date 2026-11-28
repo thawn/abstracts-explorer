@@ -30,6 +30,36 @@ Options:
 - `--force`: Force re-download even if papers already exist
 - `--list-plugins`: List available downloader plugins and exit
 
+#### Generated keywords
+
+Each paper has a `generated_keywords` property containing TF-IDF keywords
+derived from its title and abstract. Keywords are generated per
+`(conference, year)` corpus and stored in the database. Downloads generate
+keywords automatically for each downloaded unit.
+
+Existing databases can be backfilled once with the script-only helper:
+
+```bash
+# Preview how many papers would be updated
+uv run python scripts/backfill_generated_keywords.py --dry-run --json
+
+# Fill missing keywords for all conferences and years
+uv run python scripts/backfill_generated_keywords.py
+
+# Limit the backfill to a single scope, or regenerate existing values
+uv run python scripts/backfill_generated_keywords.py --conference NeurIPS --year 2025
+uv run python scripts/backfill_generated_keywords.py --force
+```
+
+On staging, run the same backfill command with `PAPER_DB` pointing at the
+PostgreSQL database. The script adds the `generated_keywords` column when it
+is missing and is safe to re-run.
+
+The source `keywords` field supplied by downloaders is still stored, but it is
+**not** used for topic extraction. Runtime related-topic aggregation uses
+`generated_keywords`; TF-IDF extraction remains a fallback for inputs that do
+not carry generated keywords (for example ORCID works).
+
 ### 2. Create Embeddings
 
 Generate vector embeddings for semantic search:

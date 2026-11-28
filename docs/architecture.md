@@ -22,6 +22,7 @@ The codebase comprises **~21,200 lines** of Python:
 | `web_ui/request_services.py` | 202 | Request-scoped DB/embeddings/RAG helpers |
 | `evaluation/` package | 882 | RAG evaluation (prompts, generation, running) |
 | `interesting_papers/` package | 823 | Interesting-paper summaries & recommendations |
+| `keywords/` package | — | TF-IDF generated keywords for topic aggregation |
 | `export/` package | 709 | Paper export (ZIP/Markdown) |
 | `mcp_tools.py` | 705 | Tool registry, argument normalization, LLM formatting |
 | `config.py` | 501 | Configuration management |

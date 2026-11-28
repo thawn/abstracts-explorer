@@ -876,6 +876,29 @@ class TestExtractTopKeywords:
         assert "related_topics" in data
         assert isinstance(data["related_topics"], list)
 
+    def test_search_related_topics_prefer_generated_keywords(self, client):
+        """Related topics use stored generated keywords when available."""
+        from unittest.mock import MagicMock, patch
+
+        mock_db = MagicMock()
+        mock_papers = [
+            {"uid": "p1", "generated_keywords": ["stored topic", "another topic"], "keywords": ["source"]},
+            {"uid": "p2", "generated_keywords": ["stored topic"], "keywords": ["source"]},
+        ]
+        mock_db.search.return_value = (mock_papers, None)
+
+        with patch.object(web_services, "get_database", return_value=mock_db):
+            response = client.post(
+                "/api/search",
+                data=json.dumps({"query": "topic", "use_embeddings": False, "limit": 10}),
+                content_type="application/json",
+            )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["related_topics"][0] == "stored topic"
+        assert "source" not in data["related_topics"]
+
 
 class TestChatEndpoint:
     """Test the chat endpoint."""

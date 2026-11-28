@@ -88,7 +88,11 @@ class Paper(Base):
     room_name : str, optional
         Room name for presentation.
     keywords : str, optional
-        Comma-separated keywords.
+        Comma-separated source keywords as provided by the downloader.
+    generated_keywords : str, optional
+        Comma-separated TF-IDF keywords generated from the title and abstract.
+        These are used for runtime topic aggregation; source ``keywords`` are
+        kept but not used for topic extraction.
     starttime : str, optional
         Start time of presentation.
     endtime : str, optional
@@ -122,6 +126,7 @@ class Paper(Base):
     url = Column(String, nullable=True)
     room_name = Column(String, nullable=True)
     keywords = Column(Text, nullable=True)
+    generated_keywords = Column(Text, nullable=True)
     starttime = Column(String, nullable=True)
     endtime = Column(String, nullable=True)
     award = Column(String, nullable=True)
