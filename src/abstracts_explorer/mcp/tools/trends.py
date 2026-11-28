@@ -114,6 +114,9 @@ def get_topic_evolution(
                     year_relative: Dict[int, float] = {}
                     year_totals: Dict[int, int] = {}
                     year_distribution: Dict[int, list] = {year: [] for year in available_years}
+                    year_stats = (
+                        db.get_year_counts(conference=conference, years=available_years) if available_years else {}
+                    )
 
                     if available_years:
                         # Query once per conference (all years at once) instead of
@@ -167,9 +170,8 @@ def get_topic_evolution(
                         count = year_counts[year]
                         total_papers += count
 
-                        # Get total papers for this conference+year for relative percentage
-                        stats = db.get_stats(year=year, conference=conference)
-                        total_for_year = stats["total_papers"]
+                        # Use grouped year statistics gathered once per conference.
+                        total_for_year = int(year_stats.get(year, {}).get("total_papers", 0))
                         year_totals[year] = total_for_year
                         if total_for_year > 0:
                             year_relative[year] = round((count / total_for_year) * 100, 2)

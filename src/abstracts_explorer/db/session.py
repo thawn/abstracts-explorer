@@ -8,7 +8,7 @@ import threading
 from pathlib import Path
 from typing import Any, Optional
 
-from sqlalchemy import create_engine, event, inspect
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import OperationalError, ProgrammingError, IntegrityError
@@ -424,7 +424,27 @@ class SessionMixin:
 
     def _metadata_cache_enabled(self) -> bool:
         """Return whether the metadata cache applies to this backend."""
-        return self.database_url.startswith("postgresql")
+        return self.database_url.startswith("postgresql") or self.database_url.startswith("sqlite")
+
+    def ping(self) -> bool:
+        """
+        Check database connectivity with a cheap ``SELECT 1``.
+
+        Returns
+        -------
+        bool
+            ``True`` when the database responds.
+
+        Raises
+        ------
+        DatabaseError
+            If the connectivity check fails.
+        """
+        try:
+            self.session.execute(text("SELECT 1"))
+            return True
+        except Exception as e:
+            raise self._db_error("Database connectivity check failed", e)
 
     def _metadata_cache_ttl(self) -> int:
         """Return the configured metadata cache TTL in seconds."""

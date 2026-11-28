@@ -99,22 +99,28 @@ def analyze_topic_relevance(
                     distance_threshold=distance_threshold,
                     ids=candidate_ids,
                 )
-                papers = db.get_result_details(matches)
                 total_considered = len(candidate_ids)
             else:
-                papers = []
+                matches = []
                 total_considered = 0
 
-            total_papers = len(papers)
+            total_papers = len(matches)
 
-            # Count by conference
+            # Count by conference/year using lightweight scopes for all matches.
             conference_counts: Counter[str] = Counter()
             year_counts: Counter[int] = Counter()
-            for paper in papers:
-                if paper.get("conference"):
-                    conference_counts[paper["conference"]] += 1
-                if paper.get("year"):
-                    year_counts[paper["year"]] += 1
+            matched_uids = [uid for uid, _ in matches]
+            scopes = db.get_paper_scopes_by_uids(matched_uids) if matched_uids else {}
+            for uid in matched_uids:
+                scope = scopes.get(uid)
+                if scope is None:
+                    continue
+                conference_name = scope.get("conference")
+                paper_year = scope.get("year")
+                if conference_name:
+                    conference_counts[conference_name] += 1
+                if paper_year is not None:
+                    year_counts[int(paper_year)] += 1
 
             # Calculate relevance score (0-100 scale)
             # Ratio of papers within distance threshold to total filtered papers
@@ -123,9 +129,9 @@ def analyze_topic_relevance(
             else:
                 relevance_score = 0
 
-            # Get sample papers (top 5 closest)
+            # Hydrate only the top five closest matches.
             sample_papers = []
-            for paper in papers[:5]:
+            for paper in db.get_result_details(matches[:5]):
                 sample_papers.append(
                     {
                         "uid": paper.get("uid", ""),
@@ -150,7 +156,7 @@ def analyze_topic_relevance(
                 "conferences": dict(sorted(conference_counts.items(), key=lambda x: (-x[1], x[0]))),
                 "years": dict(sorted(year_counts.items(), key=lambda x: x[0])),
                 "sample_papers": sample_papers,
-                "closest_distance": papers[0].get("distance") if papers else None,
+                "closest_distance": matches[0][1] if matches else None,
             }
 
             return json.dumps(result, indent=2)

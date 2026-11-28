@@ -124,6 +124,9 @@ class Config:
     search_cache_max_bytes : int
         Maximum total approximate bytes for semantic search and
         topic-evolution result caches (default: 256 MiB).
+    warmup_embeddings : bool
+        Warm the configured ChromaDB collection at web server startup
+        (default: ``True``). Set ``WARMUP_EMBEDDINGS=0`` to skip it.
     rag_max_parallel_tools : int
         Maximum number of RAG tool calls executed concurrently (default: 8).
         Excess calls are queued by the agent's thread pool.
@@ -355,6 +358,7 @@ class Config:
             1, self._get_env_int("QUERY_EMBEDDING_CACHE_MAX_ENTRIES", default=1024)
         )
         self.search_cache_max_bytes = max(0, self._get_env_int("SEARCH_CACHE_MAX_BYTES", default=256 * 1024 * 1024))
+        self.warmup_embeddings = self._get_env_bool("WARMUP_EMBEDDINGS", default=True)
         self.rag_max_parallel_tools = max(1, self._get_env_int("RAG_MAX_PARALLEL_TOOLS", default=8))
         self.rag_request_limit = max(1, self._get_env_int("RAG_REQUEST_LIMIT", default=50))
         self.rag_query_timeout = max(1, self._get_env_int("RAG_QUERY_TIMEOUT", default=120))
@@ -588,6 +592,7 @@ class Config:
             "metadata_cache_ttl": self.metadata_cache_ttl,
             "query_embedding_cache_max_entries": self.query_embedding_cache_max_entries,
             "search_cache_max_bytes": self.search_cache_max_bytes,
+            "warmup_embeddings": self.warmup_embeddings,
             "rag_max_parallel_tools": self.rag_max_parallel_tools,
             "rag_request_limit": self.rag_request_limit,
             "rag_query_timeout": self.rag_query_timeout,

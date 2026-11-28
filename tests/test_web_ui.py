@@ -572,6 +572,17 @@ class TestConferenceURLRoute:
         # Should be handled by the stats endpoint, not the conference route
         assert response.status_code in [200, 500]
 
+    def test_health_uses_cheap_ping(self, client):
+        """The health endpoint checks connectivity without counting papers."""
+        mock_db = MagicMock()
+
+        with patch.object(web_services, "get_database", return_value=mock_db):
+            response = client.get("/health")
+
+        assert response.status_code == 200
+        mock_db.ping.assert_called_once()
+        mock_db.get_paper_count.assert_not_called()
+
     def test_conference_url_does_not_conflict_with_health(self, client):
         """Test that /health still works."""
         response = client.get("/health")
@@ -3676,11 +3687,10 @@ class TestPapersPerYearEndpoint:
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                 mock_db = Mock()
-                mock_db.get_years.return_value = [2023, 2024]
-                mock_db.get_stats.side_effect = [
-                    {"total_papers": 100, "year": 2023, "conference": "NeurIPS"},
-                    {"total_papers": 150, "year": 2024, "conference": "NeurIPS"},
-                ]
+                mock_db.get_year_counts.return_value = {
+                    2023: {"total_papers": 100, "presentations": 120},
+                    2024: {"total_papers": 150, "presentations": 180},
+                }
                 mock_get_db.return_value = mock_db
 
                 response = client.get("/api/papers-per-year?conference=NeurIPS")
@@ -3691,6 +3701,7 @@ class TestPapersPerYearEndpoint:
                 assert data["year_counts"]["2023"] == 100
                 assert data["year_counts"]["2024"] == 150
                 assert data["conference"] == "NeurIPS"
+                mock_db.get_year_counts.assert_called_once_with(conference="NeurIPS")
 
     def test_papers_per_year_no_conference(self):
         """Test papers-per-year without conference filter."""
@@ -3699,11 +3710,10 @@ class TestPapersPerYearEndpoint:
         with app.test_client() as client:
             with patch("abstracts_explorer.web_ui.request_services.get_database") as mock_get_db:
                 mock_db = Mock()
-                mock_db.get_years.return_value = [2024, 2023]
-                mock_db.get_stats.side_effect = [
-                    {"total_papers": 200, "year": 2023, "conference": None},
-                    {"total_papers": 300, "year": 2024, "conference": None},
-                ]
+                mock_db.get_year_counts.return_value = {
+                    2023: {"total_papers": 200, "presentations": 250},
+                    2024: {"total_papers": 300, "presentations": 350},
+                }
                 mock_get_db.return_value = mock_db
 
                 response = client.get("/api/papers-per-year")
@@ -3712,6 +3722,9 @@ class TestPapersPerYearEndpoint:
                 data = response.get_json()
                 assert "year_counts" in data
                 assert data["conference"] is None
+                assert data["year_counts"]["2023"] == 200
+                assert data["year_counts"]["2024"] == 300
+                mock_db.get_year_counts.assert_called_once_with(conference=None)
 
     def test_papers_per_year_error_handling(self):
         """Test papers-per-year handles errors."""

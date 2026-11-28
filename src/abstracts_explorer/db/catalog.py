@@ -440,6 +440,10 @@ class CatalogMixin(PapersMixin):
         DatabaseError
             If the query fails.
         """
+        cached = self._metadata_cache_get("conference_year_locations")
+        if cached is not None:
+            return cached
+
         try:
             stmt: Any = (
                 select(Paper.conference, Paper.year, Paper.location)
@@ -451,14 +455,81 @@ class CatalogMixin(PapersMixin):
                 if conference is None or year is None or not location:
                     continue
                 grouped.setdefault(str(conference), {}).setdefault(int(year), set()).add(str(location))
-            return {
+            result = {
                 conference: {year: sorted(locations) for year, locations in years.items()}
                 for conference, years in grouped.items()
             }
+            self._metadata_cache_set(result, "conference_year_locations")
+            return result
         except DatabaseError:
             raise
         except Exception as e:
             raise self._db_error("Failed to retrieve conference year locations", e)
+
+    def get_year_counts(
+        self,
+        conference: Optional[str] = None,
+        years: Optional[List[int]] = None,
+    ) -> Dict[int, Dict[str, int]]:
+        """
+        Return grouped paper and presentation counts per year.
+
+        This executes a single ``GROUP BY year`` query instead of one
+        :meth:`get_stats` call per year.
+
+        Parameters
+        ----------
+        conference : str, optional
+            Restrict counts to this conference.
+        years : list of int, optional
+            Restrict counts to these years.
+
+        Returns
+        -------
+        dict
+            Mapping of year to ``{"total_papers": int, "presentations": int}``.
+            ``total_papers`` collapses duplicate presentations by content hash
+            within the scope, matching :meth:`get_stats`.
+
+        Raises
+        ------
+        DatabaseError
+            If the query fails.
+        """
+        cache_parts = (conference, tuple(years) if years else None)
+        cached = self._metadata_cache_get("year_counts", *cache_parts)
+        if cached is not None:
+            return cached
+
+        try:
+            conditions: list = [Paper.year.isnot(None)]
+            if conference is not None:
+                conditions.append(Paper.conference == conference)
+            if years:
+                conditions.append(Paper.year.in_([int(year) for year in years]))
+
+            stmt: Any = (
+                select(
+                    Paper.year,
+                    func.count(func.distinct(func.coalesce(Paper.content_hash, Paper.uid))).label("total_papers"),
+                    func.count().label("presentations"),
+                )
+                .where(and_(*conditions))
+                .group_by(Paper.year)
+                .order_by(Paper.year)
+            )
+            result: Dict[int, Dict[str, int]] = {}
+            for row in self.session.execute(stmt):
+                result[int(row.year)] = {
+                    "total_papers": int(row.total_papers or 0),
+                    "presentations": int(row.presentations or 0),
+                }
+            self._metadata_cache_set(result, "year_counts", *cache_parts)
+            return result
+        except DatabaseError:
+            raise
+        except Exception as e:
+            raise self._db_error("Failed to retrieve year counts", e)
 
     def get_conferences(self, year: Optional[int] = None) -> List[str]:
         """

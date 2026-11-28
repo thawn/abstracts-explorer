@@ -278,9 +278,9 @@ def health():
         JSON response with status and HTTP status code
     """
     try:
-        # Check if database is accessible
+        # Cheap connectivity check; do not count papers on every probe.
         db = services.get_database()
-        db.get_paper_count()
+        db.ping()
         return jsonify({"status": "healthy", "service": "abstracts-explorer"}), 200
     except Exception as e:
         # Log the actual error for debugging
@@ -959,15 +959,8 @@ def papers_per_year():
     conference = request.args.get("conference")
     database = services.get_database()
 
-    if conference:
-        years = sorted(database.get_years(conference=conference))
-    else:
-        years = sorted(database.get_years())
-
-    year_counts = {}
-    for year in years:
-        stats = database.get_stats(year=year, conference=conference)
-        year_counts[year] = stats["total_papers"]
+    counts = database.get_year_counts(conference=conference)
+    year_counts = {year: values["total_papers"] for year, values in sorted(counts.items())}
 
     return jsonify({"year_counts": year_counts, "conference": conference})
 

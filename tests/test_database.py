@@ -2206,21 +2206,22 @@ class TestMetadataCacheIntegration:
         assert stats["second"] == 0
         assert first == second == {"NeurIPS": [2025]}
 
-    def test_sqlite_bypasses_metadata_cache(self, connected_db, sample_paper):
-        """SQLite metadata calls always execute SQL."""
+    def test_sqlite_metadata_cache_hits(self, connected_db, sample_paper):
+        """SQLite metadata calls are cached like PostgreSQL."""
         from abstracts_explorer.profiling import SqlProfiler
 
         connected_db.add_paper(sample_paper)
 
         with SqlProfiler() as profiler:
             with profiler.case("first"):
-                connected_db.get_conference_years_from_db()
+                first = connected_db.get_conference_years_from_db()
             with profiler.case("second"):
-                connected_db.get_conference_years_from_db()
+                second = connected_db.get_conference_years_from_db()
 
         stats = {case.label: case.statement_count for case in profiler.results()}
         assert stats["first"] == 1
-        assert stats["second"] == 1
+        assert stats["second"] == 0
+        assert first == second == {"NeurIPS": [2025]}
 
     def test_add_paper_invalidates_metadata_cache(
         self, connected_db, sample_paper, sample_paper_minimal, monkeypatch
@@ -2893,3 +2894,114 @@ class TestSemanticSearchResultCache:
 
         assert second[0]["title"] == sample_paper.title
         em.query_ids_within_distance.assert_called_once()
+
+
+class TestGetYearCounts:
+    """Tests for grouped year statistics."""
+
+    def test_counts_match_get_stats(self, connected_db, sample_paper, sample_paper_minimal):
+        """Grouped counts match per-year get_stats values."""
+        connected_db.add_paper(sample_paper)
+        connected_db.add_paper(sample_paper_minimal)
+
+        counts = connected_db.get_year_counts()
+        assert set(counts) == {2024, 2025}
+        for year, values in counts.items():
+            stats = connected_db.get_stats(year=year)
+            assert values["total_papers"] == stats["total_papers"]
+            assert values["presentations"] == stats["presentations"]
+
+    def test_filters_by_conference_and_years(self, connected_db, sample_paper, sample_paper_minimal):
+        connected_db.add_paper(sample_paper)
+        connected_db.add_paper(sample_paper_minimal)
+
+        assert connected_db.get_year_counts(conference="NeurIPS") == {2025: {"total_papers": 1, "presentations": 1}}
+        assert connected_db.get_year_counts(years=[2024]) == {2024: {"total_papers": 1, "presentations": 1}}
+
+    def test_empty_database_returns_empty_mapping(self, connected_db):
+        assert connected_db.get_year_counts() == {}
+
+
+class TestConferenceYearLocationCache:
+    """Tests for conference/year/location metadata caching."""
+
+    def test_repeated_calls_use_cache(self, connected_db, sample_paper):
+        from abstracts_explorer.profiling import SqlProfiler
+
+        connected_db.add_paper(sample_paper)
+
+        with SqlProfiler() as profiler:
+            with profiler.case("first"):
+                first = connected_db.get_conference_year_locations()
+            with profiler.case("second"):
+                second = connected_db.get_conference_year_locations()
+
+        stats = {case.label: case.statement_count for case in profiler.results()}
+        assert stats["first"] == 1
+        assert stats["second"] == 0
+        assert first == second
+
+
+class TestScopeUidCache:
+    """Tests for the process-global scope to UID cache."""
+
+    def test_repeated_resolution_uses_cache(self, connected_db, sample_paper):
+        from abstracts_explorer.profiling import SqlProfiler
+
+        connected_db.add_paper(sample_paper)
+
+        with SqlProfiler() as profiler:
+            with profiler.case("first"):
+                first = connected_db.get_paper_uids({"year": 2025})
+            with profiler.case("second"):
+                second = connected_db.get_paper_uids({"year": 2025})
+
+        stats = {case.label: case.statement_count for case in profiler.results()}
+        assert stats["first"] == 1
+        assert stats["second"] == 0
+        assert first == second
+
+    def test_cached_values_are_copies(self, connected_db, sample_paper):
+        connected_db.add_paper(sample_paper)
+
+        first = connected_db.get_paper_uids({"year": 2025})
+        first.append("mutated")
+
+        second = connected_db.get_paper_uids({"year": 2025})
+        assert len(second) == 1
+        assert "mutated" not in second
+
+    def test_write_invalidates_scope_cache(self, connected_db, sample_paper, sample_paper_minimal):
+        connected_db.add_paper(sample_paper)
+        assert len(connected_db.get_paper_uids()) == 1
+
+        connected_db.add_paper(sample_paper_minimal)
+        assert len(connected_db.get_paper_uids()) == 2
+
+
+class TestPaperLookupHelpers:
+    """Tests for title and lightweight scope lookups."""
+
+    def test_get_paper_by_title_exact_case_insensitive(self, connected_db, sample_paper):
+        connected_db.add_paper(sample_paper)
+
+        paper = connected_db.get_paper_by_title("test paper")
+        assert paper is not None
+        assert paper["title"] == "Test Paper"
+
+    def test_get_paper_by_title_with_conference_and_year(self, connected_db, sample_paper, sample_paper_minimal):
+        connected_db.add_paper(sample_paper)
+        connected_db.add_paper(sample_paper_minimal)
+
+        assert connected_db.get_paper_by_title("Test Paper", conference="ICLR") is None
+        assert connected_db.get_paper_by_title("Test Paper", conference="NeurIPS", year=2025) is not None
+
+    def test_get_paper_by_title_missing(self, connected_db, sample_paper):
+        connected_db.add_paper(sample_paper)
+        assert connected_db.get_paper_by_title("Nonexistent") is None
+
+    def test_get_paper_scopes_by_uids(self, connected_db, sample_paper):
+        uid = connected_db.add_paper(sample_paper)
+
+        scopes = connected_db.get_paper_scopes_by_uids([uid, "missing"])
+        assert scopes == {uid: {"conference": "NeurIPS", "year": 2025}}

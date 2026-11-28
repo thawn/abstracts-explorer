@@ -799,7 +799,9 @@ class TestExecuteMCPToolE2E:
                 "abstract": "",
             },
         ]
-        mock_db.get_stats.side_effect = lambda year, conference: {"total_papers": 100}
+        mock_db.get_year_counts.return_value = {
+            year: {"total_papers": 100, "presentations": 100} for year in (2022, 2023, 2024)
+        }
 
         with (
             patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager", return_value=mock_em),
@@ -827,9 +829,13 @@ class TestExecuteMCPToolE2E:
         mock_em.query_ids_within_distance.return_value = [("p1", 0.5), ("p2", 1.0)]
         mock_db = Mock()
         mock_db.resolve_paper_uids.return_value = ["p1", "p2"]
+        mock_db.get_paper_scopes_by_uids.return_value = {
+            "p1": {"conference": "NeurIPS", "year": 2025},
+            "p2": {"conference": "NeurIPS", "year": 2025},
+        }
         mock_db.get_result_details.return_value = [
-            {"uid": "p1", "title": "Paper 1", "year": 2025, "conference": "NeurIPS"},
-            {"uid": "p2", "title": "Paper 2", "year": 2025, "conference": "NeurIPS"},
+            {"uid": "p1", "title": "Paper 1", "year": 2025, "conference": "NeurIPS", "distance": 0.5},
+            {"uid": "p2", "title": "Paper 2", "year": 2025, "conference": "NeurIPS", "distance": 1.0},
         ]
 
         with (
@@ -855,7 +861,10 @@ class TestExecuteMCPToolE2E:
         mock_em.query_ids_within_distance.return_value = [("p1", 0.5)]
         mock_db = Mock()
         mock_db.resolve_paper_uids.return_value = ["p1"]
-        mock_db.get_result_details.return_value = [{"uid": "p1", "title": "P", "year": 2025, "conference": "NeurIPS"}]
+        mock_db.get_paper_scopes_by_uids.return_value = {"p1": {"conference": "NeurIPS", "year": 2025}}
+        mock_db.get_result_details.return_value = [
+            {"uid": "p1", "title": "P", "year": 2025, "conference": "NeurIPS", "distance": 0.5}
+        ]
 
         with (
             patch("abstracts_explorer.mcp.shared_dependencies.EmbeddingsManager", return_value=mock_em),
@@ -948,7 +957,8 @@ class TestExecuteMCPToolE2E:
     def test_get_paper_details_real_execution_by_title(self):
         """get_paper_details executes end-to-end with mocked DatabaseManager."""
         mock_db = Mock()
-        mock_db.keyword_search.return_value = [
+        mock_db.get_paper_by_title.return_value = None
+        mock_db.get_paper.return_value = [
             {
                 "uid": "abc123",
                 "original_id": "neurips2023/abc",
@@ -1737,7 +1747,7 @@ def _topic_evolution_mocks():
             "abstract": "",
         }
     ]
-    mock_db.get_stats.return_value = {"total_papers": 100}
+    mock_db.get_year_counts.return_value = {2023: {"total_papers": 100, "presentations": 100}}
     return mock_em, mock_db
 
 

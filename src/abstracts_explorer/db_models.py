@@ -9,6 +9,7 @@ These models support both SQLite and PostgreSQL backends.
 from sqlalchemy import (
     Column,
     Float,
+    Index,
     Integer,
     String,
     Text,
@@ -113,6 +114,10 @@ class Paper(Base):
     """
 
     __tablename__ = "papers"
+    __table_args__ = (
+        Index("ix_papers_conference_year", "conference", "year"),
+        Index("ix_papers_conference_year_session", "conference", "year", "session"),
+    )
 
     uid = Column(String(16), primary_key=True, index=True)
     original_id = Column(String, nullable=True, index=True)

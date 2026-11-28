@@ -20,6 +20,8 @@ from abstracts_explorer.config import get_config
 
 DEFAULT_MAX_ENTRIES = 1024
 DEFAULT_MAX_ENTRY_BYTES = 1024 * 1024
+DEFAULT_SCOPE_UID_MAX_BYTES = 64 * 1024 * 1024
+MAX_CACHED_SCOPE_UIDS = 50_000
 
 _MISSING = object()
 _UNSET = object()
@@ -246,6 +248,7 @@ class TtlLruCache:
         key: Hashable,
         compute: Callable[[], Any],
         ttl_seconds: Any = _UNSET,
+        store_predicate: Optional[Callable[[Any], bool]] = None,
     ) -> Any:
         """
         Return a cached value, computing it once for concurrent callers.
@@ -264,6 +267,10 @@ class TtlLruCache:
         ttl_seconds : float or None, optional
             Override the default TTL. Values less than or equal to zero disable
             caching.
+        store_predicate : callable, optional
+            Predicate applied to the computed value. When it returns ``False``
+            the value is returned to the caller but not cached. This is used to
+            skip extremely large entries such as whole-database UID scopes.
 
         Returns
         -------
@@ -307,7 +314,8 @@ class TtlLruCache:
 
         size = _estimate_size(result)
         with self._lock:
-            self._store_locked(key, result, size, ttl)
+            if store_predicate is None or store_predicate(result):
+                self._store_locked(key, result, size, ttl)
             pending = self._inflight.pop(key, None)
             if pending is not None:
                 pending.event.set()
@@ -370,6 +378,11 @@ QUERY_EMBEDDING_CACHE = TtlLruCache(
 )
 SEARCH_RESULT_CACHE = _new_result_cache()
 TOPIC_EVOLUTION_RESULT_CACHE = _new_result_cache()
+SCOPE_UID_CACHE = TtlLruCache(
+    max_entries=DEFAULT_MAX_ENTRIES,
+    max_total_bytes=DEFAULT_SCOPE_UID_MAX_BYTES,
+    max_entry_bytes=DEFAULT_MAX_ENTRY_BYTES * 8,
+)
 
 _QUERY_EMBEDDING_SIGNATURE: Optional[Tuple[str, str]] = None
 _QUERY_EMBEDDING_SIGNATURE_LOCK = threading.Lock()
@@ -453,6 +466,34 @@ def get_or_compute_topic_evolution_result(key: Hashable, compute: Callable[[], A
     return TOPIC_EVOLUTION_RESULT_CACHE.get_or_compute(key, compute, ttl_seconds=_result_cache_ttl())
 
 
+def get_or_compute_scope_uids(key: Hashable, compute: Callable[[], list[str]]) -> list[str]:
+    """
+    Return cached paper UIDs for a filter scope or compute them once.
+
+    Extremely large scopes are returned without caching so a single broad
+    filter cannot evict the rest of the cache or consume unbounded memory.
+
+    Parameters
+    ----------
+    key : hashable
+        Scope cache key. It must start with the database URL so write
+        invalidation can remove entries with a prefix.
+    compute : callable
+        Zero-argument callable that resolves the UIDs.
+
+    Returns
+    -------
+    list of str
+        Deep copy of the cached or newly resolved UID list.
+    """
+    return SCOPE_UID_CACHE.get_or_compute(
+        key,
+        compute,
+        ttl_seconds=_result_cache_ttl(),
+        store_predicate=lambda value: len(value) <= MAX_CACHED_SCOPE_UIDS,
+    )
+
+
 def invalidate_result_caches(database_url: Optional[str] = None) -> None:
     """
     Invalidate result caches after a write.
@@ -467,11 +508,13 @@ def invalidate_result_caches(database_url: Optional[str] = None) -> None:
     if database_url is None:
         SEARCH_RESULT_CACHE.clear()
         TOPIC_EVOLUTION_RESULT_CACHE.clear()
+        SCOPE_UID_CACHE.clear()
         return
 
     prefix = (database_url,)
     SEARCH_RESULT_CACHE.invalidate_prefix(prefix)
     TOPIC_EVOLUTION_RESULT_CACHE.invalidate_prefix(prefix)
+    SCOPE_UID_CACHE.invalidate_prefix(prefix)
 
 
 def reset_query_embedding_cache() -> None:
@@ -484,9 +527,10 @@ def reset_query_embedding_cache() -> None:
 
 
 def reset_result_caches() -> None:
-    """Clear the semantic-search and topic-evolution result caches."""
+    """Clear the semantic-search, topic-evolution, and scope UID result caches."""
     SEARCH_RESULT_CACHE.clear()
     TOPIC_EVOLUTION_RESULT_CACHE.clear()
+    SCOPE_UID_CACHE.clear()
 
 
 def reset_all_caches() -> None:

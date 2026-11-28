@@ -107,6 +107,8 @@ The migration:
 
 It is manual and idempotent. There is no automatic migration at application
 startup. Rerunning the script skips valid indexes and recreates invalid ones.
+After deploying a new release, verify the composite indexes exist on staging
+with the `--dry-run` command shown above.
 
 Indexes preserve existing substring search semantics. They increase disk usage
 and add write/import overhead; this is usually acceptable for a read-heavy
@@ -123,13 +125,16 @@ For container deployments, see [Docker: Create PostgreSQL search indexes](docker
 
 ##### Metadata cache
 
-- **METADATA_CACHE_TTL**: Time-to-live in seconds for cached PostgreSQL metadata
-  queries such as conference lists, year lists, session lists, and the
-  conference/year mapping (default: `86400`).
+- **METADATA_CACHE_TTL**: Time-to-live in seconds for cached database metadata
+  queries such as conference lists, year lists, session lists, the
+  conference/year mapping, conference/year/location filters, grouped year
+  counts, and scope→UID resolutions (default: `86400`).
   - Set to `0` to disable caching.
-  - Applies only to PostgreSQL; SQLite always queries directly.
+  - Applies to both SQLite and PostgreSQL.
   - The cache is process-local. Restart `serve web` after external imports so it
     reloads metadata immediately; otherwise entries expire after the TTL.
+  - Local writes (adding or deleting papers) invalidate cached metadata and
+    result entries immediately.
 
 #### Embedding Database
 
@@ -147,6 +152,14 @@ The configuration automatically detects the type based on the format:
   less space available, `embeddings create` fails fast instead of risking a
   corrupted vector index. Set to `0` to disable the check. Ignored for HTTP
   `EMBEDDING_DB` values.
+
+- **WARMUP_EMBEDDINGS**: Warm the configured ChromaDB collection when the web
+  server starts (default: `true`). The warm-up opens the collection, reads its
+  count, determines the vector dimension from existing data, and issues one
+  tiny zero-vector query to load the HNSW index. No embedding API request is
+  made and empty collections are skipped. Set `WARMUP_EMBEDDINGS=0` to opt out
+  (for example when ChromaDB is unavailable at startup and will be initialized
+  lazily). Failures are logged and never block startup.
 
 !!! warning "Local ChromaDB is single-process"
     A local ChromaDB (`EMBEDDING_DB` file path) is locked for the lifetime of

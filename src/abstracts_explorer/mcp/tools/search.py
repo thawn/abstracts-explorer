@@ -166,13 +166,30 @@ def get_paper_details(
 
             if not result_papers and title:
                 limit = max(1, min(int(limit), 50))
-                # Keyword search on title with optional conference/year filters
-                result_papers = db.keyword_search(
-                    keyword=title,
-                    conferences=[conference] if conference else None,
-                    years=[year] if year is not None else None,
-                    limit=limit,
-                )
+
+                # 1. Exact title lookup (case-insensitive) with optional filters.
+                exact = db.get_paper_by_title(title, conference=conference, year=year)
+                if exact is not None:
+                    result_papers = [exact]
+
+                # 2. Title-only substring search.
+                if not result_papers:
+                    title_filters: List[Dict[str, Any]] = [{"title": {"$contains": title}}]
+                    if conference:
+                        title_filters.append({"conference": conference})
+                    if year is not None:
+                        title_filters.append({"year": year})
+                    combined = title_filters[0] if len(title_filters) == 1 else {"$and": title_filters}
+                    result_papers = db.get_paper(combined, limit=limit)
+
+                # 3. Broad keyword search only when no title match was found.
+                if not result_papers:
+                    result_papers = db.keyword_search(
+                        keyword=title,
+                        conferences=[conference] if conference else None,
+                        years=[year] if year is not None else None,
+                        limit=limit,
+                    )
 
             result = {
                 "papers_found": len(result_papers),
